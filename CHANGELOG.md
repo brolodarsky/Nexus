@@ -19,6 +19,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - Updated documentation to use conventional "Affirm Vault Structure" language instead of deprecated sync_vault.py
+- Updated `AGENTS.md` rules to require `CHANGELOG.md` updates and `git push` on every commit.
 
 ### Removed
 - All active references to `sync_vault.py` from `AGENTS.md` and `README.md`

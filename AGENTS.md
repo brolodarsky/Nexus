@@ -68,3 +68,4 @@ End-to-end workflow for adding a note: affirm structure → create note → upda
 5. **The TOC is the single source of truth** for Vault folder structure.
 6. **All notes must have YAML frontmatter** with `aliases`, `tags`, and `type` fields.
 7. **Audio files are gitignored** — they sync via Syncthing, not Git.
+8. **Push all commits to the remote repository (`git push`)** to ensure GitHub is always in sync.
