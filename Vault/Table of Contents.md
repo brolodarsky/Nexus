@@ -285,6 +285,7 @@ _Dedicated space for exploration, relationships, and pure interest._ Connection 
 - **Media Vault:** Analysis of _The Sopranos_, film, and literature.
 - **Music
 - **Reading List:** Books I want to read vs. books finished.
+- **[[Education List]]:** Curated paths for World History, Philosophy, and Natural Sciences.
 - **[[Movie List]]:** Movies I want to watch vs. movies watched.
 - **Writing**
 ## 5.4. Creativity
