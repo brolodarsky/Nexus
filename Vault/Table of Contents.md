@@ -11,8 +11,8 @@ _Systemic foundations for mental clarity, resilience, and long-term vision._
 - **Legacy & Impact:** What do I want to build that lasts?
 ## 1.2. Personal Knowledge Management (PKM)
 - **Brain 2.0 Meta:** How I tag, link, and maintain this system.
-- **[[Laptop App Update Protocol]]:** Recurring process for maintaining the software inventory.
-- **[[Monthly Hard Drive Backup Protocol]]:** Protocol for running monthly hard drive backups in FreeFileSync as a batch job.
+- **[[Laptop App List Update Protocol]]**
+- **[[Monthly Hard Drive Backup Protocol]]**
 - **Toolbox:** Documentation for the Pixel 8 Pro, Obsidian/Logseq workflows, and local LLM setups.
 ## 1.3. Security & Digital Sovereignty
 - **Security Audit:** Password management strategy, 2FA recovery locations, and encryption protocols.
@@ -44,10 +44,12 @@ _Systemic foundations for mental clarity, resilience, and long-term vision._
 Technical Mastery
 ## 3.1. Projects 
 The Lab
+- **[[Project Maturity Checklist]]:** Standardized checklist for enterprise-grade applications.
 - [Brain 2](https://github.com/brolodarsky/Brain2)
 - **[Project Feeder](https://github.com/brolodarsky/Feeder):** Python logic, UI/UX, and database development.
 - **[Project MEM Billing](https://github.com/brolodarsky/MEMBilling):** Billing Automation. Scripts for LCSW medical billing efficiency.
 - **Project - Domain Portfolio:** Management and monetization of SiliSlick.com and others.
+- **[[Script Attic]]:** Inactive tools, experiments, and one-off Python scripts.
 ## 3.2. Library & Learning
 - **Technical Archive:** Engineering-specific YouTube tutorials, GitHub repos, and research papers.
 - **[[AI Agents]] | [[LLMs]] | [[Vector Search]] | [[Robotics]]:** (Original technical deep-dives).
@@ -118,6 +120,7 @@ The dominant language for AI/ML and Agentic Workflows.
 - **SQL / Shell Scripting (Bash)**: Essential for data pulling and CLI integrations.
 
 #### Software Engineering Practices
+- **[[Project Maturity Checklist]]:** Standardized checklist for enterprise-grade applications.
 - Version Control (Git) and CI/CD (GitHub Actions)
 - Testing: `pytest`, mocking API calls (crucial for testing LLM outputs).
 - API Design: RESTful principles, GraphQL, OpenAPI/Swagger specifications (how LLMs read APIs).
