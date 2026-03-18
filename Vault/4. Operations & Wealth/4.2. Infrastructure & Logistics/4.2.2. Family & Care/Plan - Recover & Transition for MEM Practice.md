@@ -28,19 +28,26 @@ type: overview
 ---
 
 ## Phase 3: Transition to Independence (Self-Pay)
-* **Firing the Biller:** Since only 5 self-pay patients remain, stop paying 4-6% commissions. You can manage this manually.
+* **The "Hybrid" Model:** * **Biller:** Retain for the ONE insurance patient (to handle claims/appeals).
+    * **Internal (You):** Take over the 5 self-pay patients to save the 4% commission.
 * **The Superbill:** Generate monthly receipts for patients including:
     * Provider NPI & Tax ID (EIN).
     * ICD-10 (Diagnosis) & CPT (Service) codes.
     * Statement of "Paid in Full" for their out-of-network reimbursement.
-* **Late Onboarding:** Formalize the 5 remaining patients with:
-    1.  **Financial Agreement:** Signed rates and 24-hour cancellation policy.
-    2.  **Good Faith Estimate (GFE):** Federal requirement for uninsured patients.
-    3.  **Credit Card on File:** Use Ivy Pay or Square (approx. 3% fee) to automate the "Chase Detective" work.
+* **Automation:** Transition self-pay patients to a "Card on File" system (Ivy Pay/Square) to eliminate manual bank reconciliation.
 
 ---
 
-## Phase 4: Dispute Resolution
-* **Reconstruction of Account:** For the 2-year-old dispute, provide a "Statement of Account" showing all sessions vs. all recorded deposits.
-* **Validation of Debt:** If mom’s ledger shows no payment and the patient provides no receipt/check, the provider's contemporaneous records stand as the primary evidence.
-* **Settlement Strategy:** If the amount is small, offer a 50% "Retirement Settlement" to clear the books and reduce stress.
+## Phase 4: Dispute & Ethics Protocol
+* **The "Memory Gap" Resolution:** If a patient claims a verbal agreement or insurance change that was missed, move to a **Collaboration Model** rather than a "Default" model.
+* **The "No-Fault" Settlement:**
+    1.  **Attempt the Claim:** Have the biller submit late 2025 claims to get an official insurance denial (proves the "Timely Filing" window is closed).
+    2.  **Compromise Rate:** Offer to settle the disputed balance at the "Insurance Reimbursable Rate" (typically 50-60% of the full fee) instead of the full private pay rate.
+* **Validation of Debt:** Use the reconstructed "Statement of Account" to show the "Gaps in Payment" as the primary evidence.
+* **Sunk Cost Assessment:** If a dispute is over a small amount (e.g., <$200), offer a "Retirement Settlement" to clear the books and preserve mom's emotional energy.
+--- 
+## Phase 5: Biller Management & Communication
+* **The "Stop Work" Order:** Explicitly instruct the biller to cease all patient-facing collections for self-pay accounts.
+* **Point of Contact:** You (as the Admin) are the sole gatekeeper for patient financial conversations to protect the clinical relationship.
+* **The "Moral Compromise" Policy:** * If an administrative error (by Mom or Biller) caused a missed insurance deadline, offer the patient the "Contracted Rate" as a settlement instead of the "Full Fee."
+* Adam Michaels: Hunt him down

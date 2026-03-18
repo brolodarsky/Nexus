@@ -275,6 +275,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **[[Project - Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
 - **[[Project - Blower Motor Noise Fix]]:** Step-by-step guide for resolving HVAC fan noise.
 ## 4.3. Career Strategy & Revenue
+- **[[Employer Skill Requirements]]:** Aggregated "desired background and skills" from job descriptions and market research.
 - **Professional Portfolio:** Documentation of AI Rating and Billing experience.
 - **The Pivot:** Preparation for AI/Robotics roles (Interview prep, Networking).
 - **Resume & Artifacts:** Version control for your professional bio and CV.
