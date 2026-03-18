@@ -3,8 +3,6 @@ aliases: [App List Update, Software Inventory Protocol]
 tags: [pkm, workflow, automation]
 type: tool
 ---
-# Laptop App Update Protocol
-
 This protocol outlines the process for updating the [[Laptop App List]] to ensure the digital inventory remains current.
 
 ## 1. Objective

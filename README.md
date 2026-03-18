@@ -19,20 +19,16 @@ Knowledge Base/
 │       └── create_new_note.md        # End-to-end note creation flow
 ├── .venv/                      # Python virtual environment (not committed)
 ├── Vault/                      # All Obsidian content lives here
-│   ├── 1. Foundational Mathematics & Statistics/
-│   ├── 2. Programming & Software Engineering/
-│   ├── 3. Machine Learning Fundamentals/
-│   ├── 4. Deep Learning (DL)/
-│   ├── 5. Natural Language Processing (NLP) & Vector Search/
-│   ├── 6. Intelligent Agents & Autonomy/
-│   ├── 7. Data Processing, Engineering & MLOps/
-│   ├── 8. Computer Vision (CV)/
-│   ├── 9. Reinforcement Learning (RL)/
-│   ├── 10. Robotics (Hardware & Control Systems)/
-│   ├── 11. AI Ethics, Safety & Governance/
-│   ├── 12. Career Development & Strategy/
-│   ├── Audio/                  # Generated MP3s — synced via Syncthing, not Git
-│   ├── zImages/                # Embedded images
+│   ├── .obsidian/
+│   ├── .stfolder/
+│   ├── 1. The Core/
+│   ├── 2. Health/
+│   ├── 3. Forge/
+│   ├── 4. Operations & Wealth/
+│   ├── 5. Playground/
+│   ├── 6. Capture & Archive/
+│   ├── Audio/
+│   ├── BatchRun_CDrive_to_MainBackup.ffs_batch
 │   └── Table of Contents.md   # Master index — source of truth for structure
 ├── AGENTS.md                   # AI agent constitution for the repo
 ├── CHANGELOG.md                # Running log of notable changes
@@ -92,7 +88,7 @@ Any time `Vault/Table of Contents.md` is modified, the directory structure must 
 
 Point Obsidian at the **`Vault/`** subfolder, not the repo root.
 
-> Settings → About → Vault path → `…/Knowledge Base/Vault`
+> Settings → About → Vault path → `…/Brain 2/Vault`
 
 ---
 
