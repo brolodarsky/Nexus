@@ -9,6 +9,7 @@ _Systemic foundations for mental clarity, resilience, and long-term vision._
 - **Principles & Ethics:** Core values and decision-making frameworks.
 - **The 10-Year Horizon:** Strategic goals for the 30s, 40s, and beyond.
 - **Legacy & Impact:** What do I want to build that lasts?
+- **[[Currently Learning]]:** Active focus and active subjects.
 ## 1.2. Personal Knowledge Management (PKM)
 - **Brain 2.0 Meta:** How I tag, link, and maintain this system.
 - **[[System Maintenance]]**
@@ -50,7 +51,8 @@ The Lab
 - **[Project Feeder](https://github.com/brolodarsky/Feeder):** Python logic, UI/UX, and database development.
 - **[Project MEM Billing](https://github.com/brolodarsky/MEMBilling):** Billing Automation. Scripts for LCSW medical billing efficiency.
 - **Project - Domain Portfolio:** Management and monetization of SiliSlick.com and others.
-- **[[Script Attic]]:** Inactive tools, experiments, and one-off Python scripts.
+### 3.1.2. Script Attic
+- Inactive tools, experiments, and one-off Python scripts.
 ## 3.2. Library & Learning
 - **Technical Archive:** Engineering-specific YouTube tutorials, GitHub repos, and research papers.
 - **[[AI Agents]] | [[LLMs]] | [[Vector Search]] | [[Robotics]]:** (Original technical deep-dives).
@@ -276,7 +278,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 # 5. Playground
 _Dedicated space for exploration, relationships, and pure interest._ Connection & Joy
 ## 5.1. Social Life & Community
-- **Family Data
+- **Family Data**
 - **"People Data":** Things people tell me—birthdays, preferences, and important context.
 - **Gift Ideas:** Running list of potential gifts for friends and family.
 - **Social Club:** Event planning and community building.
@@ -288,7 +290,7 @@ _Dedicated space for exploration, relationships, and pure interest._ Connection 
 - **Date Ideas:** Local & travel-based.
 ## 5.3. Culture & Inspiration
 - **Media Vault:** Analysis of _The Sopranos_, film, and literature.
-- **Music
+- **Music**
 - **Reading List:** Books I want to read vs. books finished.
 - **[[Education List]]:** Curated paths for World History, Philosophy, and Natural Sciences.
 - **[[Movie List]]:** Movies I want to watch vs. movies watched.
