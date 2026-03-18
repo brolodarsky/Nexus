@@ -80,7 +80,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 391.5
+    "width": 221.5
   },
   "right": {
     "id": "13e5845ab2a97dc6",
@@ -187,8 +187,10 @@
   },
   "active": "78e9213739a0eb23",
   "lastOpenFiles": [
-    "1. The Core/1.2. Personal Knowledge Management (PKM)/Protocol - System Maintenance.md",
+    "1. The Core/1.1. Philosophy & Personal North Star/Currently Learning.md",
+    "3. Forge/3.1. Projects/Project - MEM Billing.md",
     "Table of Contents.md",
+    "1. The Core/1.2. Personal Knowledge Management (PKM)/Protocol - System Maintenance.md",
     "6. Capture & Archive/6.2. The Content Log (General)",
     "5. Playground/5.4. Creativity",
     "5. Playground/5.3. Culture & Inspiration",
@@ -200,7 +202,6 @@
     "2. Health/2.3. Psych",
     "2. Health/2.2. Medical",
     "3. Forge/3.2. Library/3.2.2. Programming & Software Engineering/Project Maturity Checklist.md",
-    "1. The Core/1.1. Philosophy & Personal North Star/Currently Learning.md",
     "1. The Core/1.2. Personal Knowledge Management (PKM)/Protocol - Monthly Hard Drive Backup.md",
     "3. Forge/3.2. Library/3.2.6. Intelligent Agents & Autonomy/Function Calling & Structured Outputs.md",
     "3. Forge/3.2. Library/3.2.5. NLP & Vector Search/Vector Databases.md",

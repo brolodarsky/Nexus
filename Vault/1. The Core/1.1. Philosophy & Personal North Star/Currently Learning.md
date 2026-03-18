@@ -1,6 +1,11 @@
 ---
-aliases: [Active Studies, Current Focus]
-tags: [learning, focus, master]
+aliases:
+  - Active Studies
+  - Current Focus
+tags:
+  - learning
+  - focus
+  - master
 type: overview
 ---
 **Back to:** [[Table of Contents]]

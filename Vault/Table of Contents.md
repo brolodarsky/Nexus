@@ -49,7 +49,7 @@ The Lab
 - **[[Project Maturity Checklist]]:** Standardized checklist for enterprise-grade applications.
 - [Brain 2](https://github.com/brolodarsky/Brain2)
 - **[Project Feeder](https://github.com/brolodarsky/Feeder):** Python logic, UI/UX, and database development.
-- **[Project MEM Billing](https://github.com/brolodarsky/MEMBilling):** Billing Automation. Scripts for LCSW medical billing efficiency.
+- **[[Project - MEM Billing]]**: Billing Automation. Scripts for LCSW medical billing efficiency.
 - **Project - Domain Portfolio:** Management and monetization of SiliSlick.com and others.
 ### 3.1.2. Script Attic
 - Inactive tools, experiments, and one-off Python scripts.

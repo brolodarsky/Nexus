@@ -12,9 +12,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - "Car Info" persistent reference note in Section 4.2.3
 - "Project Ideas" persistent tracking note in Section 4.2.1
 - "Currently Learning" note and tracking in Section 1.1
+- "Project - MEM Billing" note and TOC mapping in Section 3.1
+
 - "Maintenance Log" hybrid note linking to Google Sheets in Section 4.2.3
 - "Maintenance Tracker Game Plan" project note outlining the build steps for the automated Google Sheet
 - Note generation rules enforcing prefixed filenames (`Project -`, `Protocol -`, etc), banning redundant H1 headers, and moving the Table of Contents link to the top of the file
+- Rule 10 in `AGENTS.md` enforcing `.gitkeep` files for empty directories.
+- Folder maintenance scripts: `scripts/create_folders.py`, `scripts/check_folders.py`, and `scripts/add_gitkeeps.py`.
+
+### Changed
+- Moved all python scripts into the `scripts/` root directory.
+- Updated all script references across `README.md`, `CHANGELOG.md`, and `AGENTS.md`.
+- Readjusted relative paths in `scripts/generate_podcast.py`.
 
 ## [1.0.2] - 2026-03-17
 
@@ -50,17 +59,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Removed
 - `sync_vault.py` — script deleted in favor of direct agentic structure management
-
-## [Unreleased]
-
-### Added
-- Rule 10 in `AGENTS.md` enforcing `.gitkeep` files for empty directories.
-- Folder maintenance scripts: `scripts/create_folders.py`, `scripts/check_folders.py`, and `scripts/add_gitkeeps.py`.
-
-### Changed
-- Moved all python scripts into the `scripts/` root directory.
-- Updated all script references across `README.md`, `CHANGELOG.md`, and `AGENTS.md`.
-- Readjusted relative paths in `scripts/generate_podcast.py`.
 
 ## [1.0.0] - 2026-03-14
 
