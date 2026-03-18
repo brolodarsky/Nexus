@@ -260,13 +260,14 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **The Home Lab:** Hardware inventory, server setups, and network security.
 ### 4.2.1. Home Improvement & Maintenance
 - **Household Ops:** Recurring tasks for living spaces.
-- **Project Queue:** Renovation ideas, furniture builds, and aesthetic upgrades.
+- **[[Project Ideas]]:** Renovation ideas, furniture builds, and aesthetic upgrades.
 - **Tool Library:** Inventory of physical tools (drills, saws, etc.) and maintenance guides.
 - **Materials & Suppliers:** Local Fort Lee hardware stores and cost tracking.
 ### 4.2.2. Family & Care
 - **Family Estate:** Inventory and liquidation strategy for family assets (Gold/Silver).
 - **Parental Care:** Health records, medical billing history, and local Fort Lee resources.
 ### 4.2.3. Auto
+- **[[Car Info]]:** Persistent vehicle specifications and details.
 - **[[Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
 - **Maintenance Log:** Service history and recurring tasks for the Pilot.
 - **[[Blower Motor Noise Fix]]:** Step-by-step guide for resolving HVAC fan noise.
