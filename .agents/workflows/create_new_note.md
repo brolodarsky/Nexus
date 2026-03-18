@@ -11,7 +11,7 @@ Use this workflow whenever you need to add, move, format, or import a note into 
 1. Identify the topic and which H1 section in `Vault/Table of Contents.md` it belongs to.
 If a new H1 section is needed, recommend to user and wait for approval.
 
-2. Determine the appropriate filename prefix based on the note's purpose (e.g., `Project - `, `Protocol - `, `Concept - `, `Reference - `, `Log - `). Apply this taxonomy to the proposed filename. Feel free to invent a new prefix if an existing one doesn't fit well.
+2. Determine if the note requires a filename prefix. Use prefixes *only* for specific instances of categories (e.g., `Project - `, `Protocol - `, `Log - `). Broad concepts should keep their natural names. Apply this taxonomy to the proposed filename if applicable.
 
 3. Confirm the target folder exists. Create it if missing.
 

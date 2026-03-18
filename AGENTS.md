@@ -19,7 +19,7 @@ This is a personal "second brain"/knowledge management system that's read/tinker
 | `Vault/` | All Obsidian content — notes, images, audio |
 | `Vault/Table of Contents.md` | Master index; source of truth for folder structure |
 | `Vault/Audio/` | Generated MP3s (gitignored, synced via Syncthing) |
-| `generate_podcast.py` | Converts notes → MP3 via edge-tts |
+| `scripts/generate_podcast.py` | Converts notes → MP3 via edge-tts |
 | `requirements.txt` | Python dependencies |
 | `.venv/` | Virtual environment (gitignored) |
 | `.agents/skills/` | AI agent skill definitions |
@@ -75,3 +75,4 @@ End-to-end workflow for adding a note: affirm structure → create note → upda
 7. **Audio files are gitignored** — they sync via Syncthing, not Git.
 8. **Batch your commits.** Group related changes into single logical commits. Do not `git push` after every minor file edit or documentation fix. Only `git push` at the very end of a task or session to reduce user interruptions.
 9. **Keep AGENTS.md updated.** If you create, modify, or delete a skill or workflow, you must update the `## Skills` or `## Workflows` section in this file to reflect the change.
+10. **Add `.gitkeep` to empty folders.** Whenever creating a new empty directory in the Vault, always create an empty `.gitkeep` file inside it so it can be tracked by Git.

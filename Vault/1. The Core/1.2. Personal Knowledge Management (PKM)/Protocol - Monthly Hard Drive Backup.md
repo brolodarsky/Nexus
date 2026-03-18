@@ -3,7 +3,6 @@ aliases: [Hard Drive Backup, Monthly Backup Protocol, FreeFileSync Backup]
 tags: [pkm, backup, workflow, automation]
 type: tool
 ---
-
 **Back to:** [[Table of Contents]]
 
 ---

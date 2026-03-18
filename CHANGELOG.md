@@ -51,10 +51,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Removed
 - `sync_vault.py` — script deleted in favor of direct agentic structure management
 
+## [Unreleased]
+
+### Added
+- Rule 10 in `AGENTS.md` enforcing `.gitkeep` files for empty directories.
+- Folder maintenance scripts: `scripts/create_folders.py`, `scripts/check_folders.py`, and `scripts/add_gitkeeps.py`.
+
+### Changed
+- Moved all python scripts into the `scripts/` root directory.
+- Updated all script references across `README.md`, `CHANGELOG.md`, and `AGENTS.md`.
+- Readjusted relative paths in `scripts/generate_podcast.py`.
+
 ## [1.0.0] - 2026-03-14
 
 ### Added
-- `generate_podcast.py` — converts all Vault notes to MP3 via edge-tts
+- `scripts/generate_podcast.py` — converts all Vault notes to MP3 via edge-tts
 - `sync_vault.py` — syncs Vault folder structure with Table of Contents H1 sections
 - `AGENTS.md` — central AI agent constitution for the repository
 - `README.md` — project documentation with setup, scripts, and structure
@@ -69,5 +80,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - Reorganised repo: moved all Obsidian content into `Vault/` subfolder
-- `generate_podcast.py` resolves edge-tts from `.venv` automatically
+- `scripts/generate_podcast.py` resolves edge-tts from `.venv` automatically
 - `.gitignore` updated to exclude `.venv/`, `Vault/Audio/`, and `podcast_history.json`

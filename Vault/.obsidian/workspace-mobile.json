@@ -112,6 +112,7 @@
         "state": {
           "type": "backlink",
           "state": {
+            "file": "Table of Contents.md",
             "collapseAll": false,
             "extraContext": false,
             "sortOrder": "alphabetical",
@@ -167,9 +168,16 @@
   },
   "active": "9755537e7924b568",
   "lastOpenFiles": [
+    "1. The Core/1.2. Personal Knowledge Management (PKM)/Protocol - Laptop App List Update.md",
+    "Table of Contents.md",
+    "4. Operations & Wealth/4.2. Infrastructure & Logistics/4.2.3. Auto/Maintenance Log.md",
+    "4. Operations & Wealth/4.2. Infrastructure & Logistics/4.2.3. Auto/Project - Maintenance Tracker Game Plan.md",
+    "4. Operations & Wealth/4.2. Infrastructure & Logistics/4.2.3. Auto/Car Info.md",
+    "Project Maturity Checklist.md",
+    "1. The Core/1.2. Personal Knowledge Management (PKM)/Protocol - Monthly Hard Drive Backup.md",
+    "1. The Core/1.2. Personal Knowledge Management (PKM)/Protocol - System Maintenance.md",
     "5. Playground/5.1. Social Life & Community/Activities List.md",
     "5. Playground/Movie List.md",
-    "Table of Contents.md",
     "4. Operations & Wealth/Exterior Repair Game Plan.md",
     "5. Playground/5.1. Social Life & Community",
     "6. Capture & Archive/6.1. Brain Dump & Inbox/Quick Capture.md",

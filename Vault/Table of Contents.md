@@ -55,7 +55,7 @@ The Lab
 - Inactive tools, experiments, and one-off Python scripts.
 ## 3.2. Library & Learning
 - **Technical Archive:** Engineering-specific YouTube tutorials, GitHub repos, and research papers.
-- **[[AI Agents]] | [[LLMs]] | [[Vector Search]] | [[Robotics]]:** (Original technical deep-dives).
+- **[[AI Agents]] | LLMs | Vector Search | Robotics:** (Original technical deep-dives).
 ### 3.2.1. Foundational Mathematics & Statistics
 [LibreTexts Mathematics](https://math.libretexts.org/)
 #### Linear Algebra
@@ -128,7 +128,6 @@ The dominant language for AI/ML and Agentic Workflows.
 - Testing: `pytest`, mocking API calls (crucial for testing LLM outputs).
 - API Design: RESTful principles, GraphQL, OpenAPI/Swagger specifications (how LLMs read APIs).
 
-    
 ### 3.2.3. Machine Learning Fundamentals
 [Machine Learning Glossary]([Supervised Learning](https://developers.google.com/machine-learning/glossary#supervised-learning))
 #### Types of Learning
@@ -167,7 +166,7 @@ The dominant language for AI/ML and Agentic Workflows.
 ### 3.2.5. Natural Language Processing (NLP) & Vector Search
 #### Core NLP & Embeddings
 - Text Representation: Word2Vec, Contextual Embeddings.
-- [[Vector Embeddings]]: Dense representations of text.
+- Vector Embeddings: Dense representations of text.
 - [[Vector Databases]]: ChromaDB, Pinecone, [Milvus](https://milvus.io/intro), Qdrant. 
 - Chunking strategies for parsing large documents.
 
@@ -268,8 +267,8 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **Parental Care:** Health records, medical billing history, and local Fort Lee resources.
 ### 4.2.3. Auto
 - **[[Car Info]]:** Persistent vehicle specifications and details.
-- **[[Project - Maintenance Tracker Game Plan]]:** Project outline for building an automated Google Sheet tracker.
 - **[[Maintenance Log]]:** Service history and recurring tasks for the Pilot.
+- **[[Project - Maintenance Tracker Game Plan]]:** Project outline for building an automated Google Sheet tracker.
 - **[[Project - Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
 - **[[Project - Blower Motor Noise Fix]]:** Step-by-step guide for resolving HVAC fan noise.
 ## 4.3. Career Strategy & Revenue

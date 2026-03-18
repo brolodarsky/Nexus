@@ -32,7 +32,8 @@ Knowledge Base/
 │   └── Table of Contents.md   # Master index — source of truth for structure
 ├── AGENTS.md                   # AI agent constitution for the repo
 ├── CHANGELOG.md                # Running log of notable changes
-├── generate_podcast.py         # Converts notes to MP3 audiobooks
+├── scripts/                    # Python automation scripts
+│   └── generate_podcast.py     # Converts notes to MP3 audiobooks
 ├── requirements.txt            # Pinned Python dependencies
 └── .gitignore
 ```
@@ -55,7 +56,12 @@ pip install -r requirements.txt
 
 ## Scripts
 
-### `generate_podcast.py`
+### Vault Maintenance Scripts
+- `scripts/create_folders.py`: Parses the TOC for numbered headers and creates missing folders.
+- `scripts/check_folders.py`: Dry-run version of folder creation to print missing paths.
+- `scripts/add_gitkeeps.py`: Scans the Vault for empty directories and adds `.gitkeep` files.
+
+### `scripts/generate_podcast.py`
 Converts every Markdown note in the Vault into an MP3 using Microsoft's neural TTS voices via [`edge-tts`](https://github.com/rany2/edge-tts).
 
 - Only regenerates notes that are **new or modified** since the last run.
@@ -64,7 +70,7 @@ Converts every Markdown note in the Vault into an MP3 using Microsoft's neural T
 
 **Usage** (from repo root, with `.venv` active or not):
 ```bash
-python generate_podcast.py
+python scripts/generate_podcast.py
 ```
 
 **Setup** (first time only):
