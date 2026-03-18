@@ -55,14 +55,25 @@ Use a short word describing the area affected:
 
 ## CHANGELOG.md
 
-After committing with type `feat` or `fix`, **ALWAYS add an entry** to `CHANGELOG.md` under the current date's `## [Unreleased]` section. Group entries by type:
+After committing with type `feat` or `fix`, **ALWAYS add an entry** to `CHANGELOG.md`.
 
+**CRITICAL RULES FOR CHANGELOG:**
+1. **Read `CHANGELOG.md` first**.
+2. **Same-Day Entries:** If an entry for the current date already exists (e.g., `## [1.0.3] - 2026-03-18`), you MUST append your new changes under that existing date's `### Added` or `### Fixed` headers. Do NOT create duplicate `## [Version] - Date` headers for the same day.
+3. **Version Bumping:** Increment the version number only if it is a new day, OR if you believe the changes constitute a significant overhaul, major feature addition, or breaking change. In those significant cases, bumping the version on the same day is acceptable.
+
+Example of appending to an existing day:
 ```markdown
 ### Added
 - New Vector Embeddings note in section 5
-
-### Fixed
-- Podcast script now resolves edge-tts from venv
+- (Your new appended feature goes here)
 ```
 
 For `docs`, `chore`, `refactor`, `style`, and `test` commits — no CHANGELOG entry is needed.
+
+---
+
+## Pushing Changes (`git push`)
+
+**Do NOT run `git push` after every single minor file edit or documentation fix.** 
+Batch logical commits locally, and only `git push` at the very end of a task, session, or when specifically requested by the user, to reduce user interruptions and approval noise.

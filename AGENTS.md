@@ -73,5 +73,5 @@ End-to-end workflow for adding a note: affirm structure → create note → upda
 5. **The TOC is the single source of truth** for Vault folder structure.
 6. **All notes must have YAML frontmatter** with `aliases`, `tags`, and `type` fields.
 7. **Audio files are gitignored** — they sync via Syncthing, not Git.
-8. **Batch your commits.** Group related changes into a single logical commit and `git push` at the end of a task or session, rather than after every minor file edit, to reduce approval interruptions.
+8. **Batch your commits.** Group related changes into single logical commits. Do not `git push` after every minor file edit or documentation fix. Only `git push` at the very end of a task or session to reduce user interruptions.
 9. **Keep AGENTS.md updated.** If you create, modify, or delete a skill or workflow, you must update the `## Skills` or `## Workflows` section in this file to reflect the change.
