@@ -48,6 +48,11 @@ These are located in `.agents/skills/` and define rules you **must** follow.
 - Valid types: `feat`, `fix`, `docs`, `chore`, `refactor`, `style`, `test`
 - Update `CHANGELOG.md` for `feat` and `fix` commits
 
+### `cleanup_orphans`
+**Trigger:** When asked to "clean the vault", "find orphans", or perform Zettelkasten maintenance
+- Scan the vault for broken wiki-links and empty folders
+- Report findings to the user; do not delete or modify files automatically
+
 ---
 
 ## Workflows
@@ -69,3 +74,4 @@ End-to-end workflow for adding a note: affirm structure → create note → upda
 6. **All notes must have YAML frontmatter** with `aliases`, `tags`, and `type` fields.
 7. **Audio files are gitignored** — they sync via Syncthing, not Git.
 8. **Batch your commits.** Group related changes into a single logical commit and `git push` at the end of a task or session, rather than after every minor file edit, to reduce approval interruptions.
+9. **Keep AGENTS.md updated.** If you create, modify, or delete a skill or workflow, you must update the `## Skills` or `## Workflows` section in this file to reflect the change.
