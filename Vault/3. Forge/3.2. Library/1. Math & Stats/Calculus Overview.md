@@ -3,7 +3,10 @@ aliases: [Calculus, Integration, Derivatives]
 tags: [math, optimization, machine-learning]
 type: overview
 ---
-# Calculus Overview
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Calculus is the mathematical study of continuous change. In the context of AI and Machine Learning, calculus is the engine that allows models to "learn" by iteratively minimizing error. 
 
@@ -28,6 +31,3 @@ The learning process in Deep Learning relies entirely on calculus, specifically 
 
 ## Resources
 *   [Essence of Calculus (3Blue1Brown)](https://www.youtube.com/playlist?list=PLZHQObOWTQDMsr9K-rj53DwVRMYO3t5Yr)
-
----
-**Back to:** [[Table of Contents]]

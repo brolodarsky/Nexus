@@ -12,9 +12,9 @@ _Systemic foundations for mental clarity, resilience, and long-term vision._
 - **[[Currently Learning]]:** Active focus and active subjects.
 ## 1.2. Personal Knowledge Management (PKM)
 - **Brain 2.0 Meta:** How I tag, link, and maintain this system.
-- **[[System Maintenance]]**
-- **[[Laptop App List Update Protocol]]**
-- **[[Monthly Hard Drive Backup Protocol]]**
+- **[[Protocol - System Maintenance]]**
+- **[[Protocol - Laptop App List Update]]**
+- **[[Protocol - Monthly Hard Drive Backup]]**
 - **Toolbox:** Documentation for the Pixel 8 Pro, Obsidian/Logseq workflows, and local LLM setups.
 ## 1.3. Security & Digital Sovereignty
 - **Security Audit:** Password management strategy, 2FA recovery locations, and encryption protocols.
@@ -268,10 +268,10 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **Parental Care:** Health records, medical billing history, and local Fort Lee resources.
 ### 4.2.3. Auto
 - **[[Car Info]]:** Persistent vehicle specifications and details.
-- **[[Maintenance Tracker Game Plan]]:** Project outline for building an automated Google Sheet tracker.
+- **[[Project - Maintenance Tracker Game Plan]]:** Project outline for building an automated Google Sheet tracker.
 - **[[Maintenance Log]]:** Service history and recurring tasks for the Pilot.
-- **[[Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
-- **[[Blower Motor Noise Fix]]:** Step-by-step guide for resolving HVAC fan noise.
+- **[[Project - Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
+- **[[Project - Blower Motor Noise Fix]]:** Step-by-step guide for resolving HVAC fan noise.
 ## 4.3. Career Strategy & Revenue
 - **Professional Portfolio:** Documentation of AI Rating and Billing experience.
 - **The Pivot:** Preparation for AI/Robotics roles (Interview prep, Networking).

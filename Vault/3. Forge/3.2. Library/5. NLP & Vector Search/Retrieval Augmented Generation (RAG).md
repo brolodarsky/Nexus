@@ -3,7 +3,10 @@ aliases: [RAG, Retrieval Augmented Generation, Semantic Search]
 tags: [nlp, generative-ai, llms, vector-database]
 type: architecture
 ---
-# Retrieval Augmented Generation (RAG)
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Retrieval Augmented Generation (RAG) is a technique for enhancing Large Language Models by fetching relevant external data and inserting it into the model's context window before generating a response. It grounds the LLM in specific, up-to-date, or proprietary data that was not present in its original training corpus.
 
@@ -46,7 +49,3 @@ Basic RAG (Naïve RAG) often fails on complex queries. Advanced techniques inclu
 *   **[LlamaIndex](https://www.llamaindex.ai/):** The industry standard orchestration framework designed specifically for advanced RAG architectures.
 *   **[LangChain](https://python.langchain.com/):** A more general-purpose LLM orchestration framework that includes RAG components.
 *   **Embedding Models:** OpenAI (`text-embedding-3-small`), BGE, Cohere.
-
-
----
-**Back to:** [[Table of Contents]]

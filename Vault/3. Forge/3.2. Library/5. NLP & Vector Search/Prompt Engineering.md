@@ -3,7 +3,10 @@ aliases: [Prompt Engineering, Prompting, Few-Shot]
 tags: [nlp, generative-ai, llms]
 type: concept
 ---
-# Prompt Engineering
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Prompt Engineering is the practice of designing, refining, and optimizing text inputs (prompts) to effectively guide generative AI models (like LLMs) toward desired outputs. It bridges the gap between human intent and model comprehension.
 
@@ -59,7 +62,3 @@ As LLMs are integrated into public-facing applications, prompt engineering must 
 
 *   [OpenAI Best Practices for Prompting](https://help.openai.com/en/articles/6654000-best-practices-for-prompt-engineering-with-openai-api)
 *   [Prompt Engineering Guide (DAIR.AI)](https://www.promptingguide.ai/)
-
-
----
-**Back to:** [[Table of Contents]]

@@ -4,7 +4,10 @@ tags: [auto, project, sheets, tracking]
 type: plan
 ---
 
-# Maintenance Tracker Game Plan
+---
+**Back to:** [[Table of Contents]]
+---
+
 
 This document outlines the requirements and build steps for migrating the Honda Pilot service history into an automated, macro-driven Google Sheet.
 
@@ -35,6 +38,3 @@ Create a living, low-friction spreadsheet that not only logs past maintenance (c
 ## 🔗 Resources & Notes
 *   *Link to AppScript documentation for sending email triggered reminders (if needed later).*
 *   *Link to common Honda Pilot factory maintenance schedule thresholds.*
-
----
-**Back to:** [[Table of Contents]]

@@ -3,7 +3,10 @@ aliases: [AI Agents, Agentic Workflows, Autonomous Agents]
 tags: [ai-agents, llms, architecture]
 type: concept
 ---
-# AI Agents
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 An **AI Agent** is a system powered by a Large Language Model (LLM) that can autonomously reason through a problem, create a plan, and execute actions using external tools to achieve a predefined goal. Unlike standard conversational AI (chatbots), agents are proactive and capable of altering their environment.
 
@@ -36,11 +39,8 @@ Agents interact with the world via defined tools.
 *   **Web Browsing:** Using tools like Playwright or Puppeteer to navigate the DOM, click buttons, and scrape text.
 *   **Bash / CLI Execution:** Running Python scripts, managing files, and compiling code.
 *   **APIs:** Connecting to Slack, GitHub, Jira, or proprietary databases. 
-    *   *Note:* The emerging standard for organizing these tools universally is the [[Model Context Protocol (MCP)]].
+    *   *Note:* The emerging standard for organizing these tools universally is the [[Concept - Model Context Protocol (MCP)]].
 
 ## Further Resources
 *   [IBM: AI Agents Explained](https://www.ibm.com/think/ai-agents)
 *   [Sequoia Capital: AI Agents Landscape](https://www.sequoiacap.com/article/ai-agents/)
-
----
-**Back to:** [[Table of Contents]]

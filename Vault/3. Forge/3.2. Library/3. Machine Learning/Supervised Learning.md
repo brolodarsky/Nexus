@@ -3,7 +3,10 @@ aliases: [Supervised Learning, Predictive Modeling]
 tags: [machine-learning, concepts]
 type: overview
 ---
-# Supervised Learning
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Supervised learning is a subfield of machine learning where an algorithm learns from a labeled dataset. The model observes pairs of input data (features) and corresponding correct outputs (labels), and learns the mathematical mapping between them. 
 
@@ -63,6 +66,3 @@ Supervised learning is a subfield of machine learning where an algorithm learns 
 ## Further Resources
 
 *   [Machine Learning Glossary (Google)](https://developers.google.com/machine-learning/glossary)
-
----
-**Back to:** [[Table of Contents]]

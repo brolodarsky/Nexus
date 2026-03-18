@@ -3,7 +3,10 @@ aliases: [MCP, Model Context Protocol]
 tags: [ai-agents, architecture, standards, api]
 type: tool
 ---
-# Model Context Protocol (MCP)
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 The Model Context Protocol (MCP) is an emerging open standard, originally developed by Anthropic, that acts as a universal bridge between Large Language Models (LLMs) and external data sources or tools. It standardizes how AI models securely request, discover, and utilize APIs, databases, and local file systems.
 
@@ -57,7 +60,3 @@ An MCP Server can expose any combination of three primary capabilities to the Ho
 ## Further Resources
 *   [Model Context Protocol Official Site](https://modelcontextprotocol.io/)
 *   [Introduction to MCP (Anthropic)](https://www.anthropic.com/news/model-context-protocol)
-
-
----
-**Back to:** [[Table of Contents]]

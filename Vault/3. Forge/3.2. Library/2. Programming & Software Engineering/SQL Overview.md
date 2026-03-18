@@ -3,6 +3,11 @@ aliases: [SQL, Structured Query Language, Relational Databases]
 tags: [data-engineering, databases, programming-language]
 type: overview
 ---
+
+---
+**Back to:** [[Table of Contents]]
+---
+
 # SQL (Structured Query Language)
 
 **SQL** is the standard domain-specific language used for managing, querying, and updating structured tabular data from a Relational Database Management System (RDBMS). Even in the era of Big Data and NoSQL, SQL remains the absolute bedrock of data engineering.
@@ -39,7 +44,7 @@ SQL commands are generally divided into DDL (Data Definition Language) for defin
 ## SQL in AI & Agentic Workflows
 
 *   **Text-to-SQL Agents:** A massive subfield of modern AI involves training Language Models or creating Agentic workflows (via frameworks like LangChain) to receive a natural language query, parse the database schema, write a complex SQL query, execute it, and return the answer.
-*   **Database Connections:** AI agents connected via the [[Model Context Protocol (MCP)]] often use Postgres or SQL Server MCPs to scan database schemas securely and read proprietary data into their context windows.
+*   **Database Connections:** AI agents connected via the [[Concept - Model Context Protocol (MCP)]] often use Postgres or SQL Server MCPs to scan database schemas securely and read proprietary data into their context windows.
 *   **Vector Search Extensions:** The line between relational databases and [[Vector Databases]] is blurring. Extensions like `pgvector` for PostgreSQL allow users to run SQL queries that find records based on semantic vector similarity (e.g., `SELECT * FROM items ORDER BY embedding <-> '[0.1, ...]' LIMIT 5;`).
 
 ## Popular RDBMS
@@ -50,6 +55,3 @@ SQL commands are generally divided into DDL (Data Definition Language) for defin
 ## Resources
 *   [W3Schools SQL Tutorial](https://www.w3schools.com/sql/)
 *   [PostgreSQL Official Documentation](https://www.postgresql.org/docs/)
-
----
-**Back to:** [[Table of Contents]]

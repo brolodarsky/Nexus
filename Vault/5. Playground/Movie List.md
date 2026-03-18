@@ -3,8 +3,6 @@ aliases: [Movies, Watchlist, Film List]
 tags: [media, entertainment, movies]
 type: log
 ---
-# Movie List
-
 * ## Drama
 
   * Brooklyn (2015)  

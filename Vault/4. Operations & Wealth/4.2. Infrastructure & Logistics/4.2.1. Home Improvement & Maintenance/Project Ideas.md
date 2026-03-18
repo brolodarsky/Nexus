@@ -4,11 +4,11 @@ tags: [home, project, ideas]
 type: overview
 ---
 
-# Project Ideas
+---
+**Back to:** [[Table of Contents]]
+---
+
 
 This note maintains a running queue of long-term home improvement ideas, furniture builds, and aesthetic upgrades.
 
 *   *(Add persistent project ideas here)*
-
----
-**Back to:** [[Table of Contents]]

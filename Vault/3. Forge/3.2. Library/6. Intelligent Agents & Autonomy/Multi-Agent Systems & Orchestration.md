@@ -3,7 +3,10 @@ aliases: [Multi-Agent Systems, MAS, Agent Orchestration]
 tags: [ai-agents, architecture, orchestration]
 type: architecture
 ---
-# Multi-Agent Systems & Orchestration
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Multi-Agent Systems (MAS) represent the evolution from single, conversational LLMs into distributed problem-solving networks. Instead of one monolithic model trying to do everything, a multi-agent system divides complex tasks among specialized, autonomous "agents" that communicate and collaborate to achieve a goal.
 
@@ -52,7 +55,3 @@ Building these communication channels from scratch in Python is tedious. Several
 ## Further Resources
 *   [CrewAI Documentation](https://docs.crewai.com/)
 *   [The Landscape of Agentic AI (Sequoia Capital)](https://www.sequoiacap.com/article/ai-agents/)
-
-
----
-**Back to:** [[Table of Contents]]

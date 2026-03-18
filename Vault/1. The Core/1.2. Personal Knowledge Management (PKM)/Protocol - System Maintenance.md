@@ -4,7 +4,10 @@ tags: [maintenance, system, admin]
 type: overview
 ---
 
-# System Maintenance
+---
+**Back to:** [[Table of Contents]]
+---
+
 
 Use this note to track recurring administrative and maintenance tasks for Brain 2.0.
 
@@ -22,8 +25,5 @@ Use this note to track recurring administrative and maintenance tasks for Brain 
   - Ensure any new scripts or workflows created this month are documented.
 - [ ] **Verify Python Environment**
   - Ensure `.venv` is healthy and `requirements.txt` is strictly in sync with actual usage.
-- [ ] **[[Monthly Hard Drive Backup Protocol]]**
+- [ ] **[[Protocol - Monthly Hard Drive Backup]]**
   - Execute the FreeFileSync batch jobs to back up the system locally.
-
----
-**Back to:** [[Table of Contents]]

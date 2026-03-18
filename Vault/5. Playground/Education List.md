@@ -444,7 +444,5 @@ type: log
 * Vsauce (Science, Mathematics, Philosophy)  
 * YaleCourses (Lectures)
 
-
-
 ---
 [[Table of Contents|Back to TOC]]

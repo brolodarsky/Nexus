@@ -3,6 +3,11 @@ aliases: [Car Exterior Repair, Honda Pilot Bodywork]
 tags: [maintenance, vehicle, honda-pilot]
 type: plan
 ---
+
+---
+**Back to:** [[Table of Contents]]
+---
+
 # 2005 Honda Pilot: Exterior Repair Game Plan
 
 This guide outlines the repair strategy for the driver-side rear quarter panel and bumper damage.
@@ -65,6 +70,3 @@ If you choose the DIY route (Option A), follow these specific steps:
 ## Local Resources (Williamsburg, NY)
 * **AutoZone / Advance Auto Parts:** For sandpaper, Bondo, and basic primer.
 * **Salerno Service Station:** Good for mechanical mounting help if you can't get the bumper bolts loose.
-
----
-**Back to:** [[Table of Contents]]

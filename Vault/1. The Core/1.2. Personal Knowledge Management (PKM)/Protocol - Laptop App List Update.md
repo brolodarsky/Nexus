@@ -3,6 +3,11 @@ aliases: [App List Update, Software Inventory Protocol]
 tags: [pkm, workflow, automation]
 type: tool
 ---
+
+---
+**Back to:** [[Table of Contents]]
+---
+
 This protocol outlines the process for updating the [[Laptop App List]] to ensure the digital inventory remains current.
 
 ## 1. Objective
@@ -32,6 +37,3 @@ $header + "`n" + ($apps -join "`n") | Out-File "$home\Desktop\App List.md"
 
 ## 3. Frequency
 Perform this audit monthly or after major software installations/removals.
-
----
-**Back to:** [[Table of Contents]]

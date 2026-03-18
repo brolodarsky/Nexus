@@ -3,6 +3,11 @@ aliases: [Vector Databases, Vector Embeddings, Similarity Search]
 tags: [nlp, databases, infrastructure]
 type: tool
 ---
+
+---
+**Back to:** [[Table of Contents]]
+---
+
 # Vector Databases & Embeddings
 
 Vector Databases are specialized databases designed to store, manage, and search large datasets of high-dimensional vectors. They are the foundational infrastructure layer for modern AI applications, enabling semantic search and [[Retrieval Augmented Generation (RAG)]].
@@ -49,7 +54,3 @@ A crucial feature of modern vector DBs is combining semantic search with traditi
 
 *   [What is a Vector Database? (Pinecone)](https://www.pinecone.io/learn/vector-database/)
 *   [Milvus Documentation](https://milvus.io/docs)
-
-
----
-**Back to:** [[Table of Contents]]

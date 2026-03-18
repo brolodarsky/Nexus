@@ -3,7 +3,10 @@ aliases: [Logistic Regression, Sigmoid Function, Log-Loss]
 tags: [machine-learning, algorithm, classification]
 type: algorithm
 ---
-# Logistic Regression
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Despite its name containing the word "regression," **Logistic Regression** is almost exclusively used for **Classification** tasks in [[Supervised Learning]]. Rather than fitting a continuous straight line like [[Linear Regression]], Logistic Regression fits an "S-shaped" curve to calculate the probability that an observation belongs to a specific category.
 
@@ -46,6 +49,3 @@ Where $\frac{p}{1-p}$ is the Odds Ratio. This logarithmic transformation is what
 ## Further Resources
 
 *   [StatQuest: Logistic Regression Explained](https://www.youtube.com/watch?v=yIYKR4sgzI8)
-
----
-**Back to:** [[Table of Contents]]

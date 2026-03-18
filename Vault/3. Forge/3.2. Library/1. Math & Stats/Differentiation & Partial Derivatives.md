@@ -3,7 +3,10 @@ aliases: [Differentiation, Partial Derivatives, Gradients]
 tags: [math, optimization, deep-learning]
 type: concept
 ---
-# Differentiation & Partial Derivatives
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Differentiation is the mathematical procedure used to find a derivative—the rate of change of a function. The derivative of a function $f(x)$ with respect to $x$ is denoted as $f'(x)$ or $\frac{df}{dx}$.
 
@@ -24,6 +27,3 @@ While a partial derivative gives the rate of change with respect to one variable
 *   If $f(x, y, z)$ is a cost function, its gradient is the vector: $\nabla f = \left[ \frac{\partial f}{\partial x}, \frac{\partial f}{\partial y}, \frac{\partial f}{\partial z} \right]$.
 *   **Geometric Meaning:** The gradient vector at any point points in the direction of the *greatest rate of increase* of the function.
 *   **Gradient Descent:** To optimize an ML model, we calculate the gradient of the cost function, and then take a step in the *opposite* direction (the direction of steepest descent) to minimize the error.
-
----
-**Back to:** [[Table of Contents]]

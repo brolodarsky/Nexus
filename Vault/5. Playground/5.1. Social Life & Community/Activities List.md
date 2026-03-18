@@ -3,6 +3,11 @@ aliases: [Hobbies, Bucket List, Experience Log]
 tags: [social, life, archive]
 type: overview
 ---
+
+---
+**Back to:** [[Table of Contents]]
+---
+
 # Priorities
 
 * Bocce Tournament  
@@ -590,5 +595,3 @@ type: overview
 * **Visit a historical landmark you've never seen.**  
 * **Write letters to friends or family.**  
 * **Stargazing (away from city lights if possible \- e.g., join an astronomy club event, some spots in NJ, further out on Long Island).**
----
-**Back to:** [[Table of Contents]]

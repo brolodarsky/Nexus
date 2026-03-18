@@ -3,7 +3,10 @@ aliases: [Probability Distributions, Gaussian, Normal Distribution]
 tags: [math, statistics, generative-ai]
 type: concept
 ---
-# Probability Distributions
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 A **Probability Distribution** is a mathematical function that provides the probabilities of occurrence of different possible outcomes in an experiment. It is a fundamental concept in statistics and machine learning for modeling uncertainty and understanding data generation processes.
 
@@ -29,6 +32,3 @@ Used when the possible outcomes can take any value within a range (e.g., height,
 ## Importance in Generative AI
 
 Understanding these distributions is critical for Generative AI. Models like Variational Autoencoders (VAEs) and Diffusion Models function by learning the underlying probability distribution of the training data (e.g., images) so they can sample new, highly probable data points from that learned distribution.
-
----
-**Back to:** [[Table of Contents]]

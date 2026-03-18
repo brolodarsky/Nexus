@@ -3,7 +3,10 @@ aliases: [Linear Regression, OLS, Ordinary Least Squares]
 tags: [machine-learning, algorithm, regression]
 type: algorithm
 ---
-# Linear Regression
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Linear Regression is arguably the simplest and most widely used algorithm in all of [[Supervised Learning]]. It attempts to model the relationship between a dependent continuous variable and one or more independent variables by fitting a straight line (or an $n$-dimensional plane) to the observed data.
 
@@ -62,6 +65,3 @@ prediction = model.predict([[50]])
 
 ## Further Resources
 *   [StatQuest: Linear Regression Explained](https://www.youtube.com/watch?v=nk2CQITm_eo)
-
----
-**Back to:** [[Table of Contents]]

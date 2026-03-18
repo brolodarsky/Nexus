@@ -3,7 +3,10 @@ aliases: [Linear Algebra, Vectors, Matrices]
 tags: [math, machine-learning, embeddings]
 type: overview
 ---
-# Overview - Linear Algebra
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 [[Linear Algebra]] is a branch of mathematics concerning **vector spaces** and **linear mappings** between such spaces. It is a fundamental tool for AI and Machine Learning, allowing for the modeling and solving of systems of linear equations.
 
@@ -39,6 +42,3 @@ type: overview
 ## Resources
 *   [Essence of Linear Algebra (3Blue1Brown)](https://www.youtube.com/playlist?list=PLZHQObOWTQDPD3MizzM2xVFitgF8hE_ab)
 *   [Khan Academy Linear Algebra](https://www.khanacademy.org/math/linear-algebra)
-
----
-**Back to:** [[Table of Contents]]

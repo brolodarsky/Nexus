@@ -3,7 +3,10 @@ aliases: [Hard Drive Backup, Monthly Backup Protocol, FreeFileSync Backup]
 tags: [pkm, backup, workflow, automation]
 type: tool
 ---
-# Monthly Hard Drive Backup Protocol
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 This protocol outlines the process for running a monthly backup of the primary hard drive to an external storage device using FreeFileSync as a batch job.
 
@@ -37,6 +40,3 @@ Locate and run the FreeFileSync batch job file. This is typically configured to 
 
 ## 4. Frequency
 Perform this backup on the **1st of every month**.
-
----
-**Back to:** [[Table of Contents]]

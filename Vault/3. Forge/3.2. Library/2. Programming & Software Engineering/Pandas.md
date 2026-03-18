@@ -3,7 +3,10 @@ aliases: [Pandas, DataFrame, Data Analysis]
 tags: [python, library, data-science, feature-engineering]
 type: tool
 ---
-# Pandas
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 **Pandas** is an open-source data manipulation and analysis library built on top of [[NumPy]]. While NumPy excels at crunching uniform mathematical arrays, Pandas excels at handling heterogeneous, tabular data—much like a SQL table or an Excel spreadsheet.
 
@@ -33,6 +36,3 @@ Pandas is typically used in the critical *Data Processing and Feature Engineerin
 
 ## Resources
 *   [10 minutes to pandas (Official Guide)](https://pandas.pydata.org/docs/user_guide/10min.html)
-
----
-**Back to:** [[Table of Contents]]

@@ -3,7 +3,10 @@ aliases: [Data Collection, Web Scraping, Data Acquisition]
 tags: [data-engineering, mlops, python]
 type: overview
 ---
-# Data Collection & Acquisition
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Data collection is the critical first stage of any Machine Learning project or Agentic Workflow. Without high-quality, relevant, and clean data, even the most advanced Deep Learning models will fail (Garbage In, Garbage Out).
 
@@ -39,6 +42,3 @@ In the context of [[Retrieval Augmented Generation (RAG)]], raw text data must b
 *   **Robots.txt:** When web scraping, ethical practice requires checking the target site's `robots.txt` file to ensure the specific pages allow automated crawling.
 *   **Rate Limiting:** Ensuring your ingestion scripts or Agent loops adhere to API rate limits (e.g., max 10 requests per second) to explicitly avoid Denial of Service (DoS) bans.
 *   **PII Sanitization:** scrub Personally Identifiable Information (like Social Security Numbers or credit cards) from ingested datasets *before* training a model or storing it in a Vector DB.
-
----
-**Back to:** [[Table of Contents]]

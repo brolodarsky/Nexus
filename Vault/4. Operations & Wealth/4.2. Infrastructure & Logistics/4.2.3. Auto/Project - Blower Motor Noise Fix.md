@@ -3,7 +3,10 @@ aliases: [Fan Noise Fix, Blower Motor Cleaning, HVAC Noise]
 tags: [auto, maintenance, repair, honda-pilot]
 type: tool
 ---
-# Blower Motor Noise Fix
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 This guide covers the diagnosis and resolution of unusual noises (rattling, squeaking, grinding) coming from the blower motor in a 2005 Honda Pilot.
 
@@ -43,6 +46,3 @@ In the 2005 Honda Pilot, blower motor noise is most commonly caused by debris (l
 
 ## Prevention
 - **[[Cabin Air Filter]]:** Replace the cabin air filter every 15,000 miles to prevent debris from entering the HVAC system.
-
----
-**Back to:** [[Table of Contents]]

@@ -3,7 +3,10 @@ aliases: [Function Calling, Structured Outputs, Tool Use]
 tags: [ai-agents, llms, api]
 type: concept
 ---
-# Function Calling & Structured Outputs
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Function calling (or Tool Use) is the mechanism that allows Large Language Models (LLMs) to connect to external tools, APIs, and databases. Instead of just returning text, the model returns a structured JSON object that matches a predefined schema, which your code then uses to execute a classical programming function.
 
@@ -33,12 +36,8 @@ Function calling (or Tool Use) is the mechanism that allows Large Language Model
 
 *   **OpenAI API:** Native support via the `tools` parameter in Chat Completions.
 *   **Pydantic:** Often used in Python to guarantee that the JSON returned by the LLM strictly conforms to the expected data types.
-*   [[Model Context Protocol (MCP)]]: An emerging standard for defining these tools uniformly across different model providers.
+*   [[Concept - Model Context Protocol (MCP)]]: An emerging standard for defining these tools uniformly across different model providers.
 
 ## Further Resources
 *   [OpenAI Guide: Function Calling](https://platform.openai.com/docs/guides/function-calling)
 *   [Anthropic Tool Use Documentation](https://docs.anthropic.com/en/docs/build-with-claude/tool-use)
-
-
----
-**Back to:** [[Table of Contents]]

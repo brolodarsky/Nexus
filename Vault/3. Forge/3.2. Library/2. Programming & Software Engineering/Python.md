@@ -3,7 +3,10 @@ aliases: [Python, Python 3, Py]
 tags: [programming-language, software-engineering, ai-stack]
 type: overview
 ---
-# Python
+
+---
+**Back to:** [[Table of Contents]]
+---
 
 Python is the dominant programming language for Artificial Intelligence, Data Science, and Agentic Workflows. Its rich ecosystem of libraries, readable syntax, and extensive community support make it the standard for building complex software systems interacting with LLMs.
 
@@ -38,6 +41,3 @@ Python is the dominant programming language for Artificial Intelligence, Data Sc
 
 *   [Real Python](https://realpython.com/)
 *   [Automate the Boring Stuff with Python](https://automatetheboringstuff.com/)
-
----
-**Back to:** [[Table of Contents]]
