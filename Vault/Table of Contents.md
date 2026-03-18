@@ -269,7 +269,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 ### 4.2.3. Auto
 - **[[Car Info]]:** Persistent vehicle specifications and details.
 - **[[Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
-- **Maintenance Log:** Service history and recurring tasks for the Pilot.
+- **[[Maintenance Log]]:** Service history and recurring tasks for the Pilot.
 - **[[Blower Motor Noise Fix]]:** Step-by-step guide for resolving HVAC fan noise.
 ## 4.3. Career Strategy & Revenue
 - **Professional Portfolio:** Documentation of AI Rating and Billing experience.
