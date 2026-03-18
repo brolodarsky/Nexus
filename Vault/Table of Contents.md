@@ -268,8 +268,9 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **Parental Care:** Health records, medical billing history, and local Fort Lee resources.
 ### 4.2.3. Auto
 - **[[Car Info]]:** Persistent vehicle specifications and details.
-- **[[Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
+- **[[Maintenance Tracker Game Plan]]:** Project outline for building an automated Google Sheet tracker.
 - **[[Maintenance Log]]:** Service history and recurring tasks for the Pilot.
+- **[[Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
 - **[[Blower Motor Noise Fix]]:** Step-by-step guide for resolving HVAC fan noise.
 ## 4.3. Career Strategy & Revenue
 - **Professional Portfolio:** Documentation of AI Rating and Billing experience.

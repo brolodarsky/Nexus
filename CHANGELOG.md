@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - "Project Ideas" persistent tracking note in Section 4.2.1
 - "Currently Learning" note and tracking in Section 1.1
 - "Maintenance Log" hybrid note linking to Google Sheets in Section 4.2.3
+- "Maintenance Tracker Game Plan" project note outlining the build steps for the automated Google Sheet
 
 ## [1.0.2] - 2026-03-17
 
