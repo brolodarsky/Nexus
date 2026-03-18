@@ -11,6 +11,7 @@ _Systemic foundations for mental clarity, resilience, and long-term vision._
 - **Legacy & Impact:** What do I want to build that lasts?
 ## 1.2. Personal Knowledge Management (PKM)
 - **Brain 2.0 Meta:** How I tag, link, and maintain this system.
+- **[[System Maintenance]]**
 - **[[Laptop App List Update Protocol]]**
 - **[[Monthly Hard Drive Backup Protocol]]**
 - **Toolbox:** Documentation for the Pixel 8 Pro, Obsidian/Logseq workflows, and local LLM setups.
