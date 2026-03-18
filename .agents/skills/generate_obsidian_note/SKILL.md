@@ -2,9 +2,9 @@
 description: How to generate and format new Obsidian notes
 ---
 
-# Generating New Obsidian Notes
+# Generating, Moving, or Importing Obsidian Notes
 
-When asked to generate a new note in the user's Obsidian vault, you must adhere to the following rules to ensure consistency with their existing knowledge base structure.
+When asked to generate a new note, OR when moving, formatting, or importing an existing markdown file into the user's Obsidian vault (`Vault/`), you must adhere to the following rules to ensure consistency with their existing knowledge base structure.
 
 > Before placing any note, verify the target folder exists. If it does not, apply the `sync_vault_structure` skill first to create it.
 

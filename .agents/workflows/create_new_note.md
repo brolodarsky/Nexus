@@ -1,10 +1,10 @@
 ---
-description: End-to-end workflow for creating a new Obsidian note in the Knowledge Base
+description: End-to-end workflow for creating, moving, formatting, or importing an Obsidian note in the Knowledge Base
 ---
 
-# Create New Note
+# Create, Move, or Import Note
 
-Use this workflow whenever you need to add a new note to the Knowledge Base.
+Use this workflow whenever you need to add, move, format, or import a note into the Knowledge Base.
 
 ## Steps
 

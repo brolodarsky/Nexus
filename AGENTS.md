@@ -32,7 +32,7 @@ This is a personal "second brain"/knowledge management system that's read/tinker
 These are located in `.agents/skills/` and define rules you **must** follow.
 
 ### `generate_obsidian_note`
-**Trigger:** When asked to create a new note
+**Trigger:** When asked to create, move, format, or import a note into the Vault
 - Verify folder exists (Affirm Vault Structure first)
 - Follow Zettelkasten formatting: YAML frontmatter, atomic structure, wikilinks, mandatory footer
 - Add the note's `[[wikilink]]` to `Table of Contents.md`
