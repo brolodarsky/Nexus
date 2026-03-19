@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ---
 ---
 
+## [1.0.4] - 2026-03-19
+
+### Changed
+- Updated `conventional_commits` skill and `AGENTS.md` to require TOC section references for Vault changes in git commit messages.
+
 ## [1.0.3] - 2026-03-18
 
 ### Added

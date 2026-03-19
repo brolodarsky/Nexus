@@ -45,6 +45,7 @@ These are located in `.agents/skills/` and define rules you **must** follow.
 ### `conventional_commits`
 **Trigger:** On every `git commit`
 - Use conventional commit format: `type(scope): description`
+- **Vault Changes:** If the change affects the `Vault/`, include a reference to the relevant section(s) of `Table of Contents.md` in the description, e.g., `feat(vault): add New Note (ref: TOC 1.2)`
 - Valid types: `feat`, `fix`, `docs`, `chore`, `refactor`, `style`, `test`
 - Update `CHANGELOG.md` for `feat` and `fix` commits
 
@@ -71,7 +72,7 @@ Automates extracting skills from a job description (PDF/URL), appending it to `E
 
 1. **Never delete user content** without explicit confirmation.
 2. **Always use the `.venv`** — resolve Python tools from `.venv/Scripts/`, not system PATH. Never install dependencies globally. Always use `.venv\Scripts\pip.exe` for installations. If a new requirement is added, immediately trigger the `maintain_project_docs` skill.
-3. **Commit messages must follow Conventional Commits** — see `conventional_commits` skill.
+3. **Commit messages must follow Conventional Commits** — see `conventional_commits` skill. For Vault changes, always include a TOC section reference.
 4. **Update `CHANGELOG.md` for all `feat` and `fix` commits.**
 5. **The TOC is the single source of truth** for Vault folder structure.
 6. **All notes must have YAML frontmatter** with `aliases`, `tags`, and `type` fields.

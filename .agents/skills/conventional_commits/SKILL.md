@@ -16,7 +16,7 @@ type(scope): description
 
 **Examples:**
 ```
-feat(vault): add Vector Embeddings note
+feat(vault): add Vector Embeddings note (ref: TOC 3.2)
 fix(podcast): resolve venv path on Windows
 docs(readme): add setup instructions
 chore(gitignore): exclude Audio folder
@@ -50,6 +50,7 @@ Use a short word describing the area affected:
 2. **No period** at the end of the description.
 3. **Imperative mood** — write "add feature" not "added feature".
 4. **One logical change per commit** — don't bundle unrelated changes.
+5. **Vault References** — when changing the Vault, append `(ref: TOC X.Y)` where `X.Y` is the section number from `Vault/Table of Contents.md`.
 
 ---
 
