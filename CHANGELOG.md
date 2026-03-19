@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [1.1.0] - 2026-03-19
+
+### Added
+- Four new Agentic Workflows to simplify knowledge management and cognitive load:
+  - `/audit_inbox` — Zettelkasten maintenance and raw note structuring.
+  - `/create_project` — Task extraction and project planning from raw notes.
+  - `/distill_learning` — Concept extraction and atomic note generation from complex papers/articles.
+  - `/plan_activity` — Intelligent itinerary generation using relationship/activity data.
+- Updated `Protocol - System Maintenance.md` to include running `/audit_inbox`.
+
 ## [1.0.4] - 2026-03-19
 
 ### Added

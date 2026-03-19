@@ -64,12 +64,19 @@ pip install -r requirements.txt
 
 This repository distinguishes between two types of "cognitive" capabilities:
 
-1. **Agentic Workflows (`.agents/workflows/`)**: These are **Active Procedures** (Recipes) for the AI agent to follow. They define complex, multi-step logic (like creating notes or parsing job descriptions) and are triggered via slash commands.
+1. **Agentic Tools (`.agents/workflows/`)**: These are **Active Procedures** (Recipes) for the AI agent to follow. They define complex, multi-step logic (like creating notes or parsing job descriptions) and are triggered via slash commands.
 2. **Automation Tools (`tools/`)**: These are **Deterministic Capabilities** (Scripts) written in Python. They perform specific, repetitive tasks (like generating MP3s or maintenance) and are triggered manually via the terminal.
 
 ---
 
 ## Tools & Workflows
+
+### Agentic Tools
+- `/add_job_requirement`: Automates extracting skills from a job description (PDF/URL).
+- `/audit_inbox`: Sorts raw notes and bullet points from the Brain Dump & Inbox into the main Zettelkasten structure.
+- `/create_project`: Consolidates rough notes or ideas into a structured project note, complete with extracted tasks and materials.
+- `/distill_learning`: Synthesizes complex technical articles or PDFs into atomic, interlinked notes.
+- `/plan_activity`: Cross-references Activities List, Date Ideas, and People Data notes to generate a structured markdown itinerary.
 
 ### Vault Maintenance Tools
 - `tools/create_folders.py`: Parses the TOC for numbered headers and creates missing folders.
@@ -99,7 +106,7 @@ pip install edge-tts
 ### Vault Maintenance
 Any time `Vault/Table of Contents.md` is modified, the directory structure must be affirmed to match.
 
-- Ensure every top-level H1 section has a matching folder in `Vault/`.
+- Ensure every numbered section has a matching folder in `Vault/`.
 - Handle `.gitkeep` files: add to empty folders, remove from populated ones.
 - Orphaned folders (no matching H1) should be reported, never deleted automatically.
 
