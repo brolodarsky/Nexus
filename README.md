@@ -1,8 +1,10 @@
-# Knowledge Base
+# Brain 2
 
-A personal AI/ML knowledge base built in [Obsidian](https://obsidian.md/), version-controlled with Git, and synced across devices via [Syncthing](https://syncthing.net/).
+This is a personal "second brain"/knowledge management system that stores/uses markdown notes, images, pdfs and other files in a Vault as thoughts & memories.
 
-Notes follow the [Zettelkasten](https://zettelkasten.de/introduction/) methodology — atomic, interlinked, and tagged.
+It's read and tinkered with in Obsidian and tinkered with in agentic IDEs, version-controlled with Git, and synced to mobile via Syncthing. 
+
+Notes follow the Zettelkasten methodology. Vault folder structure is defined in `Table of Contents.md`. Audio files are frequently generated for on the go listening to "thoughts". Several scripts are available to help with "brain automation".
 
 ---
 
@@ -99,9 +101,9 @@ Point Obsidian at the **`Vault/`** subfolder, not the repo root.
 
 ---
 
-## Agent Skills
+## Agent Skills, Workflows & Rules
 
-AI agent skills live in `.agents/skills/`. Each skill is a `SKILL.md` file that instructs the agent how to behave for a specific task:
+AI agent tools & instructions live in `.agents/`. Each skill is a `SKILL.md` file that instructs the agent how to behave for a specific task:
 
 | Skill | Trigger |
 |---|---|

@@ -1,23 +1,23 @@
 # AGENTS.md
 
-> This file tells any AI agent how to work in this repository.
-
----
+> This file tells any AI agent how to work in this repository. The Agentic Constitution.
 
 ## Project Overview
 
-This is a personal "second brain"/knowledge management system that's read and tinkered with in Obsidian and tinkered with in agentic IDEs, version-controlled with Git, and synced to mobile via Syncthing. Notes follow the Zettelkasten methodology. Audio files are frequently generated for on the go listening to "thoughts".
+This is a personal "second brain"/knowledge management system that stores/uses markdown notes, images, pdfs and other files in a Vault as thoughts & memories.
+
+It's read and tinkered with in Obsidian and tinkered with in agentic IDEs, version-controlled with Git, and synced to mobile via Syncthing. 
+
+Notes follow the Zettelkasten methodology. Vault folder structure is defined in `Table of Contents.md`. Audio files are frequently generated for on the go listening to "thoughts". Several scripts are available to help with "brain automation".
 
 **Vault path:** `Vault/` (not the repo root)
-
----
 
 ## Repository Layout
 
 | Path | Purpose |
 |---|---|
-| `Vault/` | All Obsidian content — notes, images, audio |
-| `Vault/Table of Contents.md` | Master index; source of truth for folder structure |
+| `Vault/` | All Obsidian content/second brain "thoughts" — notes, images, audio, pdfs, external links, etc. |
+| `Vault/Table of Contents.md` | Master index; source of truth for folder structure/brain structure |
 | `Vault/Audio/` | Generated MP3s (gitignored, synced via Syncthing) |
 | `scripts/` | Python scripts for brain automation |
 | `requirements.txt` | Python dependencies |
@@ -25,36 +25,21 @@ This is a personal "second brain"/knowledge management system that's read and ti
 | `.agents/skills/` | AI agent skill definitions |
 | `.agents/workflows/` | AI agent workflows |
 
----
-
 ## Skills (Mandatory Behaviours)
 
 These are located in `.agents/skills/` and define rules you **must** follow.
 
 ### `generate_obsidian_note`
 **Trigger:** When asked to create, move, format, or import a note into the Vault
-- Verify folder exists (Affirm Vault Structure first)
-- Follow Zettelkasten formatting: YAML frontmatter, atomic structure, wikilinks, mandatory footer
-- Add the note's `[[wikilink]]` to `Table of Contents.md`
 
 ### `maintain_project_docs`
-**Trigger:** After `pip install`/`pip uninstall`, or after adding/changing/removing a script
-- Regenerate `requirements.txt` via `.venv\Scripts\pip.exe freeze > requirements.txt`
-- Update relevant `## Scripts` section in `README.md`
+**Trigger:** After `pip install`/`pip uninstall`, after adding/changing/removing scripts, agentic workflows, skills or rules.
 
 ### `conventional_commits`
 **Trigger:** On every `git commit`
-- Use conventional commit format: `type(scope): description`
-- **Vault Changes:** If the change affects the `Vault/`, include a reference to the relevant section(s) of `Table of Contents.md` in the description, e.g., `feat(vault): add New Note (ref: TOC 1.2)`
-- Valid types: `feat`, `fix`, `docs`, `chore`, `refactor`, `style`, `test`
-- Update `CHANGELOG.md` for `feat` and `fix` commits
 
 ### `cleanup_orphans`
 **Trigger:** When asked to "clean the vault", "find orphans", or perform Zettelkasten maintenance
-- Scan the vault for broken wiki-links and empty folders
-- Report findings to the user; do not delete or modify files automatically
-
----
 
 ## Workflows
 
@@ -65,8 +50,6 @@ End-to-end workflow for adding a note: affirm structure → create note → upda
 
 ### `add_job_requirement`
 Automates extracting skills from a job description (PDF/URL), appending it to `Employer Skill Requirements.md`, and regenerating the high-level AI Summary.
-
----
 
 ## Rules
 

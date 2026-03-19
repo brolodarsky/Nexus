@@ -1,10 +1,10 @@
 ---
-description: How to generate and format new Obsidian notes
+description: How to generate, move, format, or import Obsidian notes
 ---
 
 # Generating, Moving, or Importing Obsidian Notes
 
-When asked to generate a new note, OR when moving, formatting, or importing an existing markdown file into the user's Obsidian vault (`Vault/`), you must adhere to the following rules to ensure consistency with their existing knowledge base structure.
+When asked to generate, move, format, or import a note/thought into the user's Obsidian vault (`Vault/`), you must adhere to the following rules to ensure consistency with their existing knowledge base structure.
 
 > Before placing any note, verify the target folder exists. If it does not, create it based on the index.
 
@@ -20,20 +20,21 @@ When asked to generate a new note, OR when moving, formatting, or importing an e
 *   *Note:* You are explicitly permitted to invent and use a new prefix if needed, but err on the side of natural names for general concepts.
 *   The final filename must be what is specified in the index wiki-link.
 
-## 3. Formatting and Structure (Zettelkasten Protocol)
+## 3. Formatting and Structure (Modified Zettelkasten Protocol)
 *   **No Redundant H1 Header:** Do NOT use an `#` H1 header that perfectly matches the filename. Obsidian natively displays the filename as the document title, making matching H1s redundant and a waste of vertical space. 
 *   **Mandatory Header Link:** directly below the YAML frontmatter block, you MUST place the Table of Contents return link, followed by a blank line and a horizontal rule, before any body content:
-
+```markdown
     **Back to:** [[Table of Contents]]
 
     ---
+```
 *   **Atomic Notes:** Keep the note focused on a single logical concept. Use H2 (`##`) and H3 (`###`) headers to logically break down the topic.
 *   **Lists:** Use extensive bullet points for readability. The user prefers a highly structured, outline-like format over wall-of-text paragraphs.
 *   **Intra-linking:** Proactively interlink concepts within the body text using Obsidian's `[[Wiki-link]]` syntax.
 ## 4. Frontmatter (YAML)
 *   Every single note MUST begin with a YAML frontmatter block at the very top of the file.
 *   **`aliases:`** Provide 1-3 synonyms or alternative names (e.g., for `Calculus.md`, an alias might be `Derivatives`). This makes linking much easier.
-*   **`tags:`** Provide 2-4 highly relevant, broad category tags (e.g., `#machine-learning`, `#nlp`, `#math`, `#python`).
+*   **`tags:`** Provide 2-4 highly relevant, broad category tags (e.g., `#machine-learning`, `#pkm`, `#math`, `#python`, `#health`, `#work`, `#projects`, `#ideas`, `#archive`).
 *   **`type:`** Categorize the note as one of the following: `concept`, `algorithm`, `tool`, or `overview`.
 *   Example:
     ```yaml
@@ -45,7 +46,7 @@ When asked to generate a new note, OR when moving, formatting, or importing an e
     ```
 
 ## 5. Content Style
-*   Be concise and factual.
+*   Be concise and factual. Use web search when needed to gather information.
 *   Focus on definitions, core concepts, algorithms, and applications.
 *   Include relevant external resources or links to specific learning materials (like Khan Academy, Coursera, books) if applicable to the topic.
 

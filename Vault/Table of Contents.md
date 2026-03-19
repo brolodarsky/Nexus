@@ -13,10 +13,10 @@ _Systemic foundations for mental clarity, resilience, and long-term vision._
 - **[[Shit To Do]]**
 ## 1.2. Personal Knowledge Management (PKM)
 - **Brain 2.0 Meta:** How I tag, link, and maintain this system.
+- **[[Protocol - New Note Template]]**
 - **[[Protocol - System Maintenance]]**
 - **[[Protocol - Laptop App List Update]]**
 - **[[Protocol - Monthly Hard Drive Backup]]**
-- **[[Protocol - New Note Template]]**
 - **Toolbox:** Documentation for the Pixel 8 Pro, Obsidian/Logseq workflows, and local LLM setups.
 ## 1.3. Security & Digital Sovereignty
 - **Security Audit:** Password management strategy, 2FA recovery locations, and encryption protocols.
@@ -27,9 +27,11 @@ _Systemic foundations for mental clarity, resilience, and long-term vision._
 - **Crisis Protocols:** What to do in medical or financial emergencies.
 - **Vehicle Prep:** Emergency kit inventory for the 2005 Honda Pilot.
 # 2. Health
+[Link - Health - Google Drive](https://drive.google.com/drive/u/0/folders/1h_0QTrXWrNzyXtcDiM8bbolaMKAYU8PG)
 ## 2.1. Fitness
 - **Cardiovascular Base:** Running/Cycling logs and endurance strategies.
 - **Strength & Mobility:** Long-term joint health and maintenance.
+	- [Link - Hypertrophy Progress Tracker](https://docs.google.com/spreadsheets/d/1A8ujOP08lH3ZbnAub6XHwtQRpdjNSXEiaQqzJNi45_E/edit?usp=sharing)
 - **Performance Media:** YouTube playlists for cardio motivation/form tutorials.
 ## 2.2. Medical
 - **Health Logs:** History of illnesses, injuries, and surgeries.
@@ -252,7 +254,6 @@ The dominant language for AI/ML and Agentic Workflows.
 - **Explainable AI (XAI):** Interpretability tools (LIME, SHAP).
 - **Safety Guardrails:** Securing agentic workflows and prompt injection defense.
 - **Regulation:** Tracking the EU AI Act and global compliance.
-### 3.2.12. Career
 # 4. Operations & Wealth
 
 _Financial and logistical systems to support a life of freedom._ The "Engine"
@@ -283,6 +284,8 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **[[Project - Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
 - **[[Project - Blower Motor Noise Fix]]:** Step-by-step guide for resolving HVAC fan noise.
 ## 4.3. Career Strategy & Revenue
+[Link - Career - Google Drive](https://drive.google.com/drive/u/0/folders/1uJfG9nFqFD_BgbMY4HJ4GyRtieem-kC8)
+- [[Job Hunt War Room]]
 - **[[Employer Skill Requirements]]:** Aggregated "desired background and skills" from job descriptions and market research.
 - **Professional Portfolio:** Documentation of AI Rating and Billing experience.
 - **The Pivot:** Preparation for AI/Robotics roles (Interview prep, Networking).

@@ -1,5 +1,5 @@
 ---
-description: Enforce Conventional Commits format on every git commit and update CHANGELOG.md
+description: Enforce Conventional Commits format on every git commit
 ---
 
 # Conventional Commits — Mandatory Trigger
@@ -50,29 +50,6 @@ Use a short word describing the area affected:
 2. **No period** at the end of the description.
 3. **Imperative mood** — write "add feature" not "added feature".
 4. **One logical change per commit** — don't bundle unrelated changes.
-5. **Vault References** — when changing the Vault, append `(ref: TOC X.Y)` where `X.Y` is the section number from `Vault/Table of Contents.md`.
-
----
-
-## CHANGELOG.md
-
-After committing with type `feat` or `fix`, **ALWAYS add an entry** to `CHANGELOG.md`.
-
-**CRITICAL RULES FOR CHANGELOG:**
-1. **Read `CHANGELOG.md` first**.
-2. **Same-Day Entries:** If an entry for the current date already exists (e.g., `## [1.0.3] - 2026-03-18`), you MUST append your new changes under that existing date's `### Added` or `### Fixed` headers. Do NOT create duplicate `## [Version] - Date` headers for the same day.
-3. **Version Bumping:** Increment the version number only if it is a new day, OR if you believe the changes constitute a significant overhaul, major feature addition, or breaking change. In those significant cases, bumping the version on the same day is acceptable.
-
-Example of appending to an existing day:
-```markdown
-### Added
-- New Vector Embeddings note in section 5
-- (Your new appended feature goes here)
-```
-
-For `docs`, `chore`, `refactor`, `style`, and `test` commits — no CHANGELOG entry is needed.
-
----
 
 ## Pushing Changes (`git push`)
 

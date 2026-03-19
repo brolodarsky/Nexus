@@ -4,7 +4,6 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
----
 
 ## [1.0.4] - 2026-03-19
 
@@ -15,9 +14,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - "Professional Profile & Economic Strategy" note in section 4.3
 - "Life Chronology" note in section 2.3 linked to Sensitive folder
 - "Neuro-Sensory Profile & Maintenance" note in section 2.3 linked to Sensitive folder
+- Link - Hypertrophy Progress Tracker to Google Sheets in section 2.1
+- Link - Health - Google Drive to section 2
+- Link - Career - Google Drive to section 4.3
 
 ### Changed
 - Updated `conventional_commits` skill and `AGENTS.md` to require TOC section references for Vault changes in git commit messages.
+- Updated `maintain_project_docs` skill and `AGENTS.md` to require README, CHANGELOG and AGENTS.md updates when needed & to maintain README's vault structure diagram
+- "Car Info" note to include VIN, License Plate, Insurance Card, Registration Card, etc
+
+### Removed
+- Section 3.2.12 - "Career" - moved to section 4.3
 
 ## [1.0.3] - 2026-03-18
 

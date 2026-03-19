@@ -1,10 +1,37 @@
 ---
-description: Keep requirements.txt and README.md and CHANGELOG.md in sync whenever changes warrent it.
+description: Keep requirements.txt, README.md, CHANGELOG.md and AGENTS.md in sync whenever project changes warrent it.
 ---
 
-# Maintain Project Docs — Mandatory Trigger
+# Maintain Project Docs
 
-## Trigger 1: After any `pip install` or `pip uninstall`
+## Trigger 1: After adding, removing, or significantly changing project
+
+**ALWAYS check whether `README.md`, `CHANGELOG.md`, `AGENTS.md` and any agentic skills, workflows or rules need updating** when, but not limited to, the following occurs:
+- A `.py` script is added, removed, or significantly changed.
+- An agentic skill or workflow is added, removed, or significantly changed.
+- `/Vault` folder structure is changed.
+- 'Table of Contents.md' structure is significantly changed.
+
+**CRITICAL RULES FOR CHANGELOG:**
+1. **Read `CHANGELOG.md` first**.
+2. **Same-Day Entries:** If an entry for the current date already exists (e.g., `## [1.0.3] - 2026-03-18`), you MUST append your new changes under that existing date's `### Added` or `### Fixed` headers. Do NOT create duplicate `## [Version] - Date` headers for the same day.
+3. **Version Bumping:** Increment the version number only if it is a new day, OR if you believe the changes constitute a significant overhaul, major feature addition, or breaking change. In those significant cases, bumping the version on the same day is acceptable.
+
+Example of appending to an existing day:
+```markdown
+### Added
+- New Vector Embeddings note in section 5
+- (Your new appended feature goes here)
+```
+
+For scripts, update the relevant section in `README.md` under `## Scripts`. Each script entry should include:
+- **What it does** (one sentence)
+- **Usage** — exact command to run
+- **Any flags or config options** the user might need to know
+
+Do not rewrite sections unrelated to the changed script.
+
+## Trigger 2: After any `pip install` or `pip uninstall`
 
 **ALWAYS regenerate `requirements.txt` immediately after installing or removing a Python package.**
 
@@ -12,30 +39,4 @@ Run this from the repo root:
 ```powershell
 .venv\Scripts\pip.exe freeze > requirements.txt
 ```
-
 Then commit `requirements.txt` along with whatever other changes prompted the install.
-
----
-
-## Trigger 2: After adding, removing, or significantly changing project
-
-**ALWAYS check whether `README.md` needs updating** when:
-- A new `.py` script is added to the repo root
-- An existing script's purpose, usage, or flags change
-- A script is deleted
-- An agentic skill or workflow is added, removed, or significantly changed.
-- `/Vault` folder structure is changed.
-
-Update the relevant section in `README.md` under `## Scripts`. Each script entry should include:
-- **What it does** (one sentence)
-- **Usage** — exact command to run
-- **Any flags or config options** the user might need to know
-
-Do not rewrite sections unrelated to the changed script.
-
----
-
-## What Does NOT Need a README Update
-- Internal refactors with no change to user-facing behaviour
-- Bug fixes that don't change how the script is invoked
-- Changes to agent skills or workflows (those are self-documenting)
