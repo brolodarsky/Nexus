@@ -8,20 +8,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.0.4] - 2026-03-19
 
 ### Added
-- "Home Purchase Application" note for parents in section 4.2.2
 - `Vault/Sensitive/` folder for sensitive notes/files gitignored
-- "Breaking Up - Dialectic with LLM" note in section 2.3 linked to Sensitive folder
-- "Professional Profile & Economic Strategy" note in section 4.3
-- "Life Chronology" note in section 2.3 linked to Sensitive folder
-- "Neuro-Sensory Profile & Maintenance" note in section 2.3 linked to Sensitive folder
-- Link - Hypertrophy Progress Tracker to Google Sheets in section 2.1
-- Link - Health - Google Drive to section 2
-- Link - Career - Google Drive to section 4.3
 
 ### Changed
 - Updated `conventional_commits` skill and `AGENTS.md` to require TOC section references for Vault changes in git commit messages.
 - Updated `maintain_project_docs` skill and `AGENTS.md` to require README, CHANGELOG and AGENTS.md updates when needed & to maintain README's vault structure diagram
-- "Car Info" note to include VIN, License Plate, Insurance Card, Registration Card, etc
+- Put secton 3.Forge at the end of the TOC b/c it's so big
 
 ### Removed
 - Section 3.2.12 - "Career" - moved to section 4.3
@@ -29,15 +21,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.0.3] - 2026-03-18
 
 ### Added
-- "Car Info" persistent reference note in Section 4.2.3
-- "Project Ideas" persistent tracking note in Section 4.2.1
-- "Currently Learning" note and tracking in Section 1.1
-- "Maintenance Log" hybrid note linking to Google Sheets in Section 4.2.3
-- "Maintenance Tracker Game Plan" project note outlining the build steps for the automated Google Sheet
 - Note generation rules enforcing prefixed filenames (`Project -`, `Protocol -`, etc), banning redundant H1 headers, and moving the Table of Contents link to the top of the file
 - Rule 10 in `AGENTS.md` enforcing `.gitkeep` files for empty directories.
 - Folder maintenance scripts: `scripts/create_folders.py`, `scripts/check_folders.py`, and `scripts/add_gitkeeps.py`.
-- Employer Skill Requirements tracking note in Section 4.3 with AI Synthesis feature.
 - `/add_job_requirement` workflow for automated PDF/URL job criteria extraction.
 
 ### Changed
@@ -46,17 +32,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Readjusted relative paths in `scripts/generate_podcast.py`.
 
 ## [1.0.2] - 2026-03-17
-
-### Added
-- Blower Motor Noise Fix note for the 2005 Honda Pilot in section 4.2.3
-- Monthly Hard Drive Backup Protocol note in section 1.2
-- Protocol for FreeFileSync batch job backups
-- Movie List note and TOC mapping in Section 5.3
-- Education List note for general studies in Section 5.3
-- Numbered sub-subsections to TOC Section 4.2 (4.2.1. Home Improvement, 4.2.2. Family Care, 4.2.3. Auto)
-- "Exterior Repair Game Plan" note for the 2005 Honda Pilot in section 4.2.3
-- Activities List note and corresponding subfolder structure in Section 5.1
-
 
 ### Changed
 - Updated documentation to use conventional "Affirm Vault Structure" language instead of deprecated sync_vault.py

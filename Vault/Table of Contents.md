@@ -15,8 +15,6 @@ _Systemic foundations for mental clarity, resilience, and long-term vision._
 - **Brain 2.0 Meta:** How I tag, link, and maintain this system.
 - **[[Protocol - New Note Template]]**
 - **[[Protocol - System Maintenance]]**
-- **[[Protocol - Laptop App List Update]]**
-- **[[Protocol - Monthly Hard Drive Backup]]**
 - **Toolbox:** Documentation for the Pixel 8 Pro, Obsidian/Logseq workflows, and local LLM setups.
 ## 1.3. Security & Digital Sovereignty
 - **Security Audit:** Password management strategy, 2FA recovery locations, and encryption protocols.
@@ -51,21 +49,98 @@ _Systemic foundations for mental clarity, resilience, and long-term vision._
 ## 2.4. Nutrition
 - **The Recipe Vault:** High-protein/low-calorie favorites (Crack Slaw, etc.).    
 - **Feeding Reference:** Bookmarks/Videos on nutrition science and food prep.
-# 3. Forge
+
+# 3. Operations & Wealth
+
+_Financial and logistical systems to support a life of freedom._ The "Engine"
+## 3.1. Wealth & Asset Management
+- [[The Bogle Heads]]
+- **Investment Strategy:** Long-term holdings and risk management.
+- **Banking & Credit:** Tracking credit scores, loan statuses, and account maintenance.
+- **[[Recurring Payments]]**: Centralized tracking for subscriptions, memberships, and automated bills.
+- **Insurance:** Policies for health, car (Honda Pilot), and professional liability.
+- **Digital Assets:** Domain portfolio valuation and strategy.
+## 3.2. Infrastructure & Logistics
+- **The Home Lab:** Hardware inventory, server setups, and network security.
+### 3.2.1. Home Improvement & Maintenance
+- **Household Ops:** Recurring tasks for living spaces.
+- **[[Project Ideas]]:** Renovation ideas, furniture builds, and aesthetic upgrades.
+- **Tool Library:** Inventory of physical tools (drills, saws, etc.) and maintenance guides.
+- **Materials & Suppliers:** Local Fort Lee hardware stores and cost tracking.
+### 3.2.2. Family & Care
+- **Family Estate:** Inventory and liquidation strategy for family assets (Gold/Silver).
+- **Home**
+	- [[Parents Home Purchase Application.pdf|Doc - Parents Home Purchase Application]]
+- **Parental Care:** Health records, medical billing history, and local Fort Lee resources.
+	- [[Plan - Recover & Transition for MEM Practice]]
+### 3.2.3. Auto
+- **[[Car Info]]:** Persistent vehicle specifications and details.
+- **[[Maintenance Log]]:** Service history and recurring tasks for the Pilot.
+- **[[Project - Maintenance Tracker Game Plan]]:** Project outline for building an automated Google Sheet tracker.
+- **[[Project - Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
+- **[[Project - Blower Motor Noise Fix]]:** Step-by-step guide for resolving HVAC fan noise.
+## 3.3. Career Strategy & Revenue
+[Link - Career - Google Drive](https://drive.google.com/drive/u/0/folders/1uJfG9nFqFD_BgbMY4HJ4GyRtieem-kC8)
+- [[Job Hunt War Room]]
+- **[[Employer Skill Requirements]]:** Aggregated "desired background and skills" from job descriptions and market research.
+- **Professional Portfolio:** Documentation of AI Rating and Billing experience.
+- **The Pivot:** Preparation for AI/Robotics roles (Interview prep, Networking).
+- **Resume & Artifacts:** Version control for your professional bio and CV.
+- **Professional CRM:** Tracking contacts, mentors, and recruiters in the AI/Robotics industry.
+# 4. Playground
+_Dedicated space for exploration, relationships, and pure interest._ Connection & Joy
+## 4.1. Social Life & Community
+- **Family Data**
+- **"People Data":** Things people tell me—birthdays, preferences, and important context.
+- **Gift Ideas:** Running list of potential gifts for friends and family.
+- **Social Club:** Event planning and community building.
+- **[[Activities List]]**: Hobbies, sports, or experiences I want to try.
+- **Adventure Log:** Places to visit.    
+## 4.2. Romance & Partnership
+- **Values Alignment:** What am I looking for in a partner?
+- **Relationship Maintenance:** Strategies for connection and conflict resolution.
+- **Date Ideas:** Local & travel-based.
+## 4.3. Culture & Inspiration
+- **Media Vault:** Analysis of _The Sopranos_, film, and literature.
+- **Music**
+- **Reading List:** Books I want to read vs. books finished.
+- **[[Education List]]:** Curated paths for World History, Philosophy, and Natural Sciences.
+- **[[Movie List]]:** Movies I want to watch vs. movies watched.
+- **Writing**
+## 4.4. Creativity
+- [[Jokes]]
+# 5. Capture & Archive
+_High-frequency tracking and unsorted information storage. The Memory Bank_
+## 5.1. Brain Dump & Inbox
+- **[[Quick Capture]]:** Temporary scratchpad for thoughts to be sorted later.
+- **Memories Log:** Significant life events, funny moments, and personal milestones.
+- **The Trophy Case:** Screenshots of wins, kind words from others, and completed major projects.
+## 5.2. The Content Log (General)
+- **The YouTube "Everything Else" List:** Funny videos, travel vlogs, and miscellaneous likes.
+- **Article & Web Archive:** Random interesting links that don't fit a specific category yet.
+## 5.3. Digital Inventory
+- **[[Protocol - Monthly Hard Drive Backup]]**
+- **App Audit:** Current apps installed on devices.
+	- Pixel 8 Pro
+	- [[Laptop App List]].
+	- - **[[Protocol - Laptop App List Update]]**
+- **Software Subscriptions:** (See [[Recurring Payments]])
+- **Hardware Inventory:** Serial numbers and warranty info.
+# 6. Forge
 Technical Mastery
-## 3.1. Projects 
+## 6.1. Projects 
 The Lab
 - **[[Project Maturity Checklist]]:** Standardized checklist for enterprise-grade applications.
 - [Brain 2](https://github.com/brolodarsky/Brain2)
 - **[Project Feeder](https://github.com/brolodarsky/Feeder):** Python logic, UI/UX, and database development.
 - **[Project MEM Billing](<file:///C:\Users\Willi\Documents\Projects\MEMBilling>):** Billing Automation. Scripts for LCSW medical billing efficiency.
 - **Project - Domain Portfolio:** Management and monetization of SiliSlick.com and others.
-### 3.1.2. Script Attic
+### 6.1.2. Script Attic
 - Inactive tools, experiments, and one-off Python scripts.
-## 3.2. Library & Learning
+## 6.2. Library & Learning
 - **Technical Archive:** Engineering-specific YouTube tutorials, GitHub repos, and research papers.
 - **[[AI Agents]] | LLMs | Vector Search | Robotics:** (Original technical deep-dives).
-### 3.2.1. Foundational Mathematics & Statistics
+### 6.2.1. Foundational Mathematics & Statistics
 [LibreTexts Mathematics](https://math.libretexts.org/)
 #### Linear Algebra
 ##### Core Concepts:
@@ -109,7 +184,7 @@ Resources:
 - [Gradient Descent](https://www.youtube.com/watch?v=IHZwWFHWa-w) (StatQuest) and its variants (SGD, Adam, etc.)
 - Loss functions, cost functions
 - Convex optimization
-### 3.2.2. Programming & Software Engineering
+### 6.2.2. Programming & Software Engineering
 #### Core Programming Languages
 ##### [[Python]]
 The dominant language for AI/ML and Agentic Workflows.
@@ -137,7 +212,7 @@ The dominant language for AI/ML and Agentic Workflows.
 - Testing: `pytest`, mocking API calls (crucial for testing LLM outputs).
 - API Design: RESTful principles, GraphQL, OpenAPI/Swagger specifications (how LLMs read APIs).
 
-### 3.2.3. Machine Learning Fundamentals
+### 6.2.3. Machine Learning Fundamentals
 [Machine Learning Glossary]([Supervised Learning](https://developers.google.com/machine-learning/glossary#supervised-learning))
 #### Types of Learning
 - [[Supervised Learning]]: Learning from labeled data (Classification & Regression).
@@ -155,7 +230,7 @@ The dominant language for AI/ML and Agentic Workflows.
 - Tree-Based Models: Decision Trees, Random Forests, Gradient Boosting (XGBoost).
 - SVMs, K-Nearest Neighbors (KNN).
 
-### 3.2.4. Deep Learning (DL)
+### 6.2.4. Deep Learning (DL)
 #### Neural Network Fundamentals
 - Neurons, Layers, Activation Functions (Sigmoid, ReLU, GELU).
 - Forward Propagation & Backpropagation.
@@ -172,7 +247,7 @@ The dominant language for AI/ML and Agentic Workflows.
 - **Diffusion Models:** Image and video generation (Stable Diffusion, Midjourney, Sora).
 - **Multi-Modal Models:** Vision-Language Models (VLMs) like GPT-4o, Claude 3.5 Sonnet.
 
-### 3.2.5. Natural Language Processing (NLP) & Vector Search
+### 6.2.5. Natural Language Processing (NLP) & Vector Search
 #### Core NLP & Embeddings
 - Text Representation: Word2Vec, Contextual Embeddings.
 - Vector Embeddings: Dense representations of text.
@@ -185,7 +260,7 @@ The dominant language for AI/ML and Agentic Workflows.
   - Advanced RAG: Semantic routing, query rewriting, re-ranking (Cohere).
 - Fine-Tuning: LoRA, QLoRA, Parameter-Efficient Fine-Tuning (PEFT).
 
-### 3.2.6. Intelligent Agents & Autonomy
+### 6.2.6. Intelligent Agents & Autonomy
 #### [[AI Agents]]
 ##### Modern LLM-Based Agents
 - Core Architectures: ReAct (Reason + Act), Plan-and-Solve, Reflexion, Chain of Thought (CoT).
@@ -215,7 +290,7 @@ The dominant language for AI/ML and Agentic Workflows.
 - Benchmarking: SWE-bench (coding), WebArena (browser use).
 - Preventing prompt injection and unauthorized actions.
 
-### 3.2.7. Data Processing, Engineering & MLOps
+### 6.2.7. Data Processing, Engineering & MLOps
 #### Data Collection & Pipelines
 - Web scraping (BeautifulSoup, Scrapy), API ingestion.
 - Data Storage: SQL vs NoSQL, Data Lakes, Data Warehouses.
@@ -226,7 +301,7 @@ The dominant language for AI/ML and Agentic Workflows.
 - Cloud AI: AWS Bedrock, GCP Vertex AI, Azure OpenAI.
 - Monitoring: Tracking token usage, latency, and LLM hallucinations (LangSmith, Helicone).
 
-### 3.2.8. Computer Vision (CV)
+### 6.2.8. Computer Vision (CV)
 #### Core Concepts
 - Image Preprocessing: OpenCV, Filtering, transformations.
 - Object Detection: YOLO, SSD.
@@ -234,14 +309,14 @@ The dominant language for AI/ML and Agentic Workflows.
 - 3D Computer Vision: Point clouds, SLAM (Visual localization).
 - Vision Transformers (ViT) and cross-modal implementations.
 
-### 3.2.9. Reinforcement Learning (RL)
+### 6.2.9. Reinforcement Learning (RL)
 #### Core Concepts
 - Markov Decision Processes (MDPs), value & policy iteration.
 - Algorithms: Q-Learning, Policy Gradients, PPO (Proximal Policy Optimization).
 - Deep Reinforcement Learning (DRL).
 - RLHF (Reinforcement Learning from Human Feedback) & RLAIF (from AI Feedback).
 
-### 3.2.10. Robotics (Hardware & Control Systems)
+### 6.2.10. Robotics (Hardware & Control Systems)
 #### Kinematics, Dynamics & Control
 - Forward/Inverse Kinematics.
 - PID controllers, State-space representation, Model Predictive Control (MPC).
@@ -249,83 +324,8 @@ The dominant language for AI/ML and Agentic Workflows.
 - Cameras, LiDAR, IMUs. Motor controllers.
 - Robot Operating System ([ROS 2](https://docs.ros.org/en/rolling/)). Nodes, Topics, Messages.
 - Simulation: Gazebo, NVIDIA Isaac Sim, MuJoCo.
-### 3.2.11. AI Ethics, Safety & Governance
+### 6.2.11. AI Ethics, Safety & Governance
 
 - **Explainable AI (XAI):** Interpretability tools (LIME, SHAP).
 - **Safety Guardrails:** Securing agentic workflows and prompt injection defense.
 - **Regulation:** Tracking the EU AI Act and global compliance.
-# 4. Operations & Wealth
-
-_Financial and logistical systems to support a life of freedom._ The "Engine"
-## 4.1. Wealth & Asset Management
-- [[The Bogle Heads]]
-- **Investment Strategy:** Long-term holdings and risk management.
-- **Banking & Credit:** Tracking credit scores, loan statuses, and account maintenance.
-- **[[Recurring Payments]]**: Centralized tracking for subscriptions, memberships, and automated bills.
-- **Insurance:** Policies for health, car (Honda Pilot), and professional liability.
-- **Digital Assets:** Domain portfolio valuation and strategy.
-## 4.2. Infrastructure & Logistics
-- **The Home Lab:** Hardware inventory, server setups, and network security.
-### 4.2.1. Home Improvement & Maintenance
-- **Household Ops:** Recurring tasks for living spaces.
-- **[[Project Ideas]]:** Renovation ideas, furniture builds, and aesthetic upgrades.
-- **Tool Library:** Inventory of physical tools (drills, saws, etc.) and maintenance guides.
-- **Materials & Suppliers:** Local Fort Lee hardware stores and cost tracking.
-### 4.2.2. Family & Care
-- **Family Estate:** Inventory and liquidation strategy for family assets (Gold/Silver).
-- **Home**
-	- [[Parents Home Purchase Application.pdf|Doc - Parents Home Purchase Application]]
-- **Parental Care:** Health records, medical billing history, and local Fort Lee resources.
-	- [[Plan - Recover & Transition for MEM Practice]]
-### 4.2.3. Auto
-- **[[Car Info]]:** Persistent vehicle specifications and details.
-- **[[Maintenance Log]]:** Service history and recurring tasks for the Pilot.
-- **[[Project - Maintenance Tracker Game Plan]]:** Project outline for building an automated Google Sheet tracker.
-- **[[Project - Exterior Repair Game Plan]]:** Repair strategy for the driver-side rear quarter panel.
-- **[[Project - Blower Motor Noise Fix]]:** Step-by-step guide for resolving HVAC fan noise.
-## 4.3. Career Strategy & Revenue
-[Link - Career - Google Drive](https://drive.google.com/drive/u/0/folders/1uJfG9nFqFD_BgbMY4HJ4GyRtieem-kC8)
-- [[Job Hunt War Room]]
-- **[[Employer Skill Requirements]]:** Aggregated "desired background and skills" from job descriptions and market research.
-- **Professional Portfolio:** Documentation of AI Rating and Billing experience.
-- **The Pivot:** Preparation for AI/Robotics roles (Interview prep, Networking).
-- **Resume & Artifacts:** Version control for your professional bio and CV.
-- **Professional CRM:** Tracking contacts, mentors, and recruiters in the AI/Robotics industry.
-# 5. Playground
-_Dedicated space for exploration, relationships, and pure interest._ Connection & Joy
-## 5.1. Social Life & Community
-- **Family Data**
-- **"People Data":** Things people tell me—birthdays, preferences, and important context.
-- **Gift Ideas:** Running list of potential gifts for friends and family.
-- **Social Club:** Event planning and community building.
-- **[[Activities List]]**: Hobbies, sports, or experiences I want to try.
-- **Adventure Log:** Places to visit.    
-## 5.2. Romance & Partnership
-- **Values Alignment:** What am I looking for in a partner?
-- **Relationship Maintenance:** Strategies for connection and conflict resolution.
-- **Date Ideas:** Local & travel-based.
-## 5.3. Culture & Inspiration
-- **Media Vault:** Analysis of _The Sopranos_, film, and literature.
-- **Music**
-- **Reading List:** Books I want to read vs. books finished.
-- **[[Education List]]:** Curated paths for World History, Philosophy, and Natural Sciences.
-- **[[Movie List]]:** Movies I want to watch vs. movies watched.
-- **Writing**
-## 5.4. Creativity
-- [[Jokes]]
-# 6. Capture & Archive
-_High-frequency tracking and unsorted information storage. The Memory Bank_
-## 6.1. Brain Dump & Inbox
-- **[[Quick Capture]]:** Temporary scratchpad for thoughts to be sorted later.
-- **Memories Log:** Significant life events, funny moments, and personal milestones.
-- **The Trophy Case:** Screenshots of wins, kind words from others, and completed major projects.
-## 6.2. The Content Log (General)
-- **The YouTube "Everything Else" List:** Funny videos, travel vlogs, and miscellaneous likes.
-- **Article & Web Archive:** Random interesting links that don't fit a specific category yet.
-## 6.3. Digital Inventory
-- **App Audit:** Current apps installed on devices.
-	- Pixel 8 Pro
-	- [[Laptop App List]].
-- **Software Subscriptions:** (See [[Recurring Payments]])
-
-- **Hardware Inventory:** Serial numbers and warranty info.

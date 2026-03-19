@@ -16,27 +16,26 @@ Knowledge Base/
 │   ├── skills/
 │   │   ├── conventional_commits/     # Commit message format rules
 │   │   ├── generate_obsidian_note/   # How to create new notes
-│   │   ├── maintain_project_docs/    # Keep README & requirements.txt in sync
+│   │   ├── maintain_project_docs/    # Keep README & requirements.
 │   └── workflows/
-│       ├── add_job_requirement.md    # Job requirement extraction workflow
-│       └── create_new_note.md        # End-to-end note creation flow
+│       ├── add_job_requirement.md    # Job requirement extraction
+│       └── create_new_note.md        # End-to-end note creation 
 ├── .venv/                      # Python virtual environment (not committed)
-├── Vault/                      # All Obsidian content lives here
-│   ├── .obsidian/
-│   ├── .stfolder/
+├── Vault/                      # All Brain content lives here
+│   ├── .obsidian/              # Obsidian settings
+│   ├── .stfolder/              # Syncthing folder
 │   ├── 1. The Core/
 │   ├── 2. Health/
-│   ├── 3. Forge/
-│   ├── 4. Operations & Wealth/
-│   ├── 5. Playground/
-│   ├── 6. Capture & Archive/
-│   ├── Audio/
-│   ├── BatchRun_CDrive_to_MainBackup.ffs_batch
+│   ├── 3. Operations & Wealth/
+│   ├── 4. Playground/
+│   ├── 5. Capture & Archive/
+│   ├── 6. Forge/
+│   ├── Audio/                  # Gitignored
+│   ├── Sensitive/              # Gitignored
 │   └── Table of Contents.md   # Master index — source of truth for structure
-├── AGENTS.md                   # AI agent constitution for the repo
+├── AGENTS.md                   # AI agent constitution
 ├── CHANGELOG.md                # Running log of notable changes
 ├── scripts/                    # Python automation scripts
-│   └── generate_podcast.py     # Converts notes to MP3 audiobooks
 ├── requirements.txt            # Pinned Python dependencies
 └── .gitignore
 ```
