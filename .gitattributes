@@ -1,0 +1,5 @@
+# Encrypt everything in the Vault (contents only, file/folder names remain visible)
+Vault/** filter=git-crypt diff=git-crypt
+
+# Ensure .gitkeep files (used for folder structure) are never encrypted
+Vault/**/.gitkeep -filter=git-crypt -diff=git-crypt
