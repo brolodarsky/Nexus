@@ -10,7 +10,7 @@ Vault/Audio/
 Vault/Audio/podcast_history.json
 
 # Sensitive documents (sync via Syncthing only)
-Vault/Sensitive/
+# (Depcreated: Git-crypt handles sensitivity now)
 
 # Secrets and Credentials
 .env

@@ -35,7 +35,6 @@ Knowledge Base/
 │   ├── 5. Capture & Archive/
 │   ├── 6. Forge/
 │   ├── Audio/                  # Gitignored
-│   ├── Sensitive/              # Gitignored
 │   └── Table of Contents.md   # Master index — source of truth for structure
 ├── AGENTS.md                   # AI agent constitution
 ├── CHANGELOG.md                # Running log of notable changes
