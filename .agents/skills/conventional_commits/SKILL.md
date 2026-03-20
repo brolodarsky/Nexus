@@ -16,7 +16,7 @@ type(scope): description
 
 **Examples:**
 ```
-feat(vault): add Vector Embeddings note (ref: TOC 3.2)
+feat(vault): add new folder structure (ref: TOC 3.2)
 fix(podcast): resolve venv path on Windows
 docs(readme): add setup instructions
 chore(gitignore): exclude Audio folder
@@ -29,7 +29,7 @@ refactor(sync): extract H1 parser into helper
 
 | Type | When to use |
 |---|---|
-| `feat` | New feature, note, script, or skill |
+| `feat` | New feature, script, skill, or Vault structure update |
 | `fix` | Bug fix or broken link repair |
 | `docs` | README, CHANGELOG, comments-only changes |
 | `chore` | Maintenance — .gitignore, dependencies, cleanup |
@@ -40,7 +40,7 @@ refactor(sync): extract H1 parser into helper
 ## Scope (optional but encouraged)
 
 Use a short word describing the area affected:
-- `vault`, `podcast`, `sync`, `readme`, `skill`, `workflow`, `gitignore`, `deps`
+- `vault` (structure only), `podcast`, `sync`, `readme`, `skill`, `workflow`, `gitignore`, `deps`
 
 ---
 
@@ -54,7 +54,7 @@ Use a short word describing the area affected:
 ## Batching Commits (`git commit`)
 
 **Do NOT run `git commit` after every single minor file edit or individual tool execution.**
-Batch logical changes into single commits. For example, if adding a job requirement involves 3 file edits (note, summary, changelog), commit all 3 together at the end of the task.
+Batch logical changes into single commits. For example, if adding a new tool involves 3 file edits (script, skill, changelog), commit all 3 together at the end of the task. Do **not** commit changes to individual notes or "thoughts".
 
 ## Pushing Changes (`git push`)
 

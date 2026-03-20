@@ -11,6 +11,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Implemented `git-crypt` for transparent, local-only encryption of all Vault contents (`Vault/**`) before syncing to GitHub.
 - Added strict ignore rules to `.gitignore` to prevent committing the `git-crypt` master key and other sensitive credential files.
 - Updated `AGENTS.md` and `conventional_commits` skill to explicitly enforce batching of commits and pushes (forbid micro-commits).
+- Added Production Engineering - Meta job listing to `Employer Skill Requirements.md` and refreshed the AI summary.
+- Transitioned to an "Engine-only" Git policy: AI agents will no longer commit individual notes or "thoughts" in the `Vault/` directory, focusing Git operations on tools, skills, workflows, and project structure.
 
 ## [1.1.0] - 2026-03-19
 
