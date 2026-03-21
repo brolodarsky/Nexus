@@ -52,9 +52,9 @@ Use a short word describing the area affected:
 4. **One logical change per commit** — don't bundle unrelated changes.
 
 ## Batching Commits (`git commit`)
-
-**Do NOT run `git commit` after every single minor file edit or individual tool execution.**
-Batch logical changes into single commits. For example, if adding a new tool involves 3 file edits (script, skill, changelog), commit all 3 together at the end of the task. Do **not** commit changes to individual notes or "thoughts".
+ 
+ **Do NOT run `git commit` after every single minor file edit or individual tool execution.**
+ Batch logical changes into single commits. For example, if adding a new tool involves 3 file edits (script, skill, changelog), commit all 3 together at the end of the task. For individual notes, only commit when they represent a completed task or significant milestone; avoid micro-commits for "thoughts".
 
 ## Pushing Changes (`git push`)
 

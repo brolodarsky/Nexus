@@ -15,10 +15,11 @@ When asked to "review this job", "add this job requirement", when explicitly inv
    - Read the provided source.
    - Extract the following fields: Role Name, Company, Core Requirements, Preferred Background, and any compensation/bonus information.
 
+
 2. **Format the Entry:**
    - Format the extracted information into a markdown section:
      ```markdown
-     ## [Role Name] - [Company]
+     ## [[Role Name] - [Company]] <- ADD INTERNAL WIKILINK TO JOB POSTING FILE AS HEADER
      - **Source:** [Link or File Reference]
      - **Date Added:** [Current Date]
      - **Desired Background and Skills:**

@@ -14,10 +14,10 @@ async function renderResume() {
     }
 
     const markdownContent = fs.readFileSync(resumePath, 'utf-8');
-    
+
     // Remove YAML frontmatter
     const contentWithoutFrontmatter = markdownContent.replace(/^---[\s\S]*?---\n/, '');
-    
+
     const htmlContent = marked.parse(contentWithoutFrontmatter);
 
     const fullHtml = `
@@ -41,12 +41,11 @@ async function renderResume() {
     const browser = await chromium.launch();
     const page = await browser.newPage();
     await page.setContent(fullHtml, { waitUntil: 'networkidle' });
-    
+
     await page.pdf({
         path: outputPath,
         format: 'Letter',
         printBackground: true,
-        margin: { top: '0.5in', bottom: '0.5in', left: '0.5in', right: '0.5in' }
     });
 
     await browser.close();

@@ -5,13 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [1.2.1] - 2026-03-21
+## [1.3.0] - 2026-03-21
 
 ### Added
 - Implemented `resume-engine` tool for generating professional PDF resumes from Markdown sources.
 - Added `tools/resume_engine/` directory with `render.js` script and `style.css`.
 - Updated `AGENTS.md` to include `resume-engine` as a deterministic capability for generating resumes.
 - Added `tools/resume_engine/package-lock.json` for dependency management.
+
+### Changed
+- Deepened `README.md` repository structure to show one more header level (H2 equivalent) for all primary Vault sections.
+- Added concise descriptive comments to all Vault and Agent Workflow files in the `README.md` directory tree for improved clarity.
 
 ## [1.2.0] - 2026-03-20
 

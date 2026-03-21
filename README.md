@@ -19,23 +19,47 @@ Brain 2/
 │   │   ├── generate_obsidian_note/   # How to create new notes
 │   │   ├── maintain_project_docs/    # Keep README & requirements.
 │   └── workflows/              # Structured procedures (slash commands)
-│       ├── add_job_requirement.md
-│       ├── audit_inbox.md
-│       ├── create_new_note.md
-│       ├── create_project.md
-│       ├── distill_learning.md
-│       ├── plan_activity.md
-│       └── render_resume.md
+│       ├── add_job_requirement.md    # Job criteria extraction
+│       ├── audit_inbox.md            # Zettelkasten inbox sorting
+│       ├── create_new_note.md        # Obsidian note creation
+│       ├── create_project.md         # Project planning/tasks
+│       ├── distill_learning.md       # Atomic note synthesis
+│       ├── plan_activity.md          # Itinerary generation
+│       └── render_resume.md          # PDF resume rendering
 ├── .venv/                      # Python virtual environment (not committed)
 ├── Vault/                      # All Brain content lives here
 │   ├── .obsidian/              # Obsidian settings
 │   ├── .stfolder/              # Syncthing folder
 │   ├── 1. The Core/                # Identity, governance, and foundations
+│   │   ├── 1.1. Philosophy & Personal North Star/    # Values, principles, and long-term vision
+│   │   ├── 1.2. Personal Knowledge Management (PKM)/ # Brain 2.0 meta and maintenance protocols
+│   │   ├── 1.3. Security & Digital Sovereignty/      # Encryption, password strategy, and inheritance
+│   │   └── 1.4. Emergency & Survival/                # Crisis protocols and emergency contacts
 │   ├── 2. Health/                  # Physical and mental well-being
+│   │   ├── 2.1. Fitness/                             # Training logs and performance tracking
+│   │   ├── 2.2. Medical/                             # Health history, lab work, and sleep hygiene
+│   │   ├── 2.3. Psych/                               # Cognitive load and mindfulness rituals
+│   │   └── 2.4. Nutrition/                           # Recipe vault and nutrition science
 │   ├── 3. Operations & Wealth/     # Financial and logistical systems
+│   │   ├── 3.1. Wealth & Asset Management/           # Investment strategy and recurring payments
+│   │   ├── 3.2. Infrastructure & Logistics/          # Home lab, family estate, and auto maintenance
+│   │   └── 3.3. Career Strategy & Revenue/           # Job hunt, professional profile, and portfolio
 │   ├── 4. Playground/              # Social, culture, and creativity
+│   │   ├── 4.1. Social Life & Community/             # People data, social club, and adventures
+│   │   ├── 4.2. Romance & Partnership/               # Relationship maintenance and date ideas
+│   │   ├── 4.3. Culture & Inspiration/               # Media archive, reading list, and education
+│   │   └── 4.4. Creativity/                          # Writing, jokes, and creative exploration
 │   ├── 5. Capture & Archive/       # Inbox and memory bank
+│   │   ├── 5.1. Brain Dump & Inbox/                  # Quick capture and significant milestones
+│   │   ├── 5.2. The Content Log (General)/           # Web archive and YouTube history
+│   │   └── 5.3. Digital Inventory/                    # Hardware/software audits and backups
 │   ├── 6. Forge/                   # Technical projects and learning
+│   │   ├── 6.1. Projects/                            # Active development "The Lab"
+│   │   │   ├── 6.1.1. Flagship Applications/         # Primary high-importance projects (Feeder, etc.)
+│   │   │   ├── 6.1.2. Agentic R&D/                   # Agentic skills, workshops, and tinkering
+│   │   │   ├── 6.1.3. Maintenance & Assets/          # Stable portfolios and meta-checklists
+│   │   │   └── 6.1.4. Script Attic/                  # Inactive tools and experiments
+│   │   └── 6.2. Library & Learning/                  # Technical archive and deep-dives
 │   ├── Audio/                  # Gitignored
 │   └── Table of Contents.md   # Master index — source of truth for structure
 ├── AGENTS.md                   # AI agent constitution
