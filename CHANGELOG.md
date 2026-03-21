@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [1.2.1] - 2026-03-21
+
+### Added
+- Implemented `resume-engine` tool for generating professional PDF resumes from Markdown sources.
+- Added `tools/resume_engine/` directory with `render.js` script and `style.css`.
+- Updated `AGENTS.md` to include `resume-engine` as a deterministic capability for generating resumes.
+- Added `tools/resume_engine/package-lock.json` for dependency management.
+
 ## [1.2.0] - 2026-03-20
 
 ### Added
@@ -13,6 +21,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Updated `AGENTS.md` and `conventional_commits` skill to explicitly enforce batching of commits and pushes (forbid micro-commits).
 - Added Production Engineering - Meta job listing to `Employer Skill Requirements.md` and refreshed the AI summary.
 - Transitioned to an "Engine-only" Git policy: AI agents will no longer commit individual notes or "thoughts" in the `Vault/` directory, focusing Git operations on tools, skills, workflows, and project structure.
+- Implemented **Resume Engine**: A Markdown-to-PDF rendering system that converts `Resume - Master.md` into a professionally styled PDF using Playwright and custom CSS. Added `/render_resume` workflow.
 
 ## [1.1.0] - 2026-03-19
 

@@ -1,0 +1,10 @@
+{
+  "name": "resume-engine",
+  "version": "1.0.0",
+  "description": "Premium Resume Renderer",
+  "main": "render.js",
+  "dependencies": {
+    "playwright": "^1.40.0",
+    "marked": "^11.0.0"
+  }
+}

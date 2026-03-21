@@ -1,0 +1,103 @@
+:root {
+    --primary: #2c3e50;
+    --accent: #3498db;
+    --text: #333;
+    --light-text: #7f8c8d;
+    --bg: #fff;
+    --sidebar-bg: #f8f9fa;
+}
+
+@page {
+    margin: 0.5in;
+    size: letter;
+}
+
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    color: var(--text);
+    line-height: 1.5;
+    background: var(--bg);
+    margin: 0;
+    padding: 0;
+}
+
+h1 {
+    font-size: 2.5rem;
+    color: var(--primary);
+    margin-bottom: 0.2rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+h2 {
+    font-size: 1.25rem;
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 0.3rem;
+    margin-top: 1.5rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.2rem;
+    color: var(--primary);
+}
+
+p, ul {
+    margin-top: 0.3rem;
+    margin-bottom: 0.8rem;
+}
+
+ul {
+    padding-left: 1.2rem;
+}
+
+li {
+    margin-bottom: 0.4rem;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.contact-info {
+    font-size: 0.9rem;
+    color: var(--light-text);
+}
+
+.date-location {
+    float: right;
+    font-size: 0.9rem;
+    color: var(--light-text);
+    font-style: italic;
+}
+
+.job-title {
+    font-style: italic;
+    color: var(--light-text);
+    margin-bottom: 0.5rem;
+}
+
+.skills-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.skill-tag {
+    background: var(--sidebar-bg);
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    border: 1px solid #ddd;
+}
+
+@media print {
+    body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}
