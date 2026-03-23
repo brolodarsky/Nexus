@@ -46,3 +46,19 @@ h5 {
 .cm-header {
     font-weight: 700 !important;
 }
+
+/* For the Editor (Live Preview & Source Mode) */
+.markdown-source-view.mod-cm6 .cm-line {
+    line-height: 1.6 !important;
+}
+
+/* For Reading View */
+p {
+    line-height: 1.8 !important;
+}
+
+/* Increase line height for lists */
+ul,
+ol {
+    line-height: 1.8 !important;
+}

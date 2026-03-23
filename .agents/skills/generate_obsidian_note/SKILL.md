@@ -15,7 +15,7 @@ When asked to generate, move, format, or import a note/thought into the user's O
 *   If a link exists in an index file (e.g., `[[Supervised Learning]]`), create the new file in the folder that corresponds to that header.
 
 ## 2. File Naming & Taxonomy
-*   **Selective Prefixes:** Use taxonomic prefixes *only* when a note is a specific instance of a broader category (e.g., `Project - Blower Motor Noise Fix`, `Protocol - Monthly Backup`, `Log - Maintenance`).
+*   **Selective Prefixes:** Use taxonomic prefixes *only* when a note is a specific instance of a broader category (e.g., `Project - Blower Motor Noise Fix`, `Protocol - Monthly Backup`, `Log - Maintenance`, `Workshop - Tailoring Resumes`).
 *   **Natural Names:** Broad concepts, standalone entities, or general reference lists should keep their natural names without prefixes (e.g., `Linear Algebra`, `Python`, `Car Info`, `Project Ideas`).
 *   *Note:* You are explicitly permitted to invent and use a new prefix if needed, but err on the side of natural names for general concepts.
 *   The final filename must be what is specified in the index wiki-link.
@@ -28,7 +28,7 @@ When asked to generate, move, format, or import a note/thought into the user's O
 
     ---
 ```
-*   **Atomic Notes:** Keep the note focused on a single logical concept. Use H2 (`##`) and H3 (`###`) headers to logically break down the topic.
+*   **Atomic Notes:** Keep the note focused on a single logical concept. Use H1 (`#`) and H2 (`##`) and so on headers to logically break down the topic.
 *   **Lists:** Use extensive bullet points for readability. The user prefers a highly structured, outline-like format over wall-of-text paragraphs.
 *   **Intra-linking:** Proactively interlink concepts within the body text using Obsidian's `[[Wiki-link]]` syntax.
 ## 4. Frontmatter (YAML)

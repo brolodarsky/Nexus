@@ -73,11 +73,11 @@ Renders the Master Markdown Resume into a premium, professionally-styled PDF usi
 
 1. **Never delete user content** without explicit confirmation.
 2. **Always use the `.venv`** — resolve Python tools from `.venv/Scripts/`, not system PATH. Never install dependencies globally. Always use `.venv\Scripts\pip.exe` for installations. If a new requirement is added, immediately trigger the `maintain_project_docs` skill.
-3. **Commit messages must follow Conventional Commits** — see `conventional_commits` skill. **Git is primarily for the Engine and Vault structure**: prioritize committing changes to tools, skills, workflows, project docs, and Vault structure (e.g., `Table of Contents.md`, `.gitkeep`). Individual notes are encrypted and safe to commit, but avoid micro-commits for note edits, additions or subtractions; focus on logical batching.
-4. **Update `CHANGELOG.md` for all `feat` and `fix` commits, or when you think appropriate. If there is a significant change, update the version number. If there is a minor change, update the patch number. If there is a documentation change, update the patch number. If there's an existing version on the same day, only create a new version if the change is significant, otherwise update the existing version.**
-5. **The TOC is the single source of truth** for Vault folder structure and the concept of this entire project.
-6. **All notes must have YAML frontmatter** with `aliases`, `tags`, and `type` fields.
-7. **Audio files are gitignored** — they sync via Syncthing, not Git.
-8. **Batch your commits and pushes.** Group related changes into single logical blocks. Prioritize "Engine" changes (tools, skills, structure). Only commit notes when they are part of a larger task or represent a significant milestone. No micro-commits.
-9. **Keep AGENTS.md updated.** If you create, modify, or delete a skill or workflow, you must update the `## Skills` or `## Workflows` section in this file to reflect the change.
+3. **Commit messages must follow Conventional Commits** — see `conventional_commits` skill. 
+4. **Git is solely for the Engine and Vault structure**: prioritize committing changes to tools, skills, workflows, project docs, and Vault structure (e.g., new sections in `Table of Contents.md`, addition to `.gitkeep`). Individual notes/thoguhts are encrypted and backed up locally, so avoid micro-commits for note edits, additions or subtractions.
+5. **Update `CHANGELOG.md` for all `feat` and `fix` commits, or when you think appropriate. If there is a significant change, update the version number. If there is a minor change, update the patch number. If there is a documentation change, update the patch number. If there's an existing version on the same day, only create a new version if the change is significant, otherwise update the existing version.**
+6. **The TOC is the single source of truth** for Vault folder structure and the concept of this entire project.
+7. **All notes must have YAML frontmatter** with `aliases`, `tags`, and `type` fields.
+8. **Audio files are gitignored** — they sync via Syncthing, not Git.
+9. **Keep AGENTS.md AND README.md updated.** If you make fundamental changes to the project/brain functionality, update these files to reflect the changes.
 10. **Add `.gitkeep` to empty folders.** Whenever creating a new empty directory in the Vault, always create an empty `.gitkeep` file inside it so it can be tracked by Git.

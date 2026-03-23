@@ -20,7 +20,6 @@ feat(vault): add new folder structure (ref: TOC 3.2)
 fix(podcast): resolve venv path on Windows
 docs(readme): add setup instructions
 chore(gitignore): exclude Audio folder
-refactor(sync): extract H1 parser into helper
 ```
 
 ---

@@ -1,7 +1,6 @@
 ---
 description: End-to-end workflow for creating, moving, formatting, or importing an Obsidian note in the Knowledge Base
 ---
-
 # Create, Move, or Import Note
 
 Use this workflow whenever you need to add, move, format, or import a note into the Knowledge Base.
@@ -15,7 +14,8 @@ If a new H1 section is needed, recommend to user and wait for approval.
 
 3. Confirm the target folder exists. Create it if missing.
 
-4. Apply the `generate_obsidian_note` skill to create the note file with correct YAML frontmatter, structure, and intra-links.
+4. Apply the `generate_obsidian_note` skill to create the note file with correct YAML frontmatter, structure, and intra-links. 
+    - **Intertwined Research:** Proactively include external search links directly in the body text for complex terms or topics that benefit from further reading (e.g., `[Search - [Topic]](https://www.google.com/search?q=[topic])`).
 
 5. Add a `[[Wiki-link]]` to the new note from the appropriate section of `Vault/Table of Contents.md`.
 
