@@ -15,6 +15,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Upgraded `analyze_psych` skill with the same web research step:
   - Open-ended recency queries; vigilance flags for psychedelic-assisted therapy, sleep science, neuroinflammation, gut-brain axis
   - Same evidence quality hierarchy and conflict-surfacing rule
+- Added mandatory **Source Citation** rule (step 7) to both `analyze_health` and `analyze_psych` skills:
+  - Preferred source hierarchy defined per skill (PubMed/NCBI, Cochrane, domain-specific clinical guidelines, Mayo Clinic, Cleveland Clinic, JAMA/NEJM/Lancet, NIH)
+  - Blocklist: wellness blogs, product sites, Reddit, non-peer-reviewed sources
+  - Mandatory inline markdown link format beside each claim
+  - Fallback: cite institution + document name if direct URL unavailable
+  - Links must be written into Vault note updates for persistent reference
 
 ## [1.6.0] - 2026-04-05
 
