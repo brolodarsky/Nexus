@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [1.6.1] - 2026-04-05
+
+### Changed
+- Upgraded `analyze_health` skill with mandatory `search_web` step before forming any diagnostic hypothesis or treatment recommendation:
+  - Open-ended recency queries (no year pinning — uses "latest", "current guidelines" language)
+  - Evidence quality hierarchy: meta-analyses > RCTs > guidelines > case reports
+  - Explicit instruction to surface conflicting evidence rather than defaulting to most recent
+- Upgraded `analyze_psych` skill with the same web research step:
+  - Open-ended recency queries; vigilance flags for psychedelic-assisted therapy, sleep science, neuroinflammation, gut-brain axis
+  - Same evidence quality hierarchy and conflict-surfacing rule
+
 ## [1.6.0] - 2026-04-05
 
 ### Added
