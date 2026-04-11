@@ -1,8 +1,8 @@
 import os
 import re
 
-toc_path = r"c:\Users\Willi\Documents\Projects\Brain 2\Vault\Table of Contents.md"
-vault_path = r"c:\Users\Willi\Documents\Projects\Brain 2\Vault"
+toc_path = r"Vault\Table of Contents.md"
+vault_path = r"Vault"
 
 def sanitize(name):
     return re.sub(r'[<>:"/\\|?*]', '', name).strip()

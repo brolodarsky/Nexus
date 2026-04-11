@@ -6,11 +6,12 @@ description: Act as a specialized doctor and diagnose health issues. Trigger thi
 # Analyze Health Context
 
 ## Mandatory Behavior
-1. **Always Read Context:** Before giving generic medical advice, you must check `Vault/Table of Contents.md` Section 2 ("Health") to locate the user's active Health Notes (e.g., `Health Summary.md`, `Lab Work & Biomarkers`, `Game Plan` notes, etc.).
-2. **Use the `view_file` tool** to read these established files. You must understand the user's chronic baselines before addressing any acute "new" symptoms.
+1. **Identify Patient Context:** The default patient is the primary Brain owner (typically Section 2.2 Medical). If the user mentions someone else (e.g., Mom), or it is ambiguous, explicitly ask "Whose health are we analyzing?". 
+2. **Always Read Context:** Once the patient is identified, check `Vault/Table of Contents.md` Section 2 ("Health") to locate the patient's specific Health Notes (e.g., their `Health Summary.md`, `Lab Work & Biomarkers`, logs, etc.).
+3. **Use the `view_file` tool** to read these established files. You must understand the patient's chronic baselines before addressing any acute "new" symptoms.
 3. **Web Research — Current Science First:** Before formulating hypotheses or treatment suggestions, use the `search_web` tool to verify that your recommendations reflect the latest clinical guidance. Specifically:
    - Search for the most current research on any condition, drug, supplement, or treatment you plan to mention. Do NOT anchor your queries to a specific year — use terms like "latest", "current guidelines", or "recent evidence" so results surface the newest available literature.
-   - Check for updated side effect profiles, contraindications, or drug interactions relevant to the user's known medications and conditions.
+   - Check for updated side effect profiles, contradications, or drug interactions relevant to the user's known medications and conditions.
    - Look up current best-practice guidelines (e.g., from Mayo Clinic, NCBI/PubMed, UpToDate-equivalent sources) for the symptom cluster in question.
    - Prioritize fast-moving areas where the science evolves quickly (e.g., MCAS, UARS, long COVID, histamine intolerance) — the agent's training data may be significantly behind the current clinical consensus.
    - **Synthesize for quality, not just recency.** Newer is not automatically better. Weight evidence by: Systematic reviews & meta-analyses > large RCTs > established clinical guidelines > smaller studies > case reports > expert opinion. A well-powered 2019 RCT outweighs a 2025 case study. When evidence conflicts, surface both and flag the uncertainty rather than defaulting to the most recent.
@@ -23,5 +24,5 @@ description: Act as a specialized doctor and diagnose health issues. Trigger thi
    - **Format:** Inline markdown links directly beside the claim — e.g., `Ipratropium Bromide is FDA-approved for gustatory rhinitis ([NIH](https://pubmed.ncbi.nlm.nih.gov/...)).`
    - **Fallback:** If a direct link isn't available from the search result, cite the institution and document name (e.g., `per AAAAI 2023 Practice Parameters`) so the user can look it up independently.
    - **When updating the Vault:** Include the source link directly in the updated note text so it persists for future reference.
-8. **Update the Vault:** Whenever new health things are learned, edited, fixed, or discovered, you MUST explicitly update `Vault/2. Health/2.2. Medical/Health Summary.md` and/or other relevant documents to maintain a living record of the user's health context.
-
+9. **Update the Vault:** Whenever new health things are learned, edited, fixed, or discovered, you MUST explicitly update the patient's specific summary document (e.g. `Vault/2. Health/2.2. Medical/Health Summary.md` or `Vault/2. Health/2.5. Mom's Health Tracking/Mom's Health Summary.md`) and/or other relevant documents to maintain a living record of the patient's health context.
+9. **Optional Insurance Knowledge Integration:** The user maintains health insurance documentation under Section 2.2 Medical. When formulating a test/treatment strategy or recommending referrals, use your judgment to decide if integrating their insurance coverage parameters (e.g., deductible status, covered benefits, prior authorization needs) is relevant. If the context calls for realistic financial or logistical planning, proactively read those documents to tailor your advice.

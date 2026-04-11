@@ -1,6 +1,6 @@
 ---
 name: maintain_project_docs
-description: Keep README.md, AGENTS.md, CHANGELOG.md, and requirements.txt in sync whenever the project changes. Always use this skill after adding, removing, or modifying any tool, skill, or workflow; after any pip install/uninstall; or after any structural change to the Vault or Table of Contents. If you just changed something meaningful about how the brain works, this skill applies.
+description: Keep README.md, AGENTS.md, CHANGELOG.md, and requirements.txt in sync whenever the project changes. Always use this skill after adding, removing, or modifying any tool, skill, or workflow; after any pip install/uninstall; or after any structural change to the Engine (e.g., new TOC sections, AGENTS.md updates). Individual note additions/moves/links do NOT warrant this skill.
 ---
 
 # Maintain Project Docs
@@ -11,7 +11,7 @@ description: Keep README.md, AGENTS.md, CHANGELOG.md, and requirements.txt in sy
 - A `.py` script is added, removed, or significantly changed.
 - An agentic skill or workflow is added, removed, or significantly changed.
 - `/Vault` folder structure is changed.
-- 'Table of Contents.md' structure is significantly changed.
+- 'Table of Contents.md' high-level structure (H1/H2) is significantly changed. (Routine note links do NOT count).
 
 **CRITICAL RULES FOR CHANGELOG:**
 1. **Read `CHANGELOG.md` first**.

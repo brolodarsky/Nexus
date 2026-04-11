@@ -1,10 +1,10 @@
 ---
-description: Saves raw external content (YouTube videos, articles, podcast summaries, Twitter threads, web pages) as a lightly-structured inbox note in the Content Log. Use this when you want to capture something for later — not process it now. For deep synthesis into atomic notes, use /distill_learning. For original internal notes, use /create_new_note.
+description: Saves raw external content (YouTube videos, articles, Reddit posts, podcast summaries, Twitter threads, web pages) as a lightly-structured inbox note in the Content Log. Use this when you want to capture something for later — not process it now. For deep synthesis into atomic notes, use /distill_learning. For original internal notes, use /create_new_note.
 ---
 
 # Capture Content
 
-Use this workflow whenever the user wants to save raw content (YouTube transcripts, podcast summaries, long articles, Twitter threads, etc) OR point you to a previously manually-created raw note that needs to be "solidified" into the vault's capture structure.
+Use this workflow whenever the user wants to save raw content (YouTube transcripts, podcast summaries, long articles, Reddit posts, Twitter threads, etc) OR point you to a previously manually-created raw note that needs to be "solidified" into the vault's capture structure.
 
 ## Context
 A "Capture" is a raw, lightly-structured note stored in the Content Log. It acts as an inbox for external knowledge before it gets processed and distilled into the Library & Learning section.

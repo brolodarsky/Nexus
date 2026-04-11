@@ -3,7 +3,39 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.7.0] - 2026-04-11
+
+### Added
+- Created new educational sections in **6.2 Library & Learning**:
+  - **6.2.3. Algorithms & Data Structures**: Core CS fundamentals for technical depth and interview preparation.
+  - **6.2.4. System Design & Distributed Systems**: Architectural principles for scaling complex systems.
+  - **6.2.11. Knowledge Graphs & GraphRAG**: Integrated graph theory and applied graph-based retrieval into the NLP and Math domains.
+- Added boilerplate study frameworks for all new sections to facilitate future knowledge synthesis.
+- Added `.gitkeep` to new empty folders to ensure structural tracking in Git.
+
+### Changed
+- Re-architected Section **6.2 Library & Learning** for optimal pedagogical flow:
+  - Moved **Data Engineering (6.2.5)** before Machine Learning to treat it as a prerequisite.
+  - Grouped all Deep Learning application domains (NLP, Computer Vision, Reinforcement Learning) into a continuous sequence (6.2.8 - 6.2.10).
+  - Promoted **Intelligent Agents (6.2.11)** as the culmination of the Deep Learning sequence.
+- Renamed the master index alias from "Table of Contents" to include "Map of Content" (MOC) to reflect the Zettelkasten organizational paradigm.
+- Updated `README.md` directory tree to reflect the deep restructure of the Forge.
+
 ---
+
+## [1.6.2] - 2026-04-07
+
+### Added
+- Created new Vault section **2.5. Mom's Health Tracking** in the TOC and filesystem.
+- Implemented **Mom's Health Summary** dashboard for centralized symptom, medication, and visit tracking.
+- Created `Mom_Health_Logs` and `Mom_Lab_Work` folder structure for clinical record organization.
+- Added `2.5. Mom's Health Tracking/` to the `README.md` directory tree.
+- Created `tools/medical_xml_parser.py` script to parse complex HL7 CDA medical XML files into structured Markdown.
+- Added `/ingest_medical_record` workflow to automate standardizing and importing raw patient records.
+
+### Changed
+- Upgraded `analyze_health` skill to optionally integrate checking Section 2.2 Medical insurance coverage documents for realistic financial/logistical medical planning.
+- Standardized `analyze_health` skill to support multi-profile diagnostics (handling multiple health summaries like Mom's vs. Primary) via patient-context switching.
 
 ## [1.6.1] - 2026-04-05
 

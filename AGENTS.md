@@ -72,6 +72,7 @@ Deterministic scripts for vault and engine maintenance.
 | `create_folders.py` | Idempotently creates the directory structure defined in the TOC. |
 | `add_gitkeeps.py` | Adds `.gitkeep` to all empty folders to ensure tracking (Rule 10). |
 | `backup_vault.py` | Creates a timestamped local backup of the `Vault/` directory. |
+| `medical_xml_parser.py` | Parses HL7 CDA medical XML files into structured Markdown. |
 | `resume_engine/` | Node.js project for rendering the Markdown resume into a premium PDF. |
 
 ### Workflows
@@ -94,6 +95,9 @@ Consolidates rough notes or ideas into a structured project note, complete with 
 ### `distill_learning`
 Synthesizes complex technical articles or PDFs into atomic, interlinked notes within the `Library & Learning` section or global Zettelkasten.
 
+### `ingest_medical_record`
+Parse and ingest raw medical records (PDF, XML, Images) into the Vault following chronological conventions.
+
 ### `plan_activity`
 Cross-references `Activities List`, `Date Ideas`, and `People Data` notes to generate a structured markdown itinerary.
 
@@ -106,7 +110,7 @@ Renders the Master Markdown Resume into a premium, professionally-styled PDF usi
 2. **Always use the `.venv`** — resolve Python tools from `.venv/Scripts/`, not system PATH. Never install dependencies globally. Always use `.venv\Scripts\pip.exe` for installations. If a new requirement is added, immediately trigger the `maintain_project_docs` skill.
 3. **Commit messages must follow Conventional Commits** — see `conventional_commits` skill. 
 4. **Git is solely for the Engine and Vault structure**: prioritize committing changes to tools, skills, workflows, project docs, and Vault structure (e.g., new sections in `Table of Contents.md`, addition to `.gitkeep`). Individual notes/thoughts are encrypted and backed up locally, so avoid micro-commits for note edits, additions or subtractions.
-5. **Update `CHANGELOG.md` for all `feat` and `fix` commits to the Brain Engine.** If there is a significant change to a tool, skill, or workflow, update the version number. If there is a documentation change to the *Project* docs (README, AGENTS.md), update the patch number. **Individual notes/thoughts in the `Vault/` (except Structure/TOC) do NOT require CHANGELOG.md entries.** If there's an existing version on the same day, update the existing version unless the change is significant.
+5. **Update `CHANGELOG.md` for all `feat` and `fix` commits to the Brain Engine.** If there is a significant change to a tool, skill, or workflow, update the version number. If there is a documentation change to the *Project* docs (README, AGENTS.md), update the patch number. **Individual notes/thoughts in the `Vault/` (even if linked in the TOC) do NOT require CHANGELOG.md entries.** Only structural changes to the *Engine* (e.g., adding a new H1 section to the TOC, changing the global organizational paradigm, or adding new system capabilities) require a changelog entry and version bump. If there's an existing version on the same day, update the existing version unless the change is significant.
 6. **The TOC is the single source of truth** for Vault folder structure and the high-level concept of this entire project. Do not clutter the TOC with individual granular notes (e.g. single medical visits, individual articles, daily logs). Those should be linked and organized inside specialized "Hub" or "Map of Content" (MOC) notes (e.g., `Health Summary`, `Auto Knowledge Base`).
 7. **All notes must have YAML frontmatter** with `aliases`, `tags`, and `type` fields.
 8. **Audio files are gitignored** — they sync via Syncthing, not Git.

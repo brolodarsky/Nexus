@@ -1,5 +1,5 @@
 ---
-description: Agentic tool for working in `Employer Skill Requirements.md` note. Automates the extraction of skills from job descriptions, adds them to the Employer Skill Requirements note, and updates the AI summary.
+description: Extracts skills from a job description (URL, PDF, or raw text) and appends them to Employer Skill Requirements.md, regenerates the AI summary, and optionally adds the company to the correct industry vertical in Job Hunt War Room.md Section 4.
 ---
 
 # Workflow: Add Job Requirement (`/add_job_requirement`)
@@ -11,7 +11,6 @@ This workflow automates the process of extracting job requirements from a source
 1. **Extract Information:**
    - Read the provided source.
    - Extract the following fields: Role Name, Company, Core Requirements, Preferred Background, and any compensation/bonus information.
-
 
 2. **Format the Entry:**
    - Format the extracted information into a markdown section:
@@ -32,3 +31,10 @@ This workflow automates the process of extracting job requirements from a source
    - Read the entirety of the `# 📋 Roles & Requirements` section.
    - Synthesize the common themes, required degrees, prominent languages/frameworks, and domain knowledge. Sort by importance, ALWAYS NOTE MOST IMPORTANT SKILLS!!!
    - Replace the contents of the `# 🤖 AI Summary` section with the newly generated synthesis.
+
+5. **Optionally Update Job Hunt War Room — Section 4 (Industry Targets):**
+   - Read `Vault/3. Operations & Wealth/3.3. Career Strategy & Revenue/Job Hunt War Room.md`.
+   - Determine which industry vertical in `## 4. Industry Targets (NYC/NJ Area)` best fits the company (e.g. "Legal Tech", "FinTech", "AI Infrastructure & Agentic Labs", etc.).
+   - Check if the company is **already listed** under that vertical. If it is, skip this step.
+   - If it is **not listed**, ask the user: *"[Company] isn't in the [Vertical] list in the War Room. Should I add it?"*
+   - If the user confirms, append the company as a new bullet point (with a hyperlink to the company's careers page if available) under the correct vertical. Do not create a new vertical unless the company clearly doesn't fit any existing one.

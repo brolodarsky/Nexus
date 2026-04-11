@@ -28,6 +28,7 @@ Brain 2/
 │       ├── create_new_note.md        # Obsidian note creation
 │       ├── create_project.md         # Project planning/tasks
 │       ├── distill_learning.md       # Atomic note synthesis
+│       ├── ingest_medical_record.md  # Parse raw medical data
 │       ├── plan_activity.md          # Itinerary generation
 │       └── render_resume.md          # PDF resume rendering
 ├── .venv/                      # Python virtual environment (not committed)
@@ -42,10 +43,11 @@ Brain 2/
 │   ├── 2. Health/                  # Physical and mental well-being
 │   │   ├── 2.1. Fitness/                             # Training logs and performance tracking
 │   │   ├── 2.2. Medical/                             # Health history, lab work, and sleep hygiene
-│   │   │   ├── Health Logs/                          # Doctor visit notes (PCP, ENT, Pulmonology, etc.)
-│   │   │   └── Lab Work/                             # Bloodwork results (BMP, CBC, Thyroid, etc.)
+│   │   │   ├── Health_Logs/                          # Doctor visit notes (PCP, ENT, Pulmonology, etc.)
+│   │   │   └── Lab_Work/                             # Bloodwork results (BMP, CBC, Thyroid, etc.)
 │   │   ├── 2.3. Psych/                               # Cognitive load and mindfulness rituals
-│   │   └── 2.4. Nutrition/                           # Recipe vault and nutrition science
+│   │   ├── 2.4. Nutrition/                           # Recipe vault and nutrition science
+│   │   └── 2.5. Mom's Health Tracking/               # Caregiving logs, symptoms, and medical records for Mom
 │   ├── 3. Operations & Wealth/     # Financial and logistical systems
 │   │   ├── 3.1. Wealth & Asset Management/           # Investment strategy and recurring payments
 │   │   ├── 3.2. Infrastructure & Logistics/          # Home lab, family estate, and auto maintenance
@@ -67,14 +69,27 @@ Brain 2/
 │   ├── 5. Capture & Archive/       # Inbox and memory bank
 │   │   ├── 5.1. Brain Dump & Inbox/                  # Quick capture and significant milestones
 │   │   ├── 5.2. The Content Log (General)/           # Web archive and YouTube history
-│   │   └── 5.3. Digital Inventory/                    # Hardware/software audits and backups
+│   │   └── 5.3. Digital Inventory/                   # Hardware/software audits and backups
 │   ├── 6. Forge/                   # Technical projects and learning
 │   │   ├── 6.1. Projects/                            # Active development "The Lab"
-│   │   │   ├── 6.1.1. Flagship Applications/         # Primary high-importance projects (Feeder, etc.)
-│   │   │   ├── 6.1.2. Agentic R&D/                   # Agentic skills, workshops, and tinkering
+│   │   │   ├── 6.1.1. Flagship Applications/         # Primary high-importance projects
+│   │   │   ├── 6.1.2. Agentic R&D/                   # Agentic skills (mirrored), workshops, and tinkering
 │   │   │   ├── 6.1.3. Maintenance & Assets/          # Stable portfolios and meta-checklists
 │   │   │   └── 6.1.4. Script Attic/                  # Inactive tools and experiments
 │   │   └── 6.2. Library & Learning/                  # Technical archive and deep-dives
+│   │       ├── 6.2.1. Math & Stats/
+│   │       ├── 6.2.2. Programming & Software Engineering/
+│   │       ├── 6.2.3. Algorithms & Data Structures/
+│   │       ├── 6.2.4. System Design & Distributed Systems/
+│   │       ├── 6.2.5. Data Processing, Engineering & MLOps/
+│   │       ├── 6.2.6. Machine Learning/
+│   │       ├── 6.2.7. Deep Learning/
+│   │       ├── 6.2.8. NLP & Vector Search/
+│   │       ├── 6.2.9. Computer Vision/
+│   │       ├── 6.2.10. Reinforcement Learning/
+│   │       ├── 6.2.11. Intelligent Agents & Autonomy/
+│   │       ├── 6.2.12. Robotics (Hardware & Control Systems)/
+│   │       └── 6.2.13. AI Ethics, Safety & Governance/
 │   ├── Audio/                  # Gitignored
 │   └── Table of Contents.md   # Master index — source of truth for structure
 ├── AGENTS.md                   # AI agent constitution
@@ -129,6 +144,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 - `/audit_inbox`: Sorts raw notes and bullet points from the Brain Dump & Inbox into the main Zettelkasten structure.
 - `/create_project`: Consolidates rough notes or ideas into a structured project note, complete with extracted tasks and materials.
 - `/distill_learning`: Synthesizes complex technical articles or PDFs into atomic, interlinked notes.
+- `/ingest_medical_record`: Parse and ingest raw medical records (PDF, XML, Images) into the Vault.
 - `/plan_activity`: Cross-references Activities List, Date Ideas, and People Data notes to generate a structured markdown itinerary.
 - `/render_resume`: Renders the Master Markdown Resume into a premium, professionally-styled PDF.
 
@@ -142,6 +158,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `check_folders.py` | Validates Vault structure against TOC (dry-run). | `python tools/check_folders.py` |
 | `add_gitkeeps.py` | Adds `.gitkeep` to all empty folders for Git tracking. | `python tools/add_gitkeeps.py` |
 | `backup_vault.py` | Creates a timestamped local backup of the `Vault/`. | `python tools/backup_vault.py` |
+| `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
 | `resume_engine/` | PDF rendering system for the Master Resume. | (See `tools/resume_engine/`) |
 
 ---
