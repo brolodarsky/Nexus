@@ -13,7 +13,7 @@ A "Capture" is a raw, lightly-structured note stored in the Content Log. It acts
 
 1. **Information Gathering**: Ensure you have a title, URL (if applicable), and the raw content (summary, transcript, or bullet points). If the user pointed you to an *existing* note, read that note first to gather its contents.
 2. **Standardize Name & Location**:
-   - The final note must reside in `Vault/5. Capture & Archive/5.2. The Content Log (General)`. If an existing note is elsewhere, move it here.
+   - The final note must reside in `Vault/0. Inbox`. If an existing note is elsewhere, move it here.
    - The file name should be renamed/created with the prefix `Capture - `, e.g., `Capture - [Source Title].md`.
 3. **Format Frontmatter & Content**:
    - Ensure the YAML frontmatter includes exactly:

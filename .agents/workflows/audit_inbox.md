@@ -9,7 +9,7 @@ This workflow automates the process of processing, structuring, and filing raw t
 ## Steps
 
 1. **Analyze Inbox Content:**
-   - Read all files located in `Vault/5. Capture & Archive/5.1. Brain Dump & Inbox`. This includes the `Quick Capture.md` file and any other raw `.md` or text documents sitting in that TOC section.
+   - Read all files located in `Vault/0. Inbox/` and the `Vault/0. Quick Capture.md` file.
    - For each distinct thought, project idea, or piece of information, determine its core subject.
 
 2. **Categorize and Plan:**

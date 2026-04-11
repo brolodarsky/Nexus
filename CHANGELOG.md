@@ -3,6 +3,19 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.8.0] - 2026-04-11
+
+### Changed
+- Executed **Vault Structural Refactor & Friction Reduction** (Roadmap Item #5):
+  - Moved **`Inbox/`** and **`Quick Capture.md`** out of deep nesting into the Vault root (`0. Inbox/`, `0. Quick Capture.md`) to eliminate capture friction.
+  - Re-allocated **`Memories`** and Journaling into **`1.1. Philosophy & Personal North Star / Personal Logs`**, rather than creating an unnecessary extra section format.
+  - Split Personal Logs into `Daily Notes (Journal)` for stream-of-consciousness, and `Memories/` for curated milestones and Trophy Case.
+  - Renamed `5. Capture & Archive` subsections to reflect the removal of the Brain Dump.
+- Updated `audit_inbox` and `capture_content` workflows to use the new zero-friction paths.
+- Updated `Table of Contents.md` and `README.md` to reflect the new architecture.
+
+---
+
 ## [1.7.0] - 2026-04-11
 
 ### Added

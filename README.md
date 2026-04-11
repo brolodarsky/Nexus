@@ -35,8 +35,11 @@ Brain 2/
 ├── Vault/                      # All Brain content lives here
 │   ├── .obsidian/              # Obsidian settings
 │   ├── .stfolder/              # Syncthing folder
+│   ├── 0. Inbox/               # Temp file storage for items bound for integration
+│   ├── 0. Quick Capture.md     # Temp scratchpad note
 │   ├── 1. The Core/                # Identity, governance, and foundations
 │   │   ├── 1.1. Philosophy & Personal North Star/    # Values, principles, and long-term vision
+│   │   │   └── Personal Logs/                        # Journal, Memories, and The Trophy Case
 │   │   ├── 1.2. Personal Knowledge Management (PKM)/ # Brain 2.0 meta and maintenance protocols
 │   │   ├── 1.3. Security & Digital Sovereignty/      # Encryption, password strategy, and inheritance
 │   │   └── 1.4. Emergency & Survival/                # Crisis protocols and emergency contacts
@@ -66,10 +69,9 @@ Brain 2/
 │   │   ├── 4.2. Romance & Partnership/               # Relationship maintenance and date ideas
 │   │   ├── 4.3. Culture & Inspiration/               # Media archive, reading list, and education
 │   │   └── 4.4. Creativity/                          # Writing, jokes, and creative exploration
-│   ├── 5. Capture & Archive/       # Inbox and memory bank
-│   │   ├── 5.1. Brain Dump & Inbox/                  # Quick capture and significant milestones
-│   │   ├── 5.2. The Content Log (General)/           # Web archive and YouTube history
-│   │   └── 5.3. Digital Inventory/                   # Hardware/software audits and backups
+│   ├── 5. Capture & Archive/       # The Content Log & Reference
+│   │   ├── 5.1. The Content Log (General)/           # Web archive and YouTube history
+│   │   └── 5.2. Digital Inventory/                   # Hardware/software audits and backups
 │   ├── 6. Forge/                   # Technical projects and learning
 │   │   ├── 6.1. Projects/                            # Active development "The Lab"
 │   │   │   ├── 6.1.1. Flagship Applications/         # Primary high-importance projects
