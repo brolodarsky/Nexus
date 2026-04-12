@@ -3,6 +3,13 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.8.1] - 2026-04-12
+
+### Added
+- In `generate_obsidian_note` skill (Formatting and Structure section), mandated the use of synchronized horizontal navigation bars for "tight clusters" of notes (e.g., Auto, Health, Career) to allow lateral movement between related Map of Content (MOC) notes.
+
+---
+
 ## [1.8.0] - 2026-04-11
 
 ### Changed
