@@ -29,6 +29,8 @@ Notes follow the Zettelkasten methodology. Vault folder structure is defined in 
 
 These are located in `.agents/skills/` and define rules you **must** follow.
 
+<!-- AUTO-COMPILED BY maintain_project_docs. DO NOT EDIT DESCRIPTIONS MANUALLY -->
+
 ### `generate_obsidian_note`
 **Trigger:** When asked to create, move, format, or import a note into the Vault
 
@@ -78,7 +80,8 @@ Deterministic scripts for vault and engine maintenance.
 ### Workflows
 
 Agentic protocols for complex knowledge management tasks.
-Agentic tool. End-to-end workflow for adding a note: affirm structure → create note → update TOC link → confirm with user.
+
+<!-- AUTO-COMPILED BY maintain_project_docs. DO NOT EDIT DESCRIPTIONS MANUALLY -->
 
 ### `capture_content`
 Format, move, or clean up a raw capture note to serve as an inbox item for future knowledge synthesis.

@@ -37,6 +37,10 @@ Based on the user interview, fill in these components:
 - **compatibility**: Required tools, dependencies (optional, rarely needed)
 - **the rest of the skill :)**
 
+### Compile the Documentation
+
+Once you have written a complete `SKILL.md`, you MUST invoke the `maintain_project_docs` skill so it can auto-compile your newly written skill into `AGENTS.md` and the `CHANGELOG.md`. Do not perform this compilation manually yourself.
+
 ### Skill Writing Guide
 
 #### Anatomy of a Skill

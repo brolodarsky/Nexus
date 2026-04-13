@@ -90,11 +90,11 @@ The `description:` field is how the agent decides which workflow to invoke. It s
 **Weak:** `"Helps you add job postings to the vault."`
 **Strong:** `"Extracts skills from a job description (URL, PDF, or text) and appends them to Employer Skill Requirements.md, then regenerates the AI summary. Use when reviewing or logging a new job posting."`
 
-### 5. Register the Workflow
+### 5. Compile the Documentation
 
-After writing the workflow file, update:
+After writing the workflow file, you must **delegate doc compilation**:
 
-1. **`AGENTS.md`** — add an entry under `### Workflows` with the workflow name and a one-line description.
+1. **Trigger `maintain_project_docs`**: explicitly invoke this skill to auto-compile your new workflow into `AGENTS.md` and `CHANGELOG.md`. Do not manually edit `AGENTS.md`.
 2. **`README.md`** — add an entry to the Agentic Workflows slash-command list.
 3. **`Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/List - Agentic Instructions.md`** — add a wiki-link under `### Workflows (Recipes)`.
 
