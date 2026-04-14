@@ -3,12 +3,22 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.8.3] - 2026-04-14
+
+### Changed
+- Upgraded `analyze_health` skill (Step 9: Update the Vault) to explicitly mandate active narrative restructuring and visual re-weighting of `Health Summary.md` upon the discovery of a new diagnostic paradigm, preventing agents from merely appending new data chronologically.
+
+---
+
 ## [1.8.2] - 2026-04-13
 
 ### Changed
 - Promoted **Career Strategy & Revenue** from `3.3` to `3.1` to align with priority and daily usage.
 - Re-ordered Section 3 (Operations & Wealth) folders: Wealth & Asset Management shifted to `3.2`, Infrastructure & Logistics shifted to `3.3`.
 - Updated `Table of Contents.md` and `README.md` to map to the new hierarchy.
+- **Fixed:** Reconstructed broken `.venv` configuration caused by absolute path fragmentation (moved from `Knowledge Base`).
+- **Added:** Integrated `openai`, `langgraph`, `httpx`, and `python-dotenv` into `requirements.txt` for agentic development.
+- **Added:** Created `sandbox_langgraph.py` in `Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/` for isolated state machine testing.
 
 ---
 
