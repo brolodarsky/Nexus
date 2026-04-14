@@ -6,7 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.8.3] - 2026-04-14
 
 ### Changed
-- Upgraded `analyze_health` skill (Step 9: Update the Vault) to explicitly mandate active narrative restructuring and visual re-weighting of `Health Summary.md` upon the discovery of a new diagnostic paradigm, preventing agents from merely appending new data chronologically.
+- Upgraded `analyze_health` skill (Step 9: Update the Vault) to explicitly mandate active narrative restructuring and visual re-weighting of `Health Summary.md`. Added strict requirements for table hygiene: re-sorting by urgency (urgent at top) and symptom consolidation (merging managed items) to maintain high signal-to-noise ratio.
 
 ---
 
