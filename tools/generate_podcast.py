@@ -5,6 +5,8 @@ import sys
 import subprocess
 from pathlib import Path
 
+# TODO: Run test cases on trickier markdown files to ensure clean audio (i.e. tables)
+
 # Resolve edge-tts from the .venv next to this script (preferred),
 # falling back to whatever Python env is currently running.
 # This ensures the right binary is used even if the venv isn't shell-activated.

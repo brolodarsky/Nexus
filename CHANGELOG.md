@@ -3,6 +3,18 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.8.4] - 2026-04-16
+
+### Added
+- **LangGraph Integration:** Formally integrated `langgraph` and `langchain-openai` into the development stack to start development of AI agent orchestration.
+- **Vault Restructure:** Created new `6.2.12. AI for Science & Healthcare` section to un-clutter Agent frameworks. Shifted `Robotics` (now 6.2.13) and `AI Ethics` (now 6.2.14) down.
+
+### Changed
+- **Environment Management:** Updated `requirements.txt` with new dependencies for stateful agent development.
+- **Hygiene:** Verified global Python 3.12 install remains pristine (pip-only) while project environment manages 60+ specialized libraries.
+
+---
+
 ## [1.8.3] - 2026-04-14
 
 ### Changed

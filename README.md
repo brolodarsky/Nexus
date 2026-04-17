@@ -79,7 +79,7 @@ Brain 2/
 │   │   │   ├── 6.1.3. Maintenance & Assets/          # Stable portfolios and meta-checklists
 │   │   │   └── 6.1.4. Script Attic/                  # Inactive tools and experiments
 │   │   └── 6.2. Library & Learning/                  # Technical archive and deep-dives
-│   │       ├── 6.2.1. Math & Stats/
+│   │       ├── 6.2.1. Math/
 │   │       ├── 6.2.2. Programming & Software Engineering/
 │   │       ├── 6.2.3. Algorithms & Data Structures/
 │   │       ├── 6.2.4. System Design & Distributed Systems/
@@ -90,8 +90,9 @@ Brain 2/
 │   │       ├── 6.2.9. Computer Vision/
 │   │       ├── 6.2.10. Reinforcement Learning/
 │   │       ├── 6.2.11. Intelligent Agents & Autonomy/
-│   │       ├── 6.2.12. Robotics (Hardware & Control Systems)/
-│   │       └── 6.2.13. AI Ethics, Safety & Governance/
+│   │       ├── 6.2.12. AI for Science & Healthcare/
+│   │       ├── 6.2.13. Robotics (Hardware & Control Systems)/
+│   │       └── 6.2.14. AI Ethics, Safety & Governance/
 │   ├── Audio/                  # Gitignored
 │   └── Table of Contents.md   # Master index — source of truth for structure
 ├── AGENTS.md                   # AI agent constitution

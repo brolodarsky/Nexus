@@ -23,12 +23,10 @@ When asked to generate, move, format, or import a note/thought into the user's O
 
 ## 3. Formatting and Structure (Modified Zettelkasten Protocol)
 *   **No Redundant H1 Header:** Do NOT use an `#` H1 header that perfectly matches the filename. Obsidian natively displays the filename as the document title, making matching H1s redundant and a waste of vertical space. 
-*   **Mandatory Header Link:** directly below the YAML frontmatter block, you MUST place the Table of Contents return link, followed by a blank line and a horizontal rule, before any body content. 
+*   **Mandatory Header Link:** directly below the YAML frontmatter block, before any body content, you MUST place a Table of Contents return link that, if applicable, also links to the section of the TOC that the note belongs to. 
 *   **Contextual Navigation:** If the note is part of a tight cluster (e.g., specific vehicle notes, health dashboards, or a project hub and its sub-notes), you MUST implement a horizontal navigation bar in the top row, directly after the TOC link.
 ```markdown
-    **Back to:** [[Table of Contents]] | [[Hub Note]] | [[Related Note A]] | [[Related Note B]]
-
-    ---
+    **Back to:** [[Table of Contents#6.2.8. NLP & Vector Search]|Table of Contents] | [[Hub Note]] | [[Related Note A]] | [[Related Note B]]
 ```
 *   **Atomic Notes:** Keep the note focused on a single logical concept. Use H1 (`#`) and H2 (`##`) and so on headers to logically break down the topic.
 *   **Lists:** Use extensive bullet points for readability. The user prefers a highly structured, outline-like format over wall-of-text paragraphs.
