@@ -22,3 +22,6 @@ credentials.json
 
 # CRITICAL: Never accidentally commit your git-crypt key!
 brain-key.key
+
+# ChromaDB vector index (generated)
+.chroma_db/
