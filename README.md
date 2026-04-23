@@ -173,6 +173,17 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `engine/ask_brain.py` | RAG query agent for answering questions from context. | `python engine/ask_brain.py "<question>"` |
 | `resume_engine/` | PDF rendering system for the Master Resume. | (See `tools/resume_engine/`) |
 
+### PowerShell Integration
+
+For a more seamless experience on Windows, the following "global" commands are available once added to your PowerShell profile:
+
+| Command | Purpose |
+|---|---|
+| `ask-brain "<question>"` | Runs the semantic search engine from anywhere. |
+| `ingest-vault` | Triggers a vault re-index from anywhere. |
+| `render-resume` | Renders the professional PDF resume. |
+| `venv` | Searches for and activates a `.venv` in the current directory. |
+
 ---
 
 ## Security & Encryption

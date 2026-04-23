@@ -7,6 +7,7 @@ async function renderResume() {
     const resumePath = path.resolve(__dirname, '../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - Master.md');
     const cssPath = path.resolve(__dirname, 'style.css');
     const outputPath = path.resolve(__dirname, '../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - William Volodarsky.pdf');
+    const downloadsPath = path.join(process.env.USERPROFILE, 'Downloads', 'Resume - William Volodarsky.pdf');
 
     if (!fs.existsSync(resumePath)) {
         console.error('Master resume not found at:', resumePath);
@@ -49,7 +50,16 @@ async function renderResume() {
     });
 
     await browser.close();
-    console.log('Resume rendered successfully to:', outputPath);
+
+    // Copy to Downloads folder
+    try {
+        fs.copyFileSync(outputPath, downloadsPath);
+        console.log('Resume rendered successfully to:', outputPath);
+        console.log('Copy saved to Downloads folder:', downloadsPath);
+    } catch (copyErr) {
+        console.warn('Warning: Could not copy resume to Downloads folder:', copyErr.message);
+        console.log('Resume rendered successfully to:', outputPath);
+    }
 }
 
 renderResume().catch(err => {

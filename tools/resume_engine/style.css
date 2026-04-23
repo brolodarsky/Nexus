@@ -32,7 +32,7 @@ h1 {
 }
 
 h2 {
-    font-size: 1.25rem;
+    font-size: 1.15rem;
     color: var(--accent);
     border-bottom: 2px solid var(--accent);
     padding-bottom: 0.3rem;

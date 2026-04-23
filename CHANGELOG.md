@@ -3,6 +3,14 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+
+## [1.10.1] - 2026-04-23
+
+### Changed
+- **Resume Engine:** Updated `render.js` to automatically save a copy of the generated PDF to the user's `Downloads` folder for easier access.
+
+---
+
 ## [1.10.0] - 2026-04-22
 
 ### Added
