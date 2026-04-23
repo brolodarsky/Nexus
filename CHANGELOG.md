@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **Resume Engine:** Updated `render.js` to automatically save a copy of the generated PDF to the user's `Downloads` folder for easier access.
+- **Generalization:** Removed hardcoded names from the resume engine and workflow. The output PDF filename is now dynamically extracted from the first H1 header in the Markdown source.
 
 ---
 

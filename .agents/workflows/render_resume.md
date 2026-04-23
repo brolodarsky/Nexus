@@ -9,7 +9,7 @@ This workflow takes the content from the `Resume - Master.md` file and uses the 
 ## Steps
 
 1. **Verify Master Resume:**
-   - Ensure `Vault/3. Operations & Wealth/3.3. Career Strategy & Revenue/Resume - Master.md` exists and is up-to-date.
+    - Ensure `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - Master.md` exists and is up-to-date.
 
 2. **Run Rendering Engine:**
    - Navigate to `tools/resume_engine/`.
@@ -20,7 +20,7 @@ This workflow takes the content from the `Resume - Master.md` file and uses the 
    - (Note: The engine uses Playwright to ensure premium CSS rendering).
 
 3. **Confirm Output:**
-   - Verify that `Vault/3. Operations & Wealth/3.3. Career Strategy & Revenue/Resume - William Volodarsky.pdf` has been updated.
+    - Verify that the PDF output has been updated in `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/`.
    - Provide the user with a link to the new PDF.
 
 4. **Optional: Tailoring**

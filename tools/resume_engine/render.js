@@ -6,8 +6,6 @@ const { marked } = require('marked');
 async function renderResume() {
     const resumePath = path.resolve(__dirname, '../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - Master.md');
     const cssPath = path.resolve(__dirname, 'style.css');
-    const outputPath = path.resolve(__dirname, '../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - William Volodarsky.pdf');
-    const downloadsPath = path.join(process.env.USERPROFILE, 'Downloads', 'Resume - William Volodarsky.pdf');
 
     if (!fs.existsSync(resumePath)) {
         console.error('Master resume not found at:', resumePath);
@@ -18,6 +16,14 @@ async function renderResume() {
 
     // Remove YAML frontmatter
     const contentWithoutFrontmatter = markdownContent.replace(/^---[\s\S]*?---\n/, '');
+
+    // Extract title from first H1
+    const titleMatch = contentWithoutFrontmatter.match(/^#\s+(.+)$/m);
+    const resumeTitle = titleMatch ? titleMatch[1].trim() : 'Master';
+    const sanitizedTitle = resumeTitle.replace(/[\\/:*?"<>|]/g, '');
+
+    const outputPath = path.resolve(__dirname, `../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - ${sanitizedTitle}.pdf`);
+    const downloadsPath = path.join(process.env.USERPROFILE, 'Downloads', `Resume - ${sanitizedTitle}.pdf`);
 
     const htmlContent = marked.parse(contentWithoutFrontmatter);
 
