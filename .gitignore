@@ -6,9 +6,18 @@
 # ─────────────────────────────────────────────────
 # Vault Content — local only, never pushed to GitHub
 # ─────────────────────────────────────────────────
-# Ignore ALL files inside Vault/ (notes, binaries, configs, mirrors, etc.)
+# Ignore ALL files inside Vault/ at every nesting level.
 # Then whitelist only the structural files that should remain tracked.
+
+# Primary rule (catches all depths via **)
 Vault/**
+
+# Belt-and-suspenders: explicit depth rules for safety
+Vault/*
+Vault/*/*
+Vault/*/*/*
+Vault/*/*/*/*
+Vault/*/*/*/*/*
 
 # Un-ignore directories so Git can traverse them for .gitkeep files
 !Vault/**/

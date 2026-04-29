@@ -3,3 +3,6 @@ Vault/** filter=git-crypt diff=git-crypt
 
 # Ensure .gitkeep files (used for folder structure) are never encrypted
 Vault/**/.gitkeep -filter=git-crypt -diff=git-crypt
+
+# Table of Contents is intentionally public — readable on GitHub as the cognitive map
+"Vault/Table of Contents.md" -filter=git-crypt -diff=git-crypt
