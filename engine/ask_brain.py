@@ -12,8 +12,8 @@ This script uses that index to answer questions.
 The process for every single query is always:
   1. RETRIEVE: Convert the question to a vector, find the top-5 most similar
                chunks in ChromaDB, pull their text and source paths.
-  2. GENERATE: Give those chunks + the question to GPT-4o as context.
-               GPT-4o synthesizes a grounded answer citing your actual notes.
+  2. GENERATE: Give those chunks + the question to the LLM as context.
+               The LLM synthesizes a grounded answer citing your actual notes.
 
 This two-step process is called RAG — Retrieval Augmented Generation.
 "Augmented" because the LLM's generation is augmented with real retrieved data,
@@ -35,7 +35,7 @@ import chromadb
 from chromadb.utils import embedding_functions
 from dotenv import load_dotenv
 
-# ChatOpenAI — the LangChain wrapper around OpenAI's chat API (GPT-4o, etc.)
+# ChatOpenAI — the LangChain wrapper around OpenAI's chat API
 from langchain_openai import ChatOpenAI
 
 # Message types — LangChain uses typed message objects instead of raw strings.
@@ -65,8 +65,8 @@ load_dotenv()
 CHROMA_PATH = Path(__file__).parent.parent / ".chroma_db"
 COLLECTION_NAME = "brain2_vault"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-AI_MODEL = "gpt-4o"
-
+AI_MODEL = "gpt-5.4-nano"
+EMBED_MODEL = "text-embedding-3-small"  # Must match ingest_vault.py
 TOP_K = 5  # How many chunks to retrieve. Higher = more context, more cost, slower.
            # 5 is a good balance for a personal knowledge base of ~1400 chunks.
 
@@ -122,7 +122,7 @@ def get_collection():
     client = chromadb.PersistentClient(path=str(CHROMA_PATH))
     embed_fn = embedding_functions.OpenAIEmbeddingFunction(
         api_key=OPENAI_API_KEY,
-        model_name="text-embedding-3-small",  # Must match ingest_vault.py
+        model_name=EMBED_MODEL,  # Must match ingest_vault.py
     )
     return client.get_collection(name=COLLECTION_NAME, embedding_function=embed_fn)
 
@@ -173,10 +173,10 @@ def retrieve(state: AgentState) -> AgentState:
     )
 
     docs = results["documents"][0]    # The actual text of the top-5 matching chunks
-    metas = results["metadatas"][0]   # Their metadata (source file paths, section names)
+    metadatas = results["metadatas"][0]   # Their metadata (source file paths, section names)
 
     context = docs
-    sources = [m.get("source", "Unknown") for m in metas]
+    sources = [m.get("source", "Unknown") for m in metadatas]
 
     # Return updated state with the retrieved chunks loaded in.
     # The spread (**state) copies all existing state keys, then we override
@@ -191,19 +191,17 @@ def generate(state: AgentState) -> AgentState:
     How it works:
     1. If no relevant context was found, return an honest "I don't know" response.
     2. Otherwise, format the retrieved chunks into a readable context block.
-    3. Build a strict SystemMessage that tells GPT-4o to ONLY use the provided context.
-    4. Call GPT-4o with [SystemMessage, HumanMessage] and get an AIMessage back.
+    3. Build a strict SystemMessage that tells the LLM to ONLY use the provided context.
+    4. Call the LLM with [SystemMessage, HumanMessage] and get an AIMessage back.
     5. Append that AIMessage to the state's message history.
 
-    The SystemMessage is the key to preventing hallucination. Without it, GPT-4o
+    The SystemMessage is the key to preventing hallucination. Without it, the LLM
     would answer from its training data, which may contain nothing about YOUR life.
     With it, the model is constrained to only cite what the Retrieve node found.
     """
     llm = ChatOpenAI(
         model=AI_MODEL,
         temperature=0,          # Temperature 0 = deterministic, no creativity.
-                                # For a factual knowledge retrieval tool, we want
-                                # precise, consistent answers, not creative ones.
         api_key=OPENAI_API_KEY,
     )
 
@@ -223,16 +221,17 @@ def generate(state: AgentState) -> AgentState:
     # Format the retrieved chunks into a clean block.
     # Each chunk is labeled with its source file so the LLM can cite it.
     # \n\n---\n\n is a markdown horizontal rule — visually separates chunks.
-    context_block = "\n\n---\n\n".join(
+    context_block = "\n\n---\n\n".join( # String method that concatenates strings with the separator
         f"[Source: {src}]\n{doc}"
-        for src, doc in zip(sources, context)
+        for src, doc in zip(sources, context) # Generator expression: creates a list of strings, each string is a chunk of text from the vault, 
+                                              # with its source file path prepended to it.
     )
 
-    # The SystemMessage is the instruction set for the LLM.
+    # The SystemMessage is the instruction set for the LLM. 
     # It's prepended to every conversation invisibly (the user never sees it).
     # The f-string injects the actual vault content into the instructions.
     system_prompt = SystemMessage(content=(
-        "You are Brain 2, a precise personal knowledge assistant. "
+        "You are a precise personal knowledge assistant."
         "Answer the user's question using ONLY the vault notes provided below. "
         "If the answer is not in the context, say 'I don't have that in my notes.' "
         "Always cite the source note (e.g., [Source: path/to/note.md]) "

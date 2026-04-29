@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 
+## [1.10.2] - 2026-04-27
+
+### Added
+- Added `ipython` and `langchain-tavily` to `requirements.txt` for agent development and updated Tavily integration.
+
+---
+
 ## [1.10.1] - 2026-04-23
 
 ### Changed
