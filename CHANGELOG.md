@@ -6,6 +6,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [1.11.0] - 2026-04-28
 
+### Added
+- Created the `archive_project` agentic skill to systematically manage and archive completed projects while maintaining contextual Vault architecture.
+
 ### Changed
 - Executed **Radical Transparency Public Release Strategy**:
   - Restructured `.gitignore` to use a robust wildcard approach (`Vault/**`) to untrack all vault content files while retaining folder structure and `.gitkeep` files.

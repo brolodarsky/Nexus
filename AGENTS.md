@@ -50,6 +50,9 @@ These are located in `.agents/skills/` and define rules you **must** follow.
 ### `analyze_psych`
 **Trigger:** Whenever the user mentions depression,anxiety, decision fatigue, context switching, or any emotional processing. Provide science-based, non-sycophantic psychological support and cognitive architecture analysis.
 
+### `archive_project`
+**Trigger:** Use this skill whenever the user asks to archive a project, mark a project as done, complete a project, or move a finished project out of an active folder.
+
 ### `career_counselor`
 **Trigger:** Act as a high-stakes career architect and strategic advisor. Provide advice on job hunt strategy, interview prep, compensation negotiation, and professional portfolio development. Trigger this skill whenever the user mentions job searching, career pivots, networking, resume updates, or professional growth.
 
