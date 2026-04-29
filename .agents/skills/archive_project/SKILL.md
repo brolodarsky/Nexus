@@ -12,9 +12,10 @@ Use this skill to systematically archive completed projects within the Zettelkas
 When instructed to archive or complete a `Project - ...md` file, perform the following steps in order:
 
 ### 1. File Move
-Move the active `Project - [Name].md` file into the `Archive/` folder of its current Vault section. 
-- If the `Archive/` folder doesn't exist yet, create it.
-- **Example:** If the project is in `Vault/1. The Core/1.2. Personal Knowledge Management (PKM)/Project - Example.md`, move it to `Vault/1. The Core/1.2. Personal Knowledge Management (PKM)/Archive/Project - Example.md`.
+Move the active `Project - [Name].md` file into a year-based subfolder inside the `Archive/` folder of its current Vault section. 
+- The year subfolder should match the current year (e.g., `Archive/2026/`).
+- If the `Archive/` or `Archive/[Year]/` folders don't exist yet, create them.
+- **Example:** If the project is in `Vault/1. The Core/1.2. Personal Knowledge Management (PKM)/Project - Example.md` and the year is 2026, move it to `Vault/1. The Core/1.2. Personal Knowledge Management (PKM)/Archive/2026/Project - Example.md`.
 
 ### 2. YAML Update
 Update the project note's YAML frontmatter to include the following status tags (or update existing ones):
@@ -32,6 +33,7 @@ Remove the project from the "Active Projects" section of `Vault/1. The Core/1.1.
 If the project was explicitly linked in its active section of `Vault/Table of Contents.md`, remove that link.
 
 ### 5. TOC Update (Archive Link)
-Ensure there is a bullet point linking to the new `Archive/` folder in that specific TOC section. This maintains the cognitive map without cluttering it.
-- **Format:** `- [[Vault/[Path to Section]/Archive/|Archive]]`
+Ensure there is a bullet point linking to the `Archive/` folder in that specific TOC section. This maintains the cognitive map without cluttering it.
+- **Format:** `- **📁 [Archive](<file:///[Absolute Path to Section]/Archive>)**`
+- *Alternatively, to support cross-device syncing without breaking on mobile, use an Obsidian search URI:* `- **📁 [Archive](obsidian://search?vault=Vault&query=path%3A"[Section Folder Name]/Archive")**`
 - Only add this if an Archive link does not already exist for that section.
