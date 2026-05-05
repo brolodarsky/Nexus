@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **Resume Engine:** Integrated `tools/resume_engine/render_docx.py` into `render.js`. Running the Node.js renderer now automatically triggers the Python DOCX renderer using the project's virtual environment, ensuring both PDF and DOCX formats are generated in a single pass.
+- **Workflow:** Updated `/render_resume` to consolidate PDF and DOCX rendering into a single step, reflecting the tool integration.
 
 ---
 
