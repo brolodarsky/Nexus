@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 const { marked } = require('marked');
+const HTMLtoDOCX = require('html-to-docx');
 
 async function renderResume() {
     const resumePath = path.resolve(__dirname, '../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - Master.md');
@@ -24,6 +25,9 @@ async function renderResume() {
 
     const outputPath = path.resolve(__dirname, `../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - ${sanitizedTitle}.pdf`);
     const downloadsPath = path.join(process.env.USERPROFILE, 'Downloads', `Resume - ${sanitizedTitle}.pdf`);
+
+    const docxOutputPath = path.resolve(__dirname, `../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - ${sanitizedTitle}.docx`);
+    const docxDownloadsPath = path.join(process.env.USERPROFILE, 'Downloads', `Resume - ${sanitizedTitle}.docx`);
 
     const htmlContent = marked.parse(contentWithoutFrontmatter);
 
@@ -56,6 +60,27 @@ async function renderResume() {
     });
 
     await browser.close();
+
+    // Generate and save DOCX
+    try {
+        const docxBuffer = await HTMLtoDOCX(fullHtml, null, {
+            table: { row: { cantSplit: true } },
+            footer: true,
+            pageNumber: true,
+        });
+        fs.writeFileSync(docxOutputPath, docxBuffer);
+        
+        try {
+            fs.copyFileSync(docxOutputPath, docxDownloadsPath);
+            console.log('DOCX resume rendered successfully to:', docxOutputPath);
+            console.log('DOCX copy saved to Downloads folder:', docxDownloadsPath);
+        } catch (copyErr) {
+            console.warn('Warning: Could not copy DOCX resume to Downloads folder:', copyErr.message);
+            console.log('DOCX resume rendered successfully to:', docxOutputPath);
+        }
+    } catch (docxErr) {
+        console.error('Error generating DOCX resume:', docxErr);
+    }
 
     // Copy to Downloads folder
     try {

@@ -193,7 +193,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
 | `engine/ingest_vault.py` | Indexes Vault files into ChromaDB for semantic search. | `python engine/ingest_vault.py` |
 | `engine/ask_brain.py` | RAG query agent for answering questions from context. | `python engine/ask_brain.py "<question>"` |
-| `resume_engine/` | PDF rendering system for the Master Resume. | (See `tools/resume_engine/`) |
+| `resume_engine/` | PDF and DOCX rendering system for the Master Resume. | (See `tools/resume_engine/`) |
 
 ### PowerShell Integration
 
@@ -243,7 +243,7 @@ If you want to use this as a starting point for your own system:
 ---
 
 ## Vault Maintenance
-Whenever the `Table of Contents.md` is modified, run `tools/create_folders.py` to ensure the folder structure matches the plan.
+Whenever the `Table of Contents.md` STRUCTURE is modified, run `tools/create_folders.py` to ensure the folder structure matches the plan.
 
 - Handle `.gitkeep` files: add to empty folders, remove from populated ones.
 - Orphaned folders (no matching TOC entry) should be reported, never deleted automatically.

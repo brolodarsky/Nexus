@@ -82,7 +82,7 @@ Deterministic scripts for vault and engine maintenance.
 | `add_gitkeeps.py` | Adds `.gitkeep` to all empty folders to ensure tracking (Rule 10). |
 | `backup_vault.py` | Creates a timestamped local backup of the `Vault/` directory. |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files into structured Markdown. |
-| `resume_engine/` | Node.js project for rendering the Markdown resume into a premium PDF. |
+| `resume_engine/` | Node.js project for rendering the Markdown resume into a premium PDF and DOCX. |
 | `engine/ingest_vault.py` | Indexes all vault `.md` files into a local ChromaDB vector store for semantic search. Re-run after adding new notes. |
 | `engine/ask_brain.py` | RAG query agent — answers natural language questions grounded in vault context. Requires ChromaDB index to exist first. |
 

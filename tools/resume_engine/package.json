@@ -4,7 +4,8 @@
   "description": "Premium Resume Renderer",
   "main": "render.js",
   "dependencies": {
-    "playwright": "^1.40.0",
-    "marked": "^11.0.0"
+    "html-to-docx": "^1.8.0",
+    "marked": "^11.0.0",
+    "playwright": "^1.40.0"
   }
 }

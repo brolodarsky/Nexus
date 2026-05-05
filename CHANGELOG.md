@@ -4,6 +4,13 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 
+## [1.11.1] - 2026-05-04
+
+### Changed
+- **Resume Engine:** Updated `tools/resume_engine/render.js` to automatically generate and save a `.docx` copy of the resume alongside the `.pdf` version, using the `html-to-docx` package.
+
+---
+
 ## [1.11.0] - 2026-04-28
 
 ### Added
