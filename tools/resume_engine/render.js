@@ -29,7 +29,9 @@ async function renderResume() {
     const docxOutputPath = path.resolve(__dirname, `../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - ${sanitizedTitle}.docx`);
     const docxDownloadsPath = path.join(process.env.USERPROFILE, 'Downloads', `Resume - ${sanitizedTitle}.docx`);
 
-    const htmlContent = marked.parse(contentWithoutFrontmatter);
+    let htmlContent = marked.parse(contentWithoutFrontmatter);
+    // html-to-docx relies on inline styles to override Word's default huge spacing for headings
+    htmlContent = htmlContent.replace(/<h1(.*?)>/g, '<h1$1 style="margin-top: 0; padding-top: 0;">');
 
     const fullHtml = `
     <!DOCTYPE html>
@@ -67,6 +69,15 @@ async function renderResume() {
             table: { row: { cantSplit: true } },
             footer: true,
             pageNumber: true,
+            margins: {
+                top: 720,
+                right: 720,
+                bottom: 720,
+                left: 720,
+                header: 720,
+                footer: 720,
+                gutter: 0
+            }
         });
         fs.writeFileSync(docxOutputPath, docxBuffer);
         
