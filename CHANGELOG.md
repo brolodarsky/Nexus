@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.11.1] - 2026-05-04
 
 ### Changed
-- **Resume Engine:** Updated `tools/resume_engine/render.js` to automatically generate and save a `.docx` copy of the resume alongside the `.pdf` version, using the `html-to-docx` package.
+- **Resume Engine:** Integrated `tools/resume_engine/render_docx.py` into `render.js`. Running the Node.js renderer now automatically triggers the Python DOCX renderer using the project's virtual environment, ensuring both PDF and DOCX formats are generated in a single pass.
 
 ---
 

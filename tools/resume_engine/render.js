@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const { chromium } = require('playwright');
 const { marked } = require('marked');
-const HTMLtoDOCX = require('html-to-docx');
 
 async function renderResume() {
     const resumePath = path.resolve(__dirname, '../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - Master.md');
@@ -26,12 +26,7 @@ async function renderResume() {
     const outputPath = path.resolve(__dirname, `../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - ${sanitizedTitle}.pdf`);
     const downloadsPath = path.join(process.env.USERPROFILE, 'Downloads', `Resume - ${sanitizedTitle}.pdf`);
 
-    const docxOutputPath = path.resolve(__dirname, `../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - ${sanitizedTitle}.docx`);
-    const docxDownloadsPath = path.join(process.env.USERPROFILE, 'Downloads', `Resume - ${sanitizedTitle}.docx`);
-
-    let htmlContent = marked.parse(contentWithoutFrontmatter);
-    // html-to-docx relies on inline styles to override Word's default huge spacing for headings
-    htmlContent = htmlContent.replace(/<h1(.*?)>/g, '<h1$1 style="margin-top: 0; padding-top: 0;">');
+    const htmlContent = marked.parse(contentWithoutFrontmatter);
 
     const fullHtml = `
     <!DOCTYPE html>
@@ -63,36 +58,6 @@ async function renderResume() {
 
     await browser.close();
 
-    // Generate and save DOCX
-    try {
-        const docxBuffer = await HTMLtoDOCX(fullHtml, null, {
-            table: { row: { cantSplit: true } },
-            footer: true,
-            pageNumber: true,
-            margins: {
-                top: 720,
-                right: 720,
-                bottom: 720,
-                left: 720,
-                header: 720,
-                footer: 720,
-                gutter: 0
-            }
-        });
-        fs.writeFileSync(docxOutputPath, docxBuffer);
-        
-        try {
-            fs.copyFileSync(docxOutputPath, docxDownloadsPath);
-            console.log('DOCX resume rendered successfully to:', docxOutputPath);
-            console.log('DOCX copy saved to Downloads folder:', docxDownloadsPath);
-        } catch (copyErr) {
-            console.warn('Warning: Could not copy DOCX resume to Downloads folder:', copyErr.message);
-            console.log('DOCX resume rendered successfully to:', docxOutputPath);
-        }
-    } catch (docxErr) {
-        console.error('Error generating DOCX resume:', docxErr);
-    }
-
     // Copy to Downloads folder
     try {
         fs.copyFileSync(outputPath, downloadsPath);
@@ -101,6 +66,16 @@ async function renderResume() {
     } catch (copyErr) {
         console.warn('Warning: Could not copy resume to Downloads folder:', copyErr.message);
         console.log('Resume rendered successfully to:', outputPath);
+    }
+
+    // Run DOCX renderer
+    try {
+        const pythonPath = path.resolve(__dirname, '../../.venv/Scripts/python.exe');
+        const scriptPath = path.resolve(__dirname, 'render_docx.py');
+        console.log('\nRunning DOCX renderer...');
+        execSync(`"${pythonPath}" "${scriptPath}"`, { stdio: 'inherit' });
+    } catch (docxErr) {
+        console.error('Error rendering DOCX:', docxErr.message);
     }
 }
 
