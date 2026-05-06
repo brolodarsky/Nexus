@@ -1,5 +1,5 @@
 import sys
-from engine.main import main
+from main import main
 
 """
 ask_brain.py — Brain 2 RAG Query Agent (Refactored Wrapper)

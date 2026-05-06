@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 
+## [1.11.3] - 2026-05-06
+
+### Added
+- **Voice-first RAG Query:** Implemented `engine/brain_voice.py` to capture microphone input, transcribe it via OpenAI Whisper, and pipe it into the RAG LangGraph for hands-free queries. Registered `brain-voice` global PowerShell alias.
+
 ## [1.11.2] - 2026-05-05
 
 ### Changed

@@ -86,6 +86,7 @@ Deterministic scripts for vault and engine maintenance.
 | `engine/main.py` | Universal entry point & dispatcher for the Agentic Engine. |
 | `engine/ingest_vault.py` | Indexes all vault `.md` files into a local ChromaDB vector store. |
 | `engine/ask_brain.py` | CLI wrapper for the RAG query agent. |
+| `engine/brain_voice.py` | Voice-first CLI wrapper using PyAudio and Whisper transcription. |
 
 ### Workflows
 
