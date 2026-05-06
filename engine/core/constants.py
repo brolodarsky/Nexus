@@ -15,6 +15,8 @@ CHROMA_PATH = PROJECT_ROOT / ".chroma_db"
 COLLECTION_NAME = "brain2_vault"
 EMBED_MODEL = "text-embedding-3-small"
 TOP_K = 5
+SIMILARITY_THRESHOLD = 0.7  # Filter out chunks with cosine distance > 0.7 (similarity < 0.3)
+RE_RANK_TOP_K = 5
 
 # AI Config
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

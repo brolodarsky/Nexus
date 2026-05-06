@@ -193,6 +193,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
 | `engine/ingest_vault.py` | Indexes Vault files into ChromaDB for semantic search. | `python engine/ingest_vault.py` |
 | `engine/ask_brain.py` | RAG query agent for answering questions from context. | `python engine/ask_brain.py "<question>"` |
+| `engine/eval_rag.py` | LLM-as-a-judge evaluation framework for testing RAG retrieval quality. | `python engine/eval_rag.py` |
 | `engine/brain_voice.py` | Voice-first RAG query agent using microphone and Whisper transcription. | `python engine/brain_voice.py` |
 | `engine/brain_telegram.py` | Telegram Bot listener for smartphone and AFK access to the RAG agent. | `python engine/brain_telegram.py` |
 | `resume_engine/` | PDF (Playwright) and DOCX (`python-docx`) rendering for the Master Resume. | `node tools/resume_engine/render.js` + `.venv\Scripts\python.exe tools/resume_engine/render_docx.py` |

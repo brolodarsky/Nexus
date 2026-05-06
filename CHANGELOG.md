@@ -14,6 +14,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Architectural Refactor:** Extracted core LangGraph execution into `execute_rag_query` in `engine/main.py` to unify the RAG pipeline across CLI, Voice, and Telegram interfaces.
 - **Telegram UX Refinement:** Removed source citations from Telegram responses to optimize for mobile display and avoid broken `obsidian://` deep links on mobile clients.
 - **Voice Note Support:** Added secure `.ogg` voice note transcription for the Telegram bot, bridging the Phase 6A Whisper logic to mobile.
+- **RAG Retrieval Quality Enhancements (Phase 7):**
+  - **Eval Framework:** Created `engine/eval_rag.py` using an LLM-as-a-judge approach and `engine/eval_dataset.json` to systematically test the agent's accuracy against a golden dataset.
+  - **Similarity Threshold:** Added a cosine distance filter (`SIMILARITY_THRESHOLD = 0.7`) to drop low-quality retrieval chunks before they pollute the context window.
+  - **HyDE (Hypothetical Document Embedding):** Modified the `retrieve` node in `engine/agents/rag/nodes.py` to generate a hypothetical perfect answer using GPT-4o before vector search, bridging the vocabulary gap between short user queries and dense markdown notes.
+  - **LLM Re-Ranking:** Added an LLM-based re-ranker step to score and sort the top retrieved chunks from ChromaDB, drastically improving the signal-to-noise ratio.
 
 ## [1.11.2] - 2026-05-05
 
