@@ -1,6 +1,6 @@
 import chromadb
 from chromadb.utils import embedding_functions
-from engine.core.constants import CHROMA_PATH, COLLECTION_NAME, OPENAI_API_KEY, EMBED_MODEL
+from core.constants import CHROMA_PATH, COLLECTION_NAME, OPENAI_API_KEY, EMBED_MODEL
 
 def get_collection():
     """

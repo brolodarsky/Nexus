@@ -178,7 +178,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 - `/ingest_medical_record`: Parse and ingest raw medical records (PDF, XML, Images) into the Vault.
 - `/plan_activity`: Cross-references Activities List, Date Ideas, and People Data notes to generate a structured markdown itinerary.
 - `/ask_brain`: Semantic vault search. Queries the ChromaDB index and returns grounded answers with source citations.
-- `/render_resume`: Renders the Master Markdown Resume into a premium, professionally-styled PDF.
+- `/render_resume`: Renders the Master Markdown Resume into a premium, professionally-styled PDF and DOCX.
 
 ### Deterministic Tools (Scripts)
 
@@ -193,7 +193,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
 | `engine/ingest_vault.py` | Indexes Vault files into ChromaDB for semantic search. | `python engine/ingest_vault.py` |
 | `engine/ask_brain.py` | RAG query agent for answering questions from context. | `python engine/ask_brain.py "<question>"` |
-| `resume_engine/` | PDF and DOCX rendering system for the Master Resume. | (See `tools/resume_engine/`) |
+| `resume_engine/` | PDF (Playwright) and DOCX (`python-docx`) rendering for the Master Resume. | `node tools/resume_engine/render.js` + `.venv\Scripts\python.exe tools/resume_engine/render_docx.py` |
 
 ### PowerShell Integration
 

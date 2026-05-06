@@ -28,4 +28,7 @@ IGNORE_DIRS = {
     ".obsidian",
     "Memories_Log_Images",
     "Pilot Diagrams",
+    "node_modules",
+    ".venv",
+    ".git",
 }

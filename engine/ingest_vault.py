@@ -4,10 +4,10 @@ import traceback
 # Force UTF-8 output
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from engine.core.constants import VAULT_PATH, CHROMA_PATH
-from engine.tools.chroma_tool import get_or_create_collection
-from engine.tools.vault_walker import collect_markdown_files
-from engine.tools.text_utils import split_by_headers, truncate_to_token_limit, make_id
+from core.constants import VAULT_PATH, CHROMA_PATH
+from tools.chroma_tool import get_or_create_collection
+from tools.vault_walker import collect_markdown_files
+from tools.text_utils import split_by_headers, truncate_to_token_limit, make_id
 
 def ingest(force: bool = False):
     """

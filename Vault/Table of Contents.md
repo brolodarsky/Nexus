@@ -82,6 +82,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 	- **[[Goals]]**
 	- **[[Profile & Maintenance - Neuro-Sensory Conflict]]**
 	- **[[Profile & Maintenance - Job Search & Cognitive Load]]**
+	- **[[Protocol - ERP Quick Reference]]**
 	- **[[Protocol - Social Approach & Rehearsal]]**
 	- **[[Protocol - Nightly System Shutdown]]**
 	- **[[Protocol - Reduce Phone Use]]**
@@ -122,6 +123,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 ### 3.1.2. Interview Prep & Technical Depth
 - **[[Interview Prep Hub]]**
 - **[[My Skills]]:** Master inventory of competencies.
+- **[[Summary - How To Stand Out To Employers Regardless of Experience]]:** Fordham Foundry panel on startup job hunting, networking, and creative outreach.
 
 ### 3.1.3. Professional Portfolio & Evidence
 - **[[Portfolio Hub]]:** Project pitches and evidence locker.
@@ -236,7 +238,8 @@ _The Content Log & Reference_
 
 
 ## 5.2. Digital Inventory
-- **[[Protocol - Hard Drive Backup]]**
+- **Computer Backup** — [Batch File Link](file:///E:\Backups\BV%20Comp%20Backup\BatchRun_CDrive_to_MainBackup.ffs_batch)
+- **Hard Drive Backup** — [Batch File Link](file:///D:\BatchRun_BV_4TB_Backup_to_6TB.ffs_batch) 
 - **App Audit:** Current apps installed on devices.
 	- **Smartphone:** Pixel 8 Pro
 	- **[[Laptop App List]]**
@@ -263,7 +266,9 @@ _The Content Log & Reference_
 ### 6.1.2. Agentic R&D
 - **[[List - Brain 2 Agentic Instructions]]**
 - **[[Workshop - Agentic Skill - add_job_requirement]]**
-- **📁[[Old Version - Project - Brain 2 Agentic Engine]]:** Master roadmap for LangGraph agents (/ask_brain, doctor panel, routing).
+- **📁[[Old Version - Project - Brain 2 Agentic Engine]]:** 
+- Master roadmap for LangGraph agents (/ask_brain, doctor panel, routing).
+- **[[Project - Brain 2 Agentic Engine|Brain 2 Agentic Engine]]**
 	- 1. **[[Project - Vault RAG Agent (ask_brain)]]**
 - **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for Amazon and Walmart.
 - **📁 Agentic Config:** Mirror of the project's core agentic configuration (AGENTS.md, skills, and workflows).

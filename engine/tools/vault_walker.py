@@ -1,5 +1,5 @@
 from pathlib import Path
-from engine.core.constants import IGNORE_DIRS
+from core.constants import IGNORE_DIRS
 
 def collect_markdown_files(vault_path: Path) -> list[Path]:
     """
