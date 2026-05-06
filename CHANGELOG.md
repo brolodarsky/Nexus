@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 
+## [1.11.2] - 2026-05-05
+
+### Changed
+- **RAG Engine Modularization:** Completed the architectural refactor of the RAG system from flat scripts into a scalable, modular engine:
+  - `engine/core/`: Shared constants and state definitions.
+  - `engine/agents/rag/`: Isolated RAG nodes and LangGraph definitions.
+  - `engine/tools/`: Atomic utilities for ChromaDB, text splitting, and vault crawling.
+  - `engine/main.py`: New universal dispatcher for multi-agent support.
+
+### Fixed
+- **RAG Engine:** Corrected import path errors in modularized components to ensure reliable execution from the project root.
+
+---
+
 ## [1.11.1] - 2026-05-04
 
 ### Changed
