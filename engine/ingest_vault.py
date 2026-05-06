@@ -29,8 +29,6 @@ def ingest(force: bool = False):
         total_chunks = 0
         for md_file in md_files:
             relative_path = str(md_file.relative_to(VAULT_PATH))
-            print(f"[*] Processing: {relative_path}")
-            sys.stdout.flush()
             content = md_file.read_text(encoding="utf-8", errors="ignore")
 
             chunks = split_by_headers(content, relative_path)
@@ -41,8 +39,6 @@ def ingest(force: bool = False):
             texts = [truncate_to_token_limit(c["text"]) for c in chunks]
             metadatas = [{"source": c["source"], "section": c["section"]} for c in chunks]
 
-            print(f"    [*] Upserting {len(chunks)} chunks...")
-            sys.stdout.flush()
             collection.upsert(ids=ids, documents=texts, metadatas=metadatas)
             print(f"    [+] {relative_path}  ({len(chunks)} chunks)")
             sys.stdout.flush()
