@@ -1,8 +1,8 @@
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from engine.core.constants import OPENAI_API_KEY, AI_MODEL, TOP_K
-from engine.core.state import AgentState
-from engine.tools.chroma_tool import get_collection
+from core.constants import OPENAI_API_KEY, AI_MODEL, TOP_K
+from core.state import AgentState
+from tools.chroma_tool import get_collection
 
 def retrieve(state: AgentState) -> AgentState:
     """

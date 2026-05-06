@@ -1,8 +1,8 @@
 import sys
 import urllib.parse
 from langchain_core.messages import HumanMessage
-from engine.core.constants import CHROMA_PATH
-from engine.agents.rag.graph import build_rag_graph
+from core.constants import CHROMA_PATH
+from agents.rag.graph import build_rag_graph
 
 # Force UTF-8 output
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
