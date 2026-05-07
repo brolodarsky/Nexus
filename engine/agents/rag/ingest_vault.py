@@ -1,5 +1,16 @@
 import sys
 import traceback
+from pathlib import Path
+
+# Ensure the 'engine' directory is in sys.path
+engine_path = Path(__file__).parent.parent.parent
+if str(engine_path) not in sys.path:
+    sys.path.insert(0, str(engine_path))
+
+# Remove the current script's directory from sys.path to avoid 'tools' shadowing
+script_dir = str(Path(__file__).parent)
+if script_dir in sys.path:
+    sys.path.remove(script_dir)
 
 # Force UTF-8 output
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")

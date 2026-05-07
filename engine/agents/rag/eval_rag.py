@@ -1,5 +1,18 @@
 import json
 import time
+import sys
+from pathlib import Path
+
+# Ensure the 'engine' directory is in sys.path
+engine_path = Path(__file__).parent.parent.parent
+if str(engine_path) not in sys.path:
+    sys.path.insert(0, str(engine_path))
+
+# Remove the current script's directory from sys.path
+script_dir = str(Path(__file__).parent)
+if script_dir in sys.path:
+    sys.path.remove(script_dir)
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from core.constants import AI_MODEL, OPENAI_API_KEY
@@ -18,7 +31,8 @@ Did the actual answer meet the expected criteria? Answer ONLY with "PASS" or "FA
 
 def run_evals():
     print("Running RAG Evals...")
-    with open("engine/eval_dataset.json", "r") as f:
+    dataset_path = Path(__file__).parent / "eval_dataset.json"
+    with open(dataset_path, "r") as f:
         dataset = json.load(f)
     
     graph = build_rag_graph()

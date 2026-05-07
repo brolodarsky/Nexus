@@ -123,8 +123,10 @@ Brain 2/
 ├── CHANGELOG.md                # Running log of notable changes
 ├── engine/                      # RAG engine (semantic search)
 │   ├── main.py                  # Universal dispatcher & entry point
-│   ├── ingest_vault.py          # Vector store indexer
 │   ├── agents/                  # Domain-specific agents (rag/)
+│   │   ├── rag/
+│   │   │   ├── ingest_vault.py  # Vector store indexer
+│   │   │   └── eval_rag.py      # RAG evaluation framework
 │   ├── core/                    # Shared configuration (constants.py)
 │   └── tools/                   # Shared engine utilities (vault_walker.py)
 ├── tools/                      # Automation tools
@@ -194,9 +196,9 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `add_gitkeeps.py` | Adds `.gitkeep` to all empty folders for Git tracking. | `python tools/add_gitkeeps.py` |
 | `backup_vault.py` | Creates a timestamped local backup of the `Vault/`. | `python tools/backup_vault.py` |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
-| `engine/ingest_vault.py` | Indexes Vault files into ChromaDB with incremental indexing, orphan cleanup, and frontmatter metadata. | `python engine/ingest_vault.py [--force]` |
+| `engine/agents/rag/ingest_vault.py` | Indexes Vault files into ChromaDB with incremental indexing, orphan cleanup, and frontmatter metadata. | `python engine/agents/rag/ingest_vault.py [--force]` |
 | `engine/main.py` | Universal entry point for the RAG agent and future domain agents. | `python engine/main.py "<question>" [--domain health] [--tag ai] [--type journal]` |
-| `engine/eval_rag.py` | LLM-as-a-judge evaluation framework for testing RAG retrieval quality. | `python engine/eval_rag.py` |
+| `engine/agents/rag/eval_rag.py` | LLM-as-a-judge evaluation framework for testing RAG retrieval quality. | `python engine/agents/rag/eval_rag.py` |
 | `engine/brain_voice.py` | Voice-first RAG query agent using microphone and Whisper transcription. | `python engine/brain_voice.py` |
 | `engine/brain_telegram.py` | Telegram Bot listener for smartphone and AFK access to the RAG agent. | `python engine/brain_telegram.py` |
 | `resume_engine/` | PDF (Playwright) and DOCX (`python-docx`) rendering for the Master Resume. | `node tools/resume_engine/render.js` + `.venv\Scripts\python.exe tools/resume_engine/render_docx.py` |

@@ -12,6 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Filtered Search (Phase 8):** `engine/main.py` now accepts `--domain`, `--tag`, and `--type` CLI flags that generate ChromaDB `where` clauses to constrain retrieval by metadata.
 - **Schema Foresight Audit (Phase 8):** Documented current metadata distribution (1,577 chunks, 60% domain-tagged) and evaluated future fields (`word_count`, `date_created`, `confidence`) with accept/defer/reject decisions.
 - **Phase 8.5 Tech Debt Tracked:** Flagged that ~60% of `engine/core/` and `engine/tools/` is RAG-specific code that should be scoped to `engine/agents/rag/` before building domain agent #2.
+- **RAG Module Consolidation:** Moved RAG-specific utilities (`ingest_vault.py`, `eval_rag.py`, `eval_dataset.json`) from `engine/` root to `engine/agents/rag/` to ensure a clean boundary between the dispatcher and domain-specific RAG logic. Updated all internal paths and added `sys.path` bootstrapping to maintain CLI script functionality.
 
 ### Changed
 - Replaced raw `sys.argv` parsing in `engine/main.py` with `argparse` for structured CLI flag support.

@@ -1,5 +1,5 @@
 ---
-description: Semantic vault search. Queries the ChromaDB index and returns a grounded answer with source citations. Use when you need facts from your notes without reading files manually. Requires `engine/ingest_vault.py` to be run first.
+description: Semantic vault search. Queries the ChromaDB index and returns a grounded answer with source citations. Use when you need facts from your notes without reading files manually. Requires `engine/agents/rag/ingest_vault.py` to be run first.
 ---
 
 # Ask Brain (`/ask_brain`)
@@ -9,7 +9,7 @@ Use this workflow whenever you (or an orchestrating agent) need to retrieve fact
 > [!important] Prerequisite
 > The ChromaDB index (`.chroma_db/`) must exist before this workflow can run. If it doesn't, run `ingest_vault.py` first:
 > ```
-> .venv\Scripts\python.exe engine/ingest_vault.py
+> .venv\Scripts\python.exe engine/agents/rag/ingest_vault.py
 > ```
 > Re-run it after adding significant new notes. It is safe to re-run at any time.
 

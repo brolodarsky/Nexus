@@ -84,7 +84,7 @@ Deterministic scripts for vault and engine maintenance.
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files into structured Markdown. |
 | `resume_engine/` | Node.js (Playwright) for PDF rendering + Python (`python-docx`) for DOCX generation of the Master Resume. |
 | `engine/main.py` | Universal entry point & dispatcher for the Agentic Engine. Supports `--domain`, `--tag`, `--type` metadata filters. |
-| `engine/ingest_vault.py` | Indexes vault `.md` files into ChromaDB with incremental indexing (skips unchanged files), orphan cleanup (purges stale entries), and frontmatter metadata extraction. Use `--force` for full re-index. |
+| `engine/agents/rag/ingest_vault.py` | Indexes vault `.md` files into ChromaDB with incremental indexing (skips unchanged files), orphan cleanup (purges stale entries), and frontmatter metadata extraction. Use `--force` for full re-index. |
 | `engine/ask_brain.py` | CLI wrapper for the RAG query agent. |
 | `engine/brain_voice.py` | Voice-first CLI wrapper using PyAudio and Whisper transcription. |
 | `engine/brain_telegram.py` | Telegram Bot listener for smartphone and AFK access to the RAG agent. |
@@ -120,7 +120,7 @@ Cross-references Activities List, Date Ideas, and People Data to generate a mark
 Renders the Master Markdown Resume into a premium, professionally-styled PDF and DOCX.
 
 ### `ask_brain`
-Semantic vault search. Queries the ChromaDB index and returns a grounded answer with source citations. Use when you need facts from your notes without reading files manually or to supplement your own knowledge. Requires `engine/ingest_vault.py` to be run first.
+Semantic vault search. Queries the ChromaDB index and returns a grounded answer with source citations. Use when you need facts from your notes without reading files manually or to supplement your own knowledge. Requires `engine/agents/rag/ingest_vault.py` to be run first.
 
 ## Rules
 
