@@ -4,10 +4,11 @@ import traceback
 # Force UTF-8 output
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from core.constants import VAULT_PATH, CHROMA_PATH
-from tools.chroma_tool import get_or_create_collection
+from core.constants import VAULT_PATH
+from agents.rag.constants import CHROMA_PATH
+from agents.rag.tools.chroma_tool import get_or_create_collection
 from tools.vault_walker import collect_markdown_files
-from tools.text_utils import split_by_headers, truncate_to_token_limit, make_id, parse_frontmatter
+from agents.rag.tools.text_utils import split_by_headers, truncate_to_token_limit, make_id, parse_frontmatter
 from agents.rag.index_manifest import get_changed_files, save_manifest
 
 def ingest(force: bool = False):

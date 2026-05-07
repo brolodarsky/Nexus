@@ -3,7 +3,7 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [1.11.5] - 2026-05-07
+## [1.12.0] - 2026-05-07
 
 ### Added
 - **Incremental Indexing (Phase 8):** `engine/ingest_vault.py` now tracks file modification times via a JSON manifest (`.rag_index_manifest.json`) and only re-embeds files that have changed since the last run. Added `--force` flag for full re-indexing.
@@ -16,6 +16,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - Replaced raw `sys.argv` parsing in `engine/main.py` with `argparse` for structured CLI flag support.
 - Moved index manifest logic to `engine/agents/rag/index_manifest.py` (RAG-scoped, not shared core).
+- **Module Ownership Cleanup (Phase 8.5):** Refactored the engine's internal structure to improve modularity and prepare for multi-agent support.
+  - Moved RAG-specific constants from `engine/core/constants.py` to `engine/agents/rag/constants.py`.
+  - Moved `AgentState` from `engine/core/state.py` to `engine/agents/rag/state.py`.
+  - Relocated RAG-specific tools (`chroma_tool.py`, `text_utils.py`) from `engine/tools/` to `engine/agents/rag/tools/`.
+  - Updated all internal imports across the engine (`main.py`, `ingest_vault.py`, `nodes.py`, `graph.py`, `eval_rag.py`) to reflect the new scoped architecture.
 
 ---
 

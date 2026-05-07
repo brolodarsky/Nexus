@@ -2,7 +2,7 @@ import sys
 import argparse
 import urllib.parse
 from langchain_core.messages import HumanMessage
-from core.constants import CHROMA_PATH
+from agents.rag.constants import CHROMA_PATH
 from agents.rag.graph import build_rag_graph
 
 # Force UTF-8 output

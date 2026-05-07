@@ -1,8 +1,9 @@
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from core.constants import OPENAI_API_KEY, AI_MODEL, TOP_K, SIMILARITY_THRESHOLD, RE_RANK_TOP_K
-from core.state import AgentState
-from tools.chroma_tool import get_collection
+from core.constants import OPENAI_API_KEY, AI_MODEL
+from agents.rag.constants import TOP_K, SIMILARITY_THRESHOLD, RE_RANK_TOP_K
+from agents.rag.state import AgentState
+from agents.rag.tools.chroma_tool import get_collection
 
 def _generate_hyde(query: str, llm: ChatOpenAI) -> str:
     """Generate a hypothetical document to improve retrieval."""

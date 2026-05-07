@@ -2,7 +2,7 @@ import re
 import hashlib
 import yaml
 import tiktoken
-from core.constants import MAX_TOKENS
+from agents.rag.constants import MAX_TOKENS
 
 # cl100k_base is the tokenizer used by GPT-4 and text-embedding-3-small.
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")

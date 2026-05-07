@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, END
-from core.state import AgentState
+from agents.rag.state import AgentState
 from agents.rag.nodes import retrieve, generate
 
 def build_rag_graph():

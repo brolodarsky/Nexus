@@ -122,8 +122,11 @@ Brain 2/
 ├── AGENTS.md                   # AI agent constitution
 ├── CHANGELOG.md                # Running log of notable changes
 ├── engine/                      # RAG engine (semantic search)
-│   ├── ask_brain.py             # Query agent
-│   └── ingest_vault.py          # Vector store indexer
+│   ├── main.py                  # Universal dispatcher & entry point
+│   ├── ingest_vault.py          # Vector store indexer
+│   ├── agents/                  # Domain-specific agents (rag/)
+│   ├── core/                    # Shared configuration (constants.py)
+│   └── tools/                   # Shared engine utilities (vault_walker.py)
 ├── tools/                      # Automation tools
 │   └── resume_engine/          # Premium PDF rendering system
 ├── requirements.txt            # Pinned Python dependencies
@@ -192,7 +195,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `backup_vault.py` | Creates a timestamped local backup of the `Vault/`. | `python tools/backup_vault.py` |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
 | `engine/ingest_vault.py` | Indexes Vault files into ChromaDB with incremental indexing, orphan cleanup, and frontmatter metadata. | `python engine/ingest_vault.py [--force]` |
-| `engine/ask_brain.py` | RAG query agent for answering questions from context. | `python engine/main.py "<question>" [--domain health] [--tag ai] [--type journal]` |
+| `engine/main.py` | Universal entry point for the RAG agent and future domain agents. | `python engine/main.py "<question>" [--domain health] [--tag ai] [--type journal]` |
 | `engine/eval_rag.py` | LLM-as-a-judge evaluation framework for testing RAG retrieval quality. | `python engine/eval_rag.py` |
 | `engine/brain_voice.py` | Voice-first RAG query agent using microphone and Whisper transcription. | `python engine/brain_voice.py` |
 | `engine/brain_telegram.py` | Telegram Bot listener for smartphone and AFK access to the RAG agent. | `python engine/brain_telegram.py` |
