@@ -194,6 +194,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `check_folders.py` | Validates Vault structure against TOC (dry-run). | `python tools/check_folders.py` |
 | `add_gitkeeps.py` | Adds `.gitkeep` to all empty folders for Git tracking. | `python tools/add_gitkeeps.py` |
 | `backup_vault.py` | Creates a timestamped local backup of the `Vault/`. | `python tools/backup_vault.py` |
+| `sync_vault.py` | Automatically commits the nested Vault repository (The Nested Heart). | `python tools/sync_vault.py` |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
 | `engine/main.py` | Universal coordinator for the Brain 2 Engine. Features a persistent mission control menu and background Telegram bot. | `python engine/main.py` |
 | `engine/agents/rag/ingest_vault.py` | Indexes Vault files into ChromaDB with incremental indexing. | `python engine/main.py --ingest` |

@@ -270,7 +270,7 @@ _The Content Log & Reference_
 - **[[Workshop - Agentic Skill - add_job_requirement]]**
 - Master roadmap for LangGraph agents (/ask_brain, doctor panel, routing).
 - **📁 [[Project - Brain 2 Agentic Engine|Brain 2 Agentic Engine]]**
-	- 1. **[[Project - Vault RAG Agent (ask_brain)]]**
+	- 1. **[[Project - Vault Reader Agent]]**
 - **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for Amazon and Walmart.
 - **📁 Agentic Config:** Mirror of the project's core agentic configuration (AGENTS.md, skills, and workflows).
 - **Resources:**
@@ -286,6 +286,7 @@ _The Content Log & Reference_
 
 ### 6.1.4. Script Attic
 - Inactive tools, experiments, and one-off Python scripts.
+- **📁 Legacy RAG Engine:** Archived vector RAG architecture for Brain 2.
 
 
 ## 6.2. Library & Learning

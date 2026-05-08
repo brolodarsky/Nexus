@@ -81,6 +81,7 @@ Deterministic scripts for vault and engine maintenance.
 | `create_folders.py` | Idempotently creates the directory structure defined in the TOC. |
 | `add_gitkeeps.py` | Adds `.gitkeep` to all empty folders to ensure tracking (Rule 10). |
 | `backup_vault.py` | Creates a timestamped local backup of the `Vault/` directory. |
+| `sync_vault.py` | Automatically commits the nested Vault repository (The Nested Heart). |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files into structured Markdown. |
 | `resume_engine/` | Node.js (Playwright) for PDF rendering + Python (`python-docx`) for DOCX generation of the Master Resume. |
 | `engine/main.py` | Universal entry point & coordinator for the Agentic Engine. Features a persistent mission control menu with background Telegram bot support. |
@@ -146,3 +147,4 @@ Semantic vault search. Queries the ChromaDB index and returns a grounded answer 
 8. **Keep AGENTS.md AND README.md updated.** If you make fundamental changes to the project/brain functionality, update these files to reflect the changes.
 9. **Add `.gitkeep` to empty folders.** Whenever creating a new empty directory in the Vault, always create an empty `.gitkeep` file inside it so it can be tracked by Git.
 10. **All `Project -` and `Protocol -` notes must be registered in `To Do List.md`.** Ensure new projects are added to the Active Projects section of `Vault/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md`.
+11. **Do not touch the `Vault/.git` directory.** This is a nested private repository for the user's personal history. It is not part of the engine and should be ignored by all cleanup or auditing tools.

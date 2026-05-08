@@ -3,6 +3,22 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.14.0] - 2026-05-07
+
+### Added
+- **Nested Heart Architecture (Item 23):** Created a private Git repository inside `Vault/` to track personal history without polluting the public engine repository.
+- **Nested Heart Tool:** Added `tools/sync_vault.py` to automate the context-switch required to commit to the nested Vault repository.
+- Created `Project - Vault Reader Agent.md` to chart the new Agentic File System (AFS) Navigator architecture, replacing standard ChromaDB RAG.
+
+### Changed
+- **Agent Rules:** Added Rule 11 to `AGENTS.md` explicitly instructing agents to ignore the `Vault/.git` directory.
+- Pivoted `/ask_brain` architecture from Vector RAG to Agentic Vault Reader to solve Context Fragmentation and preserve Zettelkasten hierarchy.
+- Archived `engine/agents/rag/` into `Vault/6. Forge/6.1. Projects/6.1.4. Script Attic/Legacy RAG Engine/`.
+- Updated `Project - Brain 2 Agentic Engine.md`, `Table of Contents.md`, and `To Do List.md` to reflect the pivot.
+
+### Removed
+- Uninstalled `chromadb` and deleted `.chroma_db/` index and `.rag_index_manifest.json` as part of the pivot.
+
 ## [1.13.0] - 2026-05-07
 
 ### Added
