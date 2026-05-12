@@ -4,7 +4,7 @@ description: Agentic tool for reading and sorting raw notes and bullet points fr
 
 # Workflow: Audit Inbox (`/audit_inbox` or `/weekly_review`)
 
-This workflow automates the process of processing, structuring, and filing raw thoughts and clipped documents from the Inbox into the main Vault.
+This workflow automates the process of processing, structuring, and filing raw thoughts and documents from the Inbox into the main Vault.
 
 ## Steps
 
