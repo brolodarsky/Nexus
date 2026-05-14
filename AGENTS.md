@@ -83,7 +83,7 @@ Deterministic scripts for vault and engine maintenance.
 | `backup_vault.py` | Creates a timestamped local backup of the `Vault/` directory. |
 | `sync_vault.py` | Automatically commits the nested Vault repository (The Nested Heart). |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files into structured Markdown. |
-| `resume_engine/` | Node.js (Playwright) for PDF rendering + Python (`python-docx`) for DOCX generation of the Master Resume. |
+| `resume_engine/` | Node.js (Playwright) for PDF rendering + Python (`python-docx`) for DOCX generation. Interactive document picker scans `3.1.3. Professional Portfolio & Evidence/Resumes/` and `Cover Letters/` for renderable markdown documents. Also accepts a CLI path argument for scripted use. |
 | `engine/main.py` | Universal entry point & coordinator for the Agentic Engine. Features a persistent mission control menu with background Telegram bot support. |
 | `engine/agents/vault_reader/agent.py` | Core ReAct agent execution logic (LangGraph). |
 | `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`). |
@@ -119,7 +119,7 @@ Parse and ingest raw medical records (PDF, XML, Images) into the Vault following
 Cross-references Activities List, Date Ideas, and People Data to generate a markdown itinerary.
 
 ### `render_resume`
-Renders the Master Markdown Resume into a premium, professionally-styled PDF and DOCX.
+Renders markdown documents (resumes, cover letters) from the Portfolio into professionally-styled PDF and DOCX files.
 
 ### `ask_brain`
 Agentic vault search. Uses a LangGraph ReAct agent to dynamically navigate the local filesystem and returns a grounded answer with source citations. Use when you need facts from your notes without reading files manually. No indexing required.

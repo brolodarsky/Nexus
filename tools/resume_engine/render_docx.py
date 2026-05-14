@@ -1,15 +1,16 @@
 """
-Render the Master Resume markdown into a clean .docx file using python-docx.
+Render a markdown document (resume, cover letter, etc.) into a clean .docx file.
 
 Usage:
-    python tools/resume_engine/render_docx.py
+    python tools/resume_engine/render_docx.py [path/to/document.md]
 
-Reads: Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - Master.md
-Outputs: Resume - <Name>.docx in the same directory + a copy to ~/Downloads
+If no path is given, defaults to Resume - Master.md.
+Outputs: <basename>.docx alongside the source file + a copy to ~/Downloads.
 """
 
 import os
 import re
+import sys
 import shutil
 from pathlib import Path
 
@@ -36,8 +37,7 @@ MARGIN_BOTTOM = Inches(0.25)
 MARGIN_LEFT = Inches(0.5)
 MARGIN_RIGHT = Inches(0.5)
 
-RESUME_DIR = Path(__file__).resolve().parent.parent.parent / "Vault" / "3. Operations & Wealth" / "3.1. Career Strategy & Revenue"
-RESUME_SOURCE = RESUME_DIR / "Resume - Master.md"
+DEFAULT_SOURCE = Path(__file__).resolve().parent.parent.parent / "Vault" / "3. Operations & Wealth" / "3.1. Career Strategy & Revenue" / "3.1.3. Professional Portfolio & Evidence" / "Resumes" / "Resume - Master.md"
 
 
 # ---------------------------------------------------------------------------
@@ -168,23 +168,23 @@ def _parse_bullet(line):
 # ---------------------------------------------------------------------------
 # Main renderer
 # ---------------------------------------------------------------------------
-def render_docx():
-    if not RESUME_SOURCE.exists():
-        print(f"Error: Resume not found at {RESUME_SOURCE}")
+def render_docx(source_path=None):
+    source = Path(source_path) if source_path else DEFAULT_SOURCE
+    if not source.exists():
+        print(f"Error: Document not found at {source}")
         return
 
-    md = RESUME_SOURCE.read_text(encoding="utf-8")
+    md = source.read_text(encoding="utf-8")
 
     # Strip YAML frontmatter
     md = re.sub(r'^---.*?---\n', '', md, count=1, flags=re.DOTALL)
+    # Strip Obsidian navigation links ("Back to:" lines with wiki-links)
+    md = re.sub(r'^Back to:.*\n?', '', md, count=1, flags=re.MULTILINE)
     lines = md.strip().splitlines()
 
-    # Extract title from first H1
-    title = "Master"
-    h1_match = re.match(r'^#\s+(.+)$', lines[0]) if lines else None
-    if h1_match:
-        title = h1_match.group(1).strip()
-    sanitized_title = re.sub(r'[\\/:*?"<>|]', '', title)
+    # Derive output name from source filename
+    base_name = source.stem  # e.g. "Resume - PowerMarket" or "Cover Letter - PowerMarket"
+    output_dir = source.parent
 
     # Create document
     doc = Document()
@@ -259,8 +259,8 @@ def render_docx():
         _add_formatted_text(p, line, font_size=FONT_SIZE_BODY)
 
     # Save outputs
-    output_path = RESUME_DIR / f"Resume - {sanitized_title}.docx"
-    downloads_path = Path(os.environ.get("USERPROFILE", "~")) / "Downloads" / f"Resume - {sanitized_title}.docx"
+    output_path = output_dir / f"{base_name}.docx"
+    downloads_path = Path(os.environ.get("USERPROFILE", "~")) / "Downloads" / f"{base_name}.docx"
 
     doc.save(str(output_path))
     print(f"DOCX resume rendered successfully to: {output_path}")
@@ -273,4 +273,5 @@ def render_docx():
 
 
 if __name__ == "__main__":
-    render_docx()
+    arg = sys.argv[1] if len(sys.argv) > 1 else None
+    render_docx(arg)

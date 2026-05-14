@@ -21,8 +21,8 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 ### 1.1.1. Personal Logs
 - **📁 [Journal](obsidian://search?vault=Vault&query=path%3AJournal)**
-	- **[[2026 - Journal]]**
-- **[[Memories Log]]**: Curated life events, funny moments, and milestones.
+	- **[[2026 - Journal]]**: Technical progress, career strategy, and tactical "Engine" development.
+- **[[Memories Log]]**: Personal milestones, social wins, and life highlights.
 	- **📁 [Memories Log Images](obsidian://search?vault=Vault&query=path%3AMemories_Log_Images)**
 - **The Trophy Case:** Screenshots of wins, kind words from others, and completed major projects.
 
@@ -84,8 +84,11 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 	- **[[Profile & Maintenance - Job Search & Cognitive Load]]**
 	- **[[Protocol - ERP Quick Reference]]**
 	- **[[Protocol - Social Approach & Rehearsal]]**
+	- **[[Protocol - CBT vs ACT Quick Reference]]**
 	- **[[Protocol - Nightly System Shutdown]]**
 	- **[[Protocol - Reduce Phone Use]]**
+	- **[[Protocol - Dating Grounding & Dopamine Management]]**
+	- **[[Cognitive Engineering Log]]**
 	- **[[Life Chronology]]**
 - **Meditation & Mindfulness:** Rituals for grounding and focus.
 - **Stress Mitigation:** Systems for decompressing after high-output days.
@@ -129,8 +132,14 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 
 ### 3.1.3. Professional Portfolio & Evidence
 - **[[Portfolio Hub]]:** Project pitches and evidence locker.
-- **[[Resume - Master|Resume - Master - Markdown]]:** The source-of-truth CV.
-	- **[[Resume - William Volodarsky.pdf|Resume - Master - PDF]]:** Exported PDF output.
+- **📁 Resumes**
+	- **[[Resume - Master|Resume - Master - Markdown]]:** The source-of-truth CV.
+		- **[[Resume - William Volodarsky.pdf|Resume - Master - PDF]]:** Exported PDF output.
+	- **[[Resume - PowerMarket]]**
+- **📁 Cover Letters**
+	- **[[Cover Letter - Agentic AI Focus]]**
+	- **[[Cover Letter - Java Dev Focus]]**
+	- **[[Cover Letter - PowerMarket]]**
 - **[[Doc - Fordham University eDiploma.pdf]]**
 - **[[Doc - Fordham University Transcript.pdf]]**
 
@@ -181,7 +190,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 	- **[[Plan - Selling Gold and Silver]]**
 - **Home**
 	- **[[Parents Home Purchase Application.pdf|Doc - Parents Home Purchase Application]]**
-- **Parental Care:** Health records, medical billing history, and local Fort Lee resources.
+- **[[Family & Parental Care Logistics|Parental Care]]:** Health records, medical billing history, and local Fort Lee resources.
 	- **[[Plan - Recover & Transition for MEM Practice]]**
 	- **[[Project - Switch Dad to Google Voice (Software Only)]]**
 	- **[[Protocol - Dad Laptop Backup]]**
@@ -215,6 +224,7 @@ _Dedicated space for exploration, relationships, and pure interest._ Connection 
 ## 4.2. Romance & Partnership
 - **Values Alignment:** What am I looking for in a partner?
 - **Relationship Maintenance:** Strategies for connection and conflict resolution.
+	- **[[Protocol - Dating Grounding & Dopamine Management]]**
 - **Date Ideas:** Local & travel-based.
 
 
@@ -267,13 +277,15 @@ _The Content Log & Reference_
 
 ### 6.1.2. Agentic R&D
 - **[[List - Brain 2 Agentic Instructions]]**
-- **[[Workshop - Agentic Skill - add_job_requirement]]**
 - Master roadmap for LangGraph agents (/ask_brain, doctor panel, routing).
 - **📁 [[Project - Brain 2 Agentic Engine|Brain 2 Agentic Engine]]**
-	- 1. **[[Project - Vault Reader Agent]]**
-- **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for Amazon and Walmart.
+	- **[[Project - Vault Reader Agent]]**
+	- **[[Workshop - MCP Additions]]**
+	- **📁 Archive**
+- **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for eCommerce Silislick.com family business.
 - **📁 Agentic Config:** Mirror of the project's core agentic configuration (AGENTS.md, skills, and workflows).
 - **Resources:**
+	- **[Codex Docs](https://developers.openai.com/codex/app)**
 	- **[OpenAI API](https://developers.openai.com/)**
 		- **[Documentation](https://developers.openai.com/api/docs)**
 		- **[Usage](https://platform.openai.com/usage)** - Track token usage.
