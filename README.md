@@ -9,7 +9,7 @@ This repository is **not** a generic, blank-slate template. It is a live, produc
 You will see that the Agent Skills (`.agents/skills/`) and instructions (`AGENTS.md`) explicitly reference my personal context—like my health tracking, career goals, or specific personal protocols. This is intentional. The personal specificity is the proof that this system manages real human complexity.
 
 **What's included in this public repo:**
-- **The Engine Layer:** All the tools, agent skills, and workflows I use to automate my life.
+- **The Engine Layer:** All the tools, agent skills, evaluation framework, and workflows I use to automate my life.
 - **The Vault Structure:** The folder skeleton and the `Table of Contents.md`.
 - **(Private) The Vault Content:** The actual markdown notes, images, and PDFs in my vault are **local-only**. They are gitignored or encrypted, meaning you can't read my private thoughts, but you can see the architecture of the system.
 
@@ -124,8 +124,12 @@ Brain 2/
 ├── engine/                      # RAG engine agent
 │   ├── main.py                  # Universal coordinator & mission control
 │   ├── agents/                  # Domain-specific agents
-│   │   └── rag/                 # RAG agent logic (nodes, graph, state)
+│   │   └── vault_reader/        # Vault Reader agent logic
 │   ├── core/                    # Shared engine configuration
+│   ├── evals/                   # Benchmarking & Golden Dataset
+│   │   ├── dataset.json         # 12 real-world Q&A cases
+│   │   ├── runner.py            # Automated eval script
+│   │   └── results/             # Structured eval reports
 │   ├── interfaces/              # Entry-point implementations (cli, voice, telegram)
 │   └── tools/                   # Shared engine utilities
 ├── tools/                      # Automation tools
@@ -197,6 +201,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `sync_vault.py` | Automatically commits the nested Vault repository (The Nested Heart). | `python tools/sync_vault.py` |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
 | `engine/main.py` | Universal coordinator for the Brain 2 Engine. Features a persistent mission control menu and background Telegram bot. | `python engine/main.py` |
+| `engine/evals/runner.py` | Benchmarks the Vault Reader against the Golden Dataset. | `python -m engine.evals.runner` |
 | `engine/agents/vault_reader/agent.py` | Core ReAct agent execution logic (LangGraph). | `python engine/main.py <query>` |
 | `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation. | N/A |
 | `resume_engine/` | PDF and DOCX rendering for the Master Resume. | `node tools/resume_engine/render.js` |

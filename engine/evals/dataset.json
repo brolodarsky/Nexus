@@ -1,0 +1,37 @@
+[
+  {
+    "question": "What is the \"Bronx Fund\" and how much income consistency is targeted for it?",
+    "expected_answer": "The Bronx Fund is a \"Relocation Buffer\" for a future move out of Fort Lee. The target is a $750/week bridge income baseline (Tutoring/Freelance).",
+    "source_file": "Vault/2. Health/2.3. Psych/Goals.md"
+  },
+  {
+    "question": "When was the Timing Belt last changed on the Honda Pilot and at what mileage?",
+    "expected_answer": "April 9, 2026, at 196,000 miles.",
+    "source_file": "Vault/3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md"
+  },
+  {
+    "question": "What are the primary focus areas for professional development in 2026?",
+    "expected_answer": "AI Infrastructure, Agentic Workflows, or Cognitive Engineering (e.g., RAG Engineer, AI Reliability).",
+    "source_file": "Vault/2. Health/2.3. Psych/Goals.md"
+  },
+  {
+    "question": "What is the \"Sniper Protocol\" for job hunting?",
+    "expected_answer": "Identify key people (EM/Founder/PI), send a tailored narrative bridging AI Rating experience to their challenges, and provide proof of work (deployed projects).",
+    "source_file": "Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md"
+  },
+  {
+    "question": "What are the user's daily medications for allergies?",
+    "expected_answer": "Fexofenadine (Allegra) 180 mg daily and Dymista (Azelastine/Fluticasone) 1 spray each nostril 2x/day.",
+    "source_file": "Vault/2. Health/2.2. Medical/Health Summary.md"
+  },
+  {
+    "question": "What ignition system components were replaced during the April 2026 Pilot maintenance?",
+    "expected_answer": "6x Spark Plugs (NGK/Denso) and 6x Ignition Coils (OEM/Denso).",
+    "source_file": "Vault/3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md"
+  },
+  {
+    "question": "What is the user's current checking account balance?",
+    "expected_answer": "I cannot find the specific checking account balance in the vault. The notes focus on financial strategy, savings targets (like the Bronx Fund), and recurring payments rather than real-time balances.",
+    "source_file": null
+  }
+]
