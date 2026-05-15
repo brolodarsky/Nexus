@@ -25,7 +25,7 @@ A "Capture" is a raw, lightly-structured note stored in the Content Log. It acts
      ---
      ```
      (Add additional tags like `youtube`, `article`, etc., if contextually relevant).
-   - Add the standard return link below the YAML: `**Back to:** [[Table of Contents]]`
+   - Add the standard return link below the YAML: `Back to: [[Table of Contents]]`
    - Structure the body neatly. Emphasize a clear `## [Source Title]` and a `### Summary / Transcript` section.
    - Append the following footer text at the bottom of the note:
      `*Run [/distill_learning] on this note when ready to synthesize into the Zettelkasten.*`

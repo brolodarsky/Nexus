@@ -29,8 +29,8 @@ This workflow processes raw medical data and properly formats and files it into 
    date: YYYY-MM-DD
    ---
    ```
-2. **Standardize the File Name:** All ingested labs, visits, and logs must follow a consistent naming convention: `YYYY-MM-DD - Type - Extras.md`. Rename the file if necessary.
+2. Standardize the File Name: All ingested labs, visits, and logs must follow a consistent naming convention: `YYYY-MM-DD - Type - Extras.md`. Rename the file if necessary.
    - Example: `2026-04-07 - Clinical Summary - Encounters and Diagnoses.md`
    - Example: `2025-12-11 - Bloodwork - CBC and Metabolic Panel.md`
-3. **DELETE the raw file.** Once ingestion is successful and verified, use the command line to delete the original XML, PDF, or Image file to avoid clutter.
+3. DELETE the raw file. Once ingestion is successful and verified, use the command line to delete the original XML, PDF, or Image file to avoid clutter.
 4. Check the patient's `Health Summary.md` (e.g. `Mom's Health Summary.md`) and provide an entry linking to the new lab work/logs.

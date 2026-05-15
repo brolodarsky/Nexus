@@ -26,7 +26,7 @@ description: Breaks down a dense external source (article, paper, PDF, URL) into
 6. Establish Connections (Intra-linking):
    - Ensure the new or updated notes link back to the source material (URL, PDF, Markdown, etc).
    - Ensure they link to each other if part of the same source.
-   - Crucially, search the Vault for related existing concepts and add `[[wiki-links]]` tying the new knowledge into the existing web.
+   - Crucially, search the Vault for related existing concepts and add [[wiki-links]] tying the new knowledge into the existing web.
 
 7. Review and Execute:
    - Present a concise summary to the user: "I will create `Concept A.md` in `6.2.1` and augment `Existing Concept B.md`. Is this correct?"
