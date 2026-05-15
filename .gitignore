@@ -1,6 +1,7 @@
 .DS_Store
 # User specific VScode workspace file
 Brain2.code-workspace
+client_secret*.json
 
 
 # Python virtual environment
