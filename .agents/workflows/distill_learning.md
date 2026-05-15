@@ -5,7 +5,7 @@ description: Breaks down a dense external source (article, paper, PDF, URL) into
 # Steps
 
 1. Read & Absorb:
-   - Read the provided source material (using `read_url_content` for web pages, `view_file` for local docs, etc).
+   - Read the provided source material (using `tools/read_webpage.py` for URLs to ensure clean text extraction, `view_file` for local docs, etc).
 
 2. Extract Core Concepts:
    - Identify the most critical, distinct concepts, algorithms, or theories presented in the material.
