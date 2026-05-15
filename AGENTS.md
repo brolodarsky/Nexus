@@ -77,7 +77,7 @@ Deterministic scripts for vault and engine maintenance.
 |------|---------|
 | `youtube_transcript.py` | Downloads transcripts from YouTube videos to text files. |
 | `read_webpage.py` | Extracts clean markdown content from single webpages via trafilatura. |
-| `read_email.py` | Fetches a single email by IMAP UID and returns it as clean markdown. Supports Gmail App Passwords via env vars. Also lists recent emails with `--list-recent N`. |
+| `read_email.py` | Fetches a single email by IMAP UID and returns it as clean markdown. Supports Google OAuth2. Also lists recent emails with `--list-recent N`. |
 | `generate_podcast.py` | Converts a specific markdown note into an MP3 file via edge-tts. |
 | `check_folders.py` | Validates that the current Vault structure matches `Table of Contents.md`. |
 | `create_folders.py` | Idempotently creates the directory structure defined in the TOC. |
@@ -93,6 +93,8 @@ Deterministic scripts for vault and engine maintenance.
 | `engine/interfaces/cli.py` | CLI interface implementation. |
 | `engine/interfaces/voice.py` | Voice interface implementation (Whisper). |
 | `engine/interfaces/telegram.py` | Telegram interface implementation. |
+| `engine/tools/email_tool.py` | Core email fetching and parsing logic for the agentic engine. |
+| `engine/core/google_auth.py` | Centralized Google OAuth2 management (refreshing, token handling). |
 
 ### Workflows
 

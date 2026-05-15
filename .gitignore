@@ -41,6 +41,7 @@ Vault/*/*/*/*/*
 *.p12
 secrets.json
 credentials.json
+tools/.secrets/
 
 # CRITICAL: Never accidentally commit your git-crypt key!
 brain-key.key

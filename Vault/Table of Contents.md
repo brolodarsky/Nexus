@@ -32,6 +32,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **Projects**
 	- **[[Project - Brain 2 Non-Engine Functionality Upgrades]]:** Prioritized roadmap for system improvements.
 		- 1. **[[Workshop - Dashboard Option 1 Gameplan]]**
+			- **[[Project - Section 6.2 Library Condensation]]**
 	- **[[#6.1.2. Agentic R&D|Project - Brain 2 Agentic Engine]]:** Multi-agent LangGraph orchestration for vault intelligence.
 - **[[Template - New Note or Thought]]**
 - **[[Template - Capture]]** Used for capturing raw content (YouTube transcripts, podcasts, articles, etc.)
@@ -286,10 +287,12 @@ _The Content Log & Reference_
 - **📁 Agentic Config:** Mirror of the project's core agentic configuration (AGENTS.md, skills, and workflows).
 - **Resources:**
 	- **[Codex Docs](https://developers.openai.com/codex/app)**
+	- **[Google Cloud Console](https://console.cloud.google.com/)**
 	- **[OpenAI API](https://developers.openai.com/)**
 		- **[Documentation](https://developers.openai.com/api/docs)**
 		- **[Usage](https://platform.openai.com/usage)** - Track token usage.
 	- **[Tavily](https://app.tavily.com/home)**
+	- **[Tokenizer](https://platform.openai.com/tokenizer)**
 
 ### 6.1.3. Maintenance & Assets
 - **Project - Domain Portfolio**: Management and monetization of SiliSlick.com and others.
@@ -536,6 +539,7 @@ The dominant language for AI/ML and Agentic Workflows.
 - **Safety:** Defending against adversarial payloads, prompt injections, and infinite resource loops.
 
 - 📁 **Sources**
+	- **[[Article - Building Effective Agents]]**
 
 ### 6.2.12. AI for Science & Healthcare
 #### Articles & Research

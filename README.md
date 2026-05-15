@@ -126,12 +126,17 @@ Brain 2/
 │   ├── agents/                  # Domain-specific agents
 │   │   └── vault_reader/        # Vault Reader agent logic
 │   ├── core/                    # Shared engine configuration
+│   │   ├── audio.py             # Whisper transcription service
+│   │   ├── constants.py         # Global constants
+│   │   └── google_auth.py       # Reusable OAuth2 manager
 │   ├── evals/                   # Benchmarking & Golden Dataset
 │   │   ├── dataset.json         # 12 real-world Q&A cases
 │   │   ├── runner.py            # Automated eval script
 │   │   └── results/             # Structured eval reports
 │   ├── interfaces/              # Entry-point implementations (cli, voice, telegram)
 │   └── tools/                   # Shared engine utilities
+│       ├── email_tool.py        # Core email fetching logic
+│       └── vault_tools.py       # Vault navigation tools
 ├── tools/                      # Automation tools
 │   └── resume_engine/          # Premium PDF rendering system
 ├── requirements.txt            # Pinned Python dependencies
@@ -194,7 +199,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 |---|---|---|
 | `youtube_transcript.py` | Downloads YouTube transcripts to text files. | `python tools/youtube_transcript.py <url>` |
 | `read_webpage.py` | Extracts clean markdown content from single webpages via trafilatura. | `python tools/read_webpage.py <url> [-o output.md]` |
-| `read_email.py` | Fetches a single email by IMAP UID and returns clean markdown. Supports Gmail App Passwords via env vars. | `python tools/read_email.py <uid> [-o output.md]` / `python tools/read_email.py --list-recent 10` |
+| `read_email.py` | Fetches a single email by IMAP UID and returns clean markdown. Supports Google OAuth2. | `python tools/read_email.py <uid> [-o output.md]` / `python tools/read_email.py --list-recent 10` |
 | `generate_podcast.py` | Converts a specific markdown note to MP3 via edge-tts. | `python tools/generate_podcast.py <path> [--force]` |
 | `create_folders.py` | Idempotently creates the folder structure from TOC. | `python tools/create_folders.py` |
 | `check_folders.py` | Validates Vault structure against TOC (dry-run). | `python tools/check_folders.py` |
