@@ -10,8 +10,12 @@ import sys
 from typing import Optional
 from html.parser import HTMLParser
 
-# Import our unified auth manager
-from engine.core.google_auth import get_google_credentials
+# Add engine root to sys.path for internal imports
+ENGINE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ENGINE_ROOT not in sys.path:
+    sys.path.insert(0, ENGINE_ROOT)
+
+from core.google_auth import get_google_credentials
 
 # Full IMAP permissions scope for Google Accounts
 SCOPES = ['https://mail.google.com/']

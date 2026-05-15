@@ -9,6 +9,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Shared Google Auth Module:** Created `engine/core/google_auth.py` to centralize OAuth2 handling (refreshing, token management, and browser-based auth) for all Google-integrated tools.
 - **Agentic Email Tool:** Created `engine/tools/email_tool.py` containing the core IMAP and MIME parsing logic, allowing the AI Agent to import email capabilities directly.
 
+### Fixed
+- **Email Tool Imports:** Resolved a `ModuleNotFoundError` where `engine/tools/email_tool.py` could not locate the `core` package when imported from the project root. Improved path injection robustness for standalone tool execution.
+
 ### Changed
 - **Email Tool Refactor:** Modularized `tools/read_email.py` into a thin CLI wrapper. It now imports its core logic from the engine and stores credentials in a dedicated, gitignored `tools/.secrets/` folder.
 - **Improved Security:** Updated `.gitignore` to protect the new `tools/.secrets/` directory and transitioned to the standard `https://mail.google.com/` OAuth scope for more reliable IMAP access.
