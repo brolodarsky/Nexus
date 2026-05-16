@@ -50,5 +50,8 @@ brain-key.key
 .chroma_db/
 .rag_index_manifest.json
 
+# Local query run logs
+engine/logs/
+
 __pycache__/
 *.pyc

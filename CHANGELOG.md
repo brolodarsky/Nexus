@@ -3,6 +3,14 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.15.1] - 2026-05-16
+
+### Added
+- **Structured Run Logs for Vault Reader:** Implemented a lightweight, append-only JSONL run logger (`engine/logs/run_logs.jsonl`) that captures execution details for every vault reader query (CLI, interactive, voice, Telegram, and evals). Logs include ISO timestamp, raw query, execution status, deduplicated cited sources (extracted from tool calls and final text), errors, and sequential tool calls with arguments.
+
+### Changed
+- **Local-First Security Ignore Rules:** Updated `.gitignore` to explicitly exclude `engine/logs/` from version control, preserving the local-only nature of the user's private query history and thoughts.
+
 ## [1.15.0] - 2026-05-15
 
 ### Added
