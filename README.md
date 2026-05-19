@@ -157,6 +157,13 @@ pip install -r requirements.txt
 
 > The `.venv/` folder is excluded from Git. `requirements.txt` is the source of truth for dependencies.
 
+### Phone Chat Ingestion Setup (`ingest_phone.py`)
+To use the universal chat scraper, you must have ADB (Android Debug Bridge) installed and your phone configured:
+1. **Install ADB**: On Windows, you can use Winget: `winget install Google.PlatformTools --accept-source-agreements`. Ensure the installation directory is in your system `PATH`.
+2. **Enable USB Debugging**: On your Android phone, go to Settings → Developer Options → Enable "USB Debugging".
+3. **Connect**: Connect via USB (or wireless ADB) and tap "Allow" on the phone's authorization dialog.
+4. **Run**: Open the chat you want to save on your phone's screen and run `python tools/ingest_phone.py --screens <N>`.
+
 ---
 
 ## The Engine (Skills, Workflows & Tools)
