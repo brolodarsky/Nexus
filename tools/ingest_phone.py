@@ -343,6 +343,7 @@ def capture_conversation(device: str, num_screens: int,
     seen_texts = set()
     contact_name = None
     screen_batches = []  # Each entry is one screen's unique messages
+    empty_screens = 0
 
     for i in range(num_screens):
         if i > 0:
@@ -372,8 +373,12 @@ def capture_conversation(device: str, num_screens: int,
         print(f"   ✅ Found {len(screen_msgs)} nodes, {len(batch)} new messages")
 
         if len(batch) == 0 and i > 0:
-            print("   ⏹️  No new messages found — reached top of thread.")
-            break
+            empty_screens += 1
+            if empty_screens >= 3:
+                print("   ⏹️  No new messages found for 3 screens — reached top of thread.")
+                break
+        else:
+            empty_screens = 0
 
     # Screen 1 = newest (bottom of thread), last screen = oldest (top).
     # Reverse screen order so oldest screen comes first, then flatten.
