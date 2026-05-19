@@ -207,6 +207,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `backup_vault.py` | Creates a timestamped local backup of the `Vault/`. | `python tools/backup_vault.py` |
 | `sync_vault.py` | Automatically commits the nested Vault repository (The Nested Heart). | `python tools/sync_vault.py` |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
+| `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python tools/ingest_phone.py --screens 50` |
 | `engine/main.py` | Universal coordinator for the Brain 2 Engine. Features a persistent mission control menu and background Telegram bot. | `python engine/main.py` |
 | `engine/evals/runner.py` | Benchmarks the Vault Reader against the Golden Dataset. | `python -m engine.evals.runner` |
 | `engine/agents/vault_reader/agent.py` | Core ReAct agent execution logic (LangGraph). | `python engine/main.py <query>` |
