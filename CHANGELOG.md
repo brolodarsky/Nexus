@@ -11,6 +11,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - **Phone Chat Ingestion (`ingest_phone.py`):** Increased empty screen tolerance from 1 to 3 consecutive screens. This prevents the scraper from prematurely terminating when encountering long voice notes or large emoji reactions that register as zero text nodes in the UI hierarchy.
 
+### Changed
+- **Analyze Health & Analyze Psych Skills:** Updated `analyze_health` and `analyze_psych` skills to mandate safely caveated, probabilistic language when discussing medical symptoms, diagnoses, or physiological mechanisms (e.g., using "may be a cause" instead of absolute declarations). Updated their descriptions in `AGENTS.md` to reflect this tone adjustment.
+
 ## [1.15.1] - 2026-05-16
 
 ### Added

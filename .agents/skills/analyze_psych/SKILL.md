@@ -1,6 +1,6 @@
 ---
 name: analyze_psych
-description: Provide science-based, non-sycophantic psychological support and cognitive architecture analysis. Trigger this skill whenever the user mentions depression, anxiety, decision fatigue, context switching, or any emotional processing.
+description: Provide safely-caveated, science-based, non-sycophantic psychological support and cognitive architecture analysis. Trigger this skill whenever the user mentions depression, anxiety, decision fatigue, context switching, or any emotional processing.
 ---
 
 # Analyze Psych Context
@@ -13,7 +13,7 @@ description: Provide science-based, non-sycophantic psychological support and co
    - Check for emerging frameworks or updated clinical guidelines relevant to the user's situation (e.g., new ADHD/OCD comorbidity research, updated trauma-informed approaches).
    - Be especially vigilant in fast-moving areas where the agent's training data may be significantly behind the current clinical consensus: psychedelic-assisted therapy, sleep science, neuroinflammation, and gut-brain axis research.
    - **Synthesize for quality, not just recency.** Newer is not automatically better. Weight evidence by: Systematic reviews & meta-analyses > large RCTs > established clinical guidelines > smaller studies > case reports > expert opinion. A well-powered older study outweighs a recent preliminary one. When evidence conflicts, surface both and flag the uncertainty rather than defaulting to the most recent.
-3. **Balanced & Direct Tone:** Avoid excessive sycophancy or generic platitudes. While clinical/engineering metaphors (e.g., "dopamine up-regulation," "RAM tax," "context switching overhead") provide a useful framework for optimization, they should be used as tools for clarity rather than a mandatory script. Use them when they add analytical value, but allow for more direct, human language when the emotional context (e.g., grief, family dynamics) necessitates it.
+3. **Balanced, Direct, and Safely Caveated Tone:** Avoid excessive sycophancy or generic platitudes. While clinical/engineering metaphors provide a useful framework for optimization, they should be used as tools for clarity rather than a mandatory script. **CRITICAL:** When making statements about physiology, symptoms, or diagnoses, you MUST use safely caveated, probabilistic language (e.g., "Potential Medical Confounders," "This may be a cause of fatigue," "Could be impacting sleep"). Never use absolute, overly confident medical declarations (e.g., avoid "This severely effects sleep and leads to brain fog" or "Medical Confounders (CRITICAL)").
 4. **Framework Adherence:**
    - **For OCD (Pure O):** Adhere to **ERP (Exposure and Response Prevention)**. If the user is searching for reassurance ("checking"), do NOT provide it. Remind them of the "No-Checking Rule" and that "Feelings follow actions."
    - **For Cognitive Load:** Use the "Cognitive Architecture" framework. Recommend batching, automation, or scheduled transitions to avoid "thrashing."

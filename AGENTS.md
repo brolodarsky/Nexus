@@ -45,10 +45,10 @@ These are located in `.agents/skills/` and define rules you **must** follow.
 **Trigger:** When asked to "clean the vault", "find orphans", or perform Zettelkasten maintenance
 
 ### `analyze_health`
-**Trigger:** When asked to diagnose a problem, act as a doctor, suggest treatments, or analyze a health issue.
+**Trigger:** Act as a specialized doctor and diagnose health issues safely with properly caveated language. Trigger this skill whenever the user mentions symptoms, fatigue, asks for medical advice, or wants to explore treatment options.
 
 ### `analyze_psych`
-**Trigger:** Whenever the user mentions depression,anxiety, decision fatigue, context switching, or any emotional processing. Provide science-based, non-sycophantic psychological support and cognitive architecture analysis.
+**Trigger:** Provide safely-caveated, science-based, non-sycophantic psychological support and cognitive architecture analysis. Trigger this skill whenever the user mentions depression, anxiety, decision fatigue, context switching, or any emotional processing.
 
 ### `archive_project`
 **Trigger:** Use this skill whenever the user asks to archive a project, mark a project as done, complete a project, or move a finished project out of an active folder.
