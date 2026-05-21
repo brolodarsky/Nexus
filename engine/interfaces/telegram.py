@@ -12,7 +12,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
-from agents.vault_reader.agent import execute_vault_query
+from agents.librarian.agent import execute_vault_query
 from core.audio import transcribe_audio
 
 # Load environment variables

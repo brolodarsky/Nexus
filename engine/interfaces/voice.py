@@ -87,10 +87,10 @@ def capture_voice_query():
 if __name__ == "__main__":
     query = capture_voice_query()
     if query:
-        from agents.vault_reader.agent import run_ask_brain
+        from agents.librarian.agent import ask_librarian
         print(f"🧠 Querying Vault Agent: {query}")
         print("Agent is reasoning and searching the vault...\n")
-        response = run_ask_brain(query)
+        response = ask_librarian(query)
         print("\n" + "="*45)
         print("🤖 Response:")
         print("="*45)

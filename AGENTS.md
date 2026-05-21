@@ -91,8 +91,8 @@ Deterministic scripts for vault and engine maintenance.
 | `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures conversations from any app (Google Messages, Tinder, Hinge, WhatsApp, Signal, etc.) via `uiautomator dump` and saves structured Markdown to `0. Inbox/`. Supports multi-screen scroll capture. |
 | `resume_engine/` | Node.js (Playwright) for PDF rendering + Python (`python-docx`) for DOCX generation. Interactive document picker scans `3.1.3. Professional Portfolio & Evidence/Resumes/` and `Cover Letters/` for renderable markdown documents. Also accepts a CLI path argument for scripted use. |
 | `engine/main.py` | Universal entry point & coordinator for the Agentic Engine. Features a persistent mission control menu with background Telegram bot support. |
-| `engine/evals/runner.py` | Benchmarks the Vault Reader against the Golden Dataset using 12 real-world Q&A cases. |
-| `engine/agents/vault_reader/agent.py` | Core ReAct agent execution logic (LangGraph). |
+| `engine/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset using 12 real-world Q&A cases. |
+| `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). |
 | `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`). |
 | `engine/interfaces/cli.py` | CLI interface implementation. |
 | `engine/interfaces/voice.py` | Voice interface implementation (Whisper). |

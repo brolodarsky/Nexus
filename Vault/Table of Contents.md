@@ -37,7 +37,6 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **[[Template - New Note or Thought]]**
 - **[[Template - Capture]]** Used for capturing raw content (YouTube transcripts, podcasts, articles, etc.)
 - **[[Protocol - Brain Maintenance]]**
-- **[[List - Brain 2 Agentic Instructions]]**
 - **Toolbox:** Documentation for the Pixel 8 Pro, Obsidian/Logseq workflows, and local LLM setups.
 - **📁 [Archive](obsidian://search?vault=Vault&query=path%3A"1.2.%20Personal%20Knowledge%20Management%20(PKM)/Archive")**
 
@@ -69,6 +68,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 ## 2.2. Medical
 - **[[Health Summary]]**: Master dashboard for symptoms, workups, doctors visits, lab work, biomarkers, medical history and longitudinal tracking.
+- **[[Doc - Psychiatrist Intake Summary]]**
 - **[[Insurance Card]]**
 	- [[Doc - Medical Insurance 2026 Summary of Benefits and Coverage (SBC)]]: 2026 Oscar Health Summary of Benefits and Coverage
 - **[[Prescriptions]]**
@@ -89,6 +89,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 	- **[[Protocol - Nightly System Shutdown]]**
 	- **[[Protocol - Reduce Phone Use]]**
 	- **[[Protocol - Dating Grounding & Dopamine Management]]**
+	- **[[Protocol - Preemptive Rejection & The Transparency Illusion]]**
 	- **[[Cognitive Engineering Log]]**
 	- **[[Life Chronology]]**
 - **Meditation & Mindfulness:** Rituals for grounding and focus.
@@ -274,17 +275,16 @@ _The Content Log & Reference_
 - **[Project Feeder Github](https://github.com/brolodarsky/Feeder):** Python logic, UI/UX, and database development.
 - **[Project MEM Billing](<file:///C:\Users\Willi\Documents\Projects\MEMBilling>):** Billing Automation. Scripts for LCSW medical billing efficiency.
 - **[[Project - Personal Portfolio Website]]**
+- **[[Project - Vault Renderer Engine]]:** Markdown-to-HTML rendering engine for premium Vault browsing.
 - **[Brain 2 Github](https://github.com/brolodarsky/Brain2)**
 
 ### 6.1.2. Agentic R&D
-- **[[List - Brain 2 Agentic Instructions]]**
 - Master roadmap for LangGraph agents (/ask_brain, doctor panel, routing).
 - **📁 [[Project - Brain 2 Agentic Engine|Brain 2 Agentic Engine]]**
-	- **[[Project - Vault Reader Agent]]**
+	- **[[Project - Librarian Agent]]**
 	- **[[Workshop - MCP Additions]]**
 	- **📁 Archive**
 - **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for eCommerce Silislick.com family business.
-- **📁 Agentic Config:** Mirror of the project's core agentic configuration (AGENTS.md, skills, and workflows).
 - **Resources:**
 	- **[Codex Docs](https://developers.openai.com/codex/app)**
 	- **[Google Cloud Console](https://console.cloud.google.com/)**
@@ -533,6 +533,7 @@ The dominant language for AI/ML and Agentic Workflows.
 	- [LlamaIndex](https://www.llamaindex.ai/) (Data pipelines)
 - **Autonomous Coding Agents:** IDE-native agentic environments (Cline/Antigravity, Cursor) and terminal-based CLI agents.
 	- **[[List - Agentic Coding Tools to Learn]]:** Learning queue for Claude Code, Claude Cowork, and OpenAI Codex CLI.
+	- **[[Concept - Google Antigravity]]:** IDE-native agentic coding assistant by Google DeepMind.
 #### Governance, Safety, & Evaluation
 - **Enterprise Governance:** Managing autonomous boundaries, strict tool bounding, and Human-in-the-Loop (HITL) checkpoints.
 - **Benchmarking:** SWE-bench (software engineering mastery), WebArena (browser automation).

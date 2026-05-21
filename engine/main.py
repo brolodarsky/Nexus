@@ -9,7 +9,7 @@ import threading
 import logging
 import time
 
-from agents.vault_reader.agent import run_ask_brain
+from agents.librarian.agent import ask_librarian
 
 # Disable noisy logs
 logging.getLogger('httpx').setLevel(logging.WARNING)
@@ -45,7 +45,7 @@ def show_menu():
 def print_agent_response(query: str, filters: dict = None):
     print(f"🧠 Querying Vault Agent: {query}")
     print("Agent is reasoning and searching the vault...\n")
-    response = run_ask_brain(query, filters=filters)
+    response = ask_librarian(query, filters=filters)
     print("\n" + "="*45)
     print("🤖 Response:")
     print("="*45)

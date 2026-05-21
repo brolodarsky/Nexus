@@ -19,7 +19,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.15.1] - 2026-05-16
 
 ### Added
-- **Structured Run Logs for Vault Reader:** Implemented a lightweight, append-only JSONL run logger (`engine/logs/run_logs.jsonl`) that captures execution details for every vault reader query (CLI, interactive, voice, Telegram, and evals). Logs include ISO timestamp, raw query, execution status, deduplicated cited sources (extracted from tool calls and final text), errors, and sequential tool calls with arguments.
+- **Structured Run Logs for Librarian:** Implemented a lightweight, append-only JSONL run logger (`engine/logs/run_logs.jsonl`) that captures execution details for every vault reader query (CLI, interactive, voice, Telegram, and evals). Logs include ISO timestamp, raw query, execution status, deduplicated cited sources (extracted from tool calls and final text), errors, and sequential tool calls with arguments.
 
 ### Changed
 - **Local-First Security Ignore Rules:** Updated `.gitignore` to explicitly exclude `engine/logs/` from version control, preserving the local-only nature of the user's private query history and thoughts.
@@ -42,7 +42,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **New Tool: Email Reader:** Created `tools/read_email.py`, a lightweight IMAP email reader analogous to `read_webpage.py`. Fetches a single email by UID and outputs clean markdown (subject, from, date, body). Supports Gmail App Passwords via env vars (`EMAIL_ADDRESS`, `EMAIL_PASSWORD`, `IMAP_SERVER`). Includes a `--list-recent N` flag for browsing the inbox before fetching. No external deps beyond stdlib; `python-dotenv` used optionally for `.env` loading.
 - **New Tool: Webpage Reader:** Created `tools/read_webpage.py`, a lightweight, deterministic webpage scraper using `trafilatura`. Designed to provide clean markdown content for the Brain 2 Agentic Engine's content ingestion and career search pipelines.
-- **Vault Reader Eval Framework:** Created `engine/evals/dataset.json` (Golden Dataset) with 12 real-world Q&A cases and `engine/evals/runner.py` for automated agent benchmarking and groundedness grading.
+- **Librarian Eval Framework:** Created `engine/evals/dataset.json` (Golden Dataset) with 12 real-world Q&A cases and `engine/evals/runner.py` for automated agent benchmarking and groundedness grading.
 - **Dependency Update:** Added `python-dotenv`, `trafilatura`, and `lxml_html_clean` to the project environment and updated `requirements.txt`.
 
 ### Changed
@@ -62,15 +62,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Nested Heart Architecture (Item 23):** Created a private Git repository inside `Vault/` to track personal history without polluting the public engine repository.
 - **Nested Heart Tool:** Added `tools/sync_vault.py` to automate the context-switch required to commit to the nested Vault repository.
-- Created `Project - Vault Reader Agent.md` to chart the new Agentic File System (AFS) Navigator architecture, replacing standard ChromaDB RAG.
-- **Vault Reader Agent Implementation:** Built `engine/tools/vault_tools.py` (`read_toc`, `read_note`, `search_vault`) and the LangGraph ReAct agent (`engine/agents/vault_reader/agent.py`) to actively navigate the local filesystem.
+- Created `Project - Librarian Agent.md` to chart the new Agentic File System (AFS) Navigator architecture, replacing standard ChromaDB RAG.
+- **Librarian Agent Implementation:** Built `engine/tools/vault_tools.py` (`read_toc`, `read_note`, `search_vault`) and the LangGraph ReAct agent (`engine/agents/librarian/agent.py`) to actively navigate the local filesystem.
 
 ### Changed
 - **Agent Rules:** Added Rule 11 to `AGENTS.md` explicitly instructing agents to ignore the `Vault/.git` directory.
-- Pivoted `/ask_brain` architecture from Vector RAG to Agentic Vault Reader to solve Context Fragmentation and preserve Zettelkasten hierarchy.
+- Pivoted `/ask_brain` architecture from Vector RAG to Agentic Librarian to solve Context Fragmentation and preserve Zettelkasten hierarchy.
 - Archived `engine/agents/rag/` into `Vault/6. Forge/6.1. Projects/6.1.4. Script Attic/Legacy RAG Engine/`.
 - Updated `Project - Brain 2 Agentic Engine.md`, `Table of Contents.md`, and `To Do List.md` to reflect the pivot.
-- Updated `engine/main.py` dispatcher to point to the new Vault Reader agent for CLI text queries.
+- Updated `engine/main.py` dispatcher to point to the new Librarian agent for CLI text queries.
 - Updated `ask_brain` workflow documentation in `AGENTS.md` and `README.md` to reflect removal of vector indexing requirement.
 - **Presentation Layer Centralization:** Refactored `engine/main.py` to be the sole presentation layer (using a new `print_agent_response` helper). Stripped execution and printing logic from `engine/interfaces/cli.py` and `engine/interfaces/voice.py`, turning them into pure input parsers (`parse_cli_args`, `capture_voice_query`).
 
@@ -99,7 +99,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **Architectural Cleanup:** Deleted redundant root-level wrappers (`engine/ask_brain.py`, `engine/brain_voice.py`, `engine/brain_telegram.py`) in favor of the unified dispatcher.
-- **Agent Modularity:** Moved `execute_rag_query` and `run_ask_brain` from `engine/main.py` to `engine/agents/rag/agent.py`.
+- **Agent Modularity:** Moved `execute_rag_query` and `ask_librarian` from `engine/main.py` to `engine/agents/rag/agent.py`.
 - **Ingestion Refinement:** Updated `engine/agents/rag/ingest_vault.py` with a proper `main()` entry point and fixed internal module pathing for the new architecture.
 
 ### Fixed

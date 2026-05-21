@@ -124,7 +124,7 @@ Brain 2/
 ├── engine/                      # RAG engine agent
 │   ├── main.py                  # Universal coordinator & mission control
 │   ├── agents/                  # Domain-specific agents
-│   │   └── vault_reader/        # Vault Reader agent logic
+│   │   └── librarian/        # Librarian agent logic
 │   ├── core/                    # Shared engine configuration
 │   │   ├── audio.py             # Whisper transcription service
 │   │   ├── constants.py         # Global constants
@@ -216,8 +216,8 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
 | `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python tools/ingest_phone.py --screens 50` |
 | `engine/main.py` | Universal coordinator for the Brain 2 Engine. Features a persistent mission control menu and background Telegram bot. | `python engine/main.py` |
-| `engine/evals/runner.py` | Benchmarks the Vault Reader against the Golden Dataset. | `python -m engine.evals.runner` |
-| `engine/agents/vault_reader/agent.py` | Core ReAct agent execution logic (LangGraph). | `python engine/main.py <query>` |
+| `engine/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m engine.evals.runner` |
+| `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). | `python engine/main.py <query>` |
 | `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation. | N/A |
 | `resume_engine/` | PDF and DOCX rendering for the Master Resume. | `node tools/resume_engine/render.js` |
 

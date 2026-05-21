@@ -15,7 +15,7 @@ from langchain_openai import ChatOpenAI
 
 from core.constants import AI_MODEL
 from tools.vault_tools import read_toc, read_note, search_vault
-from agents.vault_reader.prompts import SYSTEM_PROMPT
+from agents.librarian.prompts import SYSTEM_PROMPT
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
@@ -145,7 +145,7 @@ def log_query_run(query: str, final_state=None, error=None):
     except Exception as e:
         sys.stderr.write(f"Failed to write query log: {e}\n")
 
-def run_ask_brain(query: str, filters: dict = None) -> str:
+def ask_librarian(query: str, filters: dict = None) -> str:
     """
     Entry point for the vault reader agent. Returns a string response.
     """
