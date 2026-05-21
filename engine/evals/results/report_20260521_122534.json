@@ -1,0 +1,180 @@
+{
+  "summary": {
+    "total_cases": 7,
+    "passed": 7,
+    "failed": 0,
+    "errors": 0,
+    "avg_score": 9.6,
+    "avg_duration_sec": 5.36,
+    "total_prompt_tokens": 128039,
+    "total_completion_tokens": 2688,
+    "total_tokens": 130727,
+    "avg_tokens_per_query": 18675
+  },
+  "results": [
+    {
+      "case_id": 1,
+      "question": "What is called a \"major key\" in the objectives section of the agentic engine project?",
+      "expected_answer": "Human-In-The-Loop.",
+      "actual_answer": "In the project\u2019s objectives section, a **major key** is **Human-In-The-Loop**.\n\n[Sources]\n- 6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md",
+      "files_read": [
+        "[structure] 6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine",
+        "[structure] 1. The Core",
+        "6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md",
+        "[structure] 0. Inbox",
+        "[structure] 6. Forge/6.2. Library & Learning/6.2.11. Intelligent Agents & Autonomy"
+      ],
+      "target_source": "Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md",
+      "duration_sec": 5.75,
+      "token_usage": {
+        "prompt_tokens": 21400,
+        "completion_tokens": 314,
+        "total_tokens": 21714
+      },
+      "score": 10,
+      "reasoning": "The actual answer matches the expected answer exactly: the 'major key' is 'Human-In-The-Loop'. It is also grounded in the cited project file from the Agentic Engine project. No hallucinated facts are introduced.",
+      "grounded": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 2,
+      "question": "When was the Timing Belt last changed on the Honda Pilot and at what mileage?",
+      "expected_answer": "April 9, 2026, at 196,000 miles.",
+      "actual_answer": "The timing belt on the Honda Pilot was last changed on **2026-04-09** at **196,000 miles**.\n\n[Sources]\n- 3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md",
+      "files_read": [
+        "3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md",
+        "[structure] 3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto"
+      ],
+      "target_source": "Vault/3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md",
+      "duration_sec": 3.72,
+      "token_usage": {
+        "prompt_tokens": 9862,
+        "completion_tokens": 239,
+        "total_tokens": 10101
+      },
+      "score": 10,
+      "reasoning": "The actual answer exactly matches the expected answer: the timing belt was last changed on April 9, 2026 at 196,000 miles. It also cites the relevant Maintenance Log file, so the response is grounded and shows no hallucination.",
+      "grounded": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 3,
+      "question": "What were the example places to play chess in parks from my activities list?",
+      "expected_answer": "Washington Square Park and Bryant Park.",
+      "actual_answer": "The example places listed for playing chess in parks were:\n\n- Washington Square Park\n- Bryant Park\n\n[Sources]\n- 4. Playground/4.1. Social Life & Community/Activities List.md",
+      "files_read": [
+        "[structure] 4. Playground",
+        "4. Playground/4.1. Social Life & Community/Activities List.md"
+      ],
+      "target_source": "Vault/4. Playground/4.1. Social Life & Community/Activities List.md",
+      "duration_sec": 2.89,
+      "token_usage": {
+        "prompt_tokens": 14592,
+        "completion_tokens": 137,
+        "total_tokens": 14729
+      },
+      "score": 10,
+      "reasoning": "The actual answer exactly matches the expected answer: Washington Square Park and Bryant Park. It is grounded in the cited Activities List file, and no unsupported facts were introduced.",
+      "grounded": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 4,
+      "question": "What is the \"Sniper Protocol\" for job hunting?",
+      "expected_answer": "Identify key people (EM/Founder/PI), send a tailored narrative bridging AI Rating experience to their challenges, and provide proof of work (deployed projects).",
+      "actual_answer": "The **\u201cSniper Protocol\u201d** appears to be a targeted job-hunting/outreach strategy for specific roles and companies, especially EliseAI. From the notes, it involves:\n\n- **Selecting a high-priority target** and tailoring the pitch to that company\u2019s needs.\n- **Using a proof-of-work artifact** as outreach fuel \u2014 in this case, the **Brain 2 Architecture Loom Demo** is described as the primary \u201cProof of Work\u201d for the EliseAI Sniper Protocol.\n- **Doing contact-based outreach through the CRM** \u2014 the notes point to **Professional CRM** for contacts like Hayden Neubert and Minna Song.\n- **Making a company-specific message**: the Loom demo script is explicitly tailored to \u201cElise Health/EliseAI engineering culture\u201d and the role\u2019s focus on stateful agent orchestration.\n- **Following up strategically**: the CRM note says to follow up with Hayden in 5 days, or target Minna if Hayden doesn\u2019t reply.\n\nIn short: it\u2019s a **high-leverage, company-specific outbound job-search tactic** built around **targeted contacts + tailored proof-of-work + follow-up sequencing**.\n\n[Sources]\n- 3. Operations & Wealth/3.1. Career Strategy & Revenue/Saved Job Listings/Software Engineer (New Grads 2025-2026) - EliseAI.md\n- 3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Project - Brain 2 Architecture Loom Demo.md\n- 3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.4. Networking & Professional CRM/Professional CRM.md\n- 1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md\n- 1. The Core/1.2. Personal Knowledge Management (PKM)/Archive/2026/Project - Public Release Strategy & Radical Transparency.md",
+      "files_read": [
+        "3. Operations & Wealth/3.1. Career Strategy & Revenue/4.1. Networking & Professional CRM/Professional CRM.md",
+        "[structure] 1. The Core",
+        "1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md",
+        "[structure] 3. Operations & Wealth/3.1. Career Strategy & Revenue",
+        "3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Project - Brain 2 Architecture Loom Demo.md",
+        "6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md",
+        "3. Operations & Wealth/3.1. Career Strategy & Revenue/Saved Job Listings/Software Engineer (New Grads 2025-2026) - EliseAI.md",
+        "[structure] 6. Forge",
+        "1. The Core/1.2. Personal Knowledge Management (PKM)/Archive/2026/Project - Public Release Strategy & Radical Transparency.md"
+      ],
+      "target_source": "Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md",
+      "duration_sec": 9.87,
+      "token_usage": {
+        "prompt_tokens": 37419,
+        "completion_tokens": 902,
+        "total_tokens": 38321
+      },
+      "score": 8,
+      "reasoning": "The answer is mostly accurate and grounded. It captures the core idea from the expected answer: a targeted job-hunting strategy using key people, a tailored narrative, and proof of work. It also correctly grounds itself in the EliseAI job listing, the Brain 2 Architecture Loom Demo, and the Professional CRM notes. However, it adds some details not present in the expected answer (e.g., specific mention of Hayden/Minna follow-up sequencing and EliseAI-specific phrasing) and slightly over-elaborates beyond the concise expected formulation.",
+      "grounded": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 5,
+      "question": "What are the user's daily medications for allergies?",
+      "expected_answer": "Fexofenadine (Allegra) 180 mg daily and Dymista (Azelastine/Fluticasone) 1 spray each nostril 2x/day.",
+      "actual_answer": "The user\u2019s daily allergy medications are:\n\n- **Dymista** \u2014 **1 spray in each nostril 2x/day**\n- **Fexofenadine (Allegra)** \u2014 **180 mg once daily** / **1 tablet daily as needed** for allergies\n\n[Sources]\n- 2. Health/2.2. Medical/Health Summary.md\n- 2. Health/2.2. Medical/Health_Logs/Visit - 2026_04_02 - Allergist.md\n- 2. Health/2.2. Medical/Health_Logs/Visit - 2026_04_08 - PCP Followup.md",
+      "files_read": [
+        "2. Health/2.2. Medical/Health_Logs/Visit - 2026_04_08 - PCP Followup.md",
+        "2. Health/2.2. Medical/Health_Logs/Visit - 2026_04_02 - Allergist.md",
+        "[structure] 2. Health",
+        "2. Health/2.2. Medical/Health Summary.md"
+      ],
+      "target_source": "Vault/2. Health/2.2. Medical/Health Summary.md",
+      "duration_sec": 6.52,
+      "token_usage": {
+        "prompt_tokens": 18060,
+        "completion_tokens": 349,
+        "total_tokens": 18409
+      },
+      "score": 9,
+      "reasoning": "The answer is grounded in the listed health files and matches the expected medications: Dymista 1 spray in each nostril twice daily and fexofenadine (Allegra) 180 mg daily. The only minor issue is that it adds 'once daily / as needed' wording, which is slightly less precise than the expected answer but not contradictory.",
+      "grounded": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 6,
+      "question": "What was the name of my brother's girlfriends dog that stayed with us for a week?",
+      "expected_answer": "Magnolia",
+      "actual_answer": "The dog\u2019s name was **Magnolia**.\n\n[Sources]\n- 1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Memories/Memories Log.md",
+      "files_read": [
+        "[structure] 1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Memories",
+        "1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Memories/Memories Log.md",
+        "1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md",
+        "[structure] 1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal"
+      ],
+      "target_source": "Vault/1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md",
+      "duration_sec": 5.02,
+      "token_usage": {
+        "prompt_tokens": 14067,
+        "completion_tokens": 342,
+        "total_tokens": 14409
+      },
+      "score": 10,
+      "reasoning": "The actual answer exactly matches the expected answer: Magnolia. It is concise, accurate, and there is no evidence of hallucination. The cited file set includes the provided source file where this fact was presumably found, so the response is grounded.",
+      "grounded": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 7,
+      "question": "What is the user's current checking account balance?",
+      "expected_answer": "I cannot find the specific checking account balance in the vault. The notes focus on financial strategy, savings targets (like the Bronx Fund), and recurring payments rather than real-time balances.",
+      "actual_answer": "[Not Found] I was unable to find information about the user's current checking account balance in the vault.\n\nI searched the following areas:\n- 3. Operations & Wealth\n- 3. Operations & Wealth/3.2. Wealth & Asset Management\n- Notes related to budgeting, wealth management, and checking accounts\n\n[Sources]\n(none)",
+      "files_read": [
+        "[structure] 3. Operations & Wealth/3.2. Wealth & Asset Management",
+        "3. Operations & Wealth/3.2. Wealth & Asset Management/Master Framework.md",
+        "3. Operations & Wealth/3.2. Wealth & Asset Management/Project - Personal Finance & Budgeting System.md",
+        "[structure] 3. Operations & Wealth",
+        "3. Operations & Wealth/3.2. Wealth & Asset Management/High Yield Savings Deep Dive.md"
+      ],
+      "target_source": null,
+      "duration_sec": 3.77,
+      "token_usage": {
+        "prompt_tokens": 12639,
+        "completion_tokens": 405,
+        "total_tokens": 13044
+      },
+      "score": 10,
+      "reasoning": "The actual answer matches the expected answer: it states that the checking account balance could not be found in the vault. It is appropriately cautious, does not invent a balance, and aligns with the described file scope focused on budgeting, wealth management, and savings rather than real-time account balances. No unsupported claims are made.",
+      "grounded": true,
+      "status": "PASS"
+    }
+  ]
+}
