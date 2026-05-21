@@ -17,6 +17,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Librarian System Prompt Rewrite:** Enforces a "navigate-first, search-second" strategy. Step 1 is now "review the vault structure above" (pre-injected), followed by targeted drill-down and scoped grep. Full-vault search is an explicit last resort.
 - **Ignored Directories:** Added `.stfolder`, `.vscode`, `__pycache__` to `IGNORE_DIRS` in `constants.py`.
 - **Eval Runner Output:** Now displays per-case duration and token count, plus aggregate token stats in the summary (prompt/output/total tokens, avg tokens/query).
+- **Eval Runner Output:** Restructured `report_*.json` output to include a top-level `summary` object containing aggregate token stats, scores, and runtimes, alongside the `results` array.
 
 ## [1.16.0] - 2026-05-19
 

@@ -127,13 +127,19 @@ class EvalRunner:
             print(f"  Duration: {result.get('duration_sec', 'N/A')}s | Tokens: {tok.get('total_tokens', 'N/A')}")
             print(f"  Files Read: {result.get('files_read', [])}\n")
 
+        summary = self.get_summary(results)
+        report_data = {
+            "summary": summary,
+            "results": results
+        }
+
         # Save results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         report_path = RESULTS_DIR / f"report_{timestamp}.json"
         with open(report_path, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2)
+            json.dump(report_data, f, indent=2)
             
-        self.print_summary(results, report_path)
+        self.print_summary(summary, report_path)
 
     def grade_answer(self, question, expected, actual, files_read) -> Dict:
         prompt = GRADER_PROMPT.format(
@@ -160,32 +166,48 @@ class EvalRunner:
         except Exception as e:
             return {"score": 0, "reasoning": f"Grading failed: {e}", "grounded": False}
 
-    def print_summary(self, results, report_path):
+    def get_summary(self, results) -> dict:
         total = len(results)
         passed = len([r for r in results if r.get("status") == "PASS"])
         errors = len([r for r in results if r.get("status") == "ERROR"])
         avg_score = sum([r.get("score", 0) for r in results]) / (total - errors) if total > errors else 0
-        avg_duration = sum([r.get("duration_sec", 0) for r in results]) / total if total else 0
+        total_duration = sum([r.get("duration_sec", 0) for r in results])
+        avg_duration = total_duration / total if total else 0
         
-        # Token totals
         total_prompt = sum(r.get("token_usage", {}).get("prompt_tokens", 0) for r in results)
         total_completion = sum(r.get("token_usage", {}).get("completion_tokens", 0) for r in results)
         total_tokens = sum(r.get("token_usage", {}).get("total_tokens", 0) for r in results)
         
+        return {
+            "total_cases": total,
+            "passed": passed,
+            "failed": total - passed - errors,
+            "errors": errors,
+            "avg_score": round(avg_score, 1),
+            "total_duration_sec": round(total_duration, 2),
+            "avg_duration_sec": round(avg_duration, 2),
+            "total_prompt_tokens": total_prompt,
+            "total_completion_tokens": total_completion,
+            "total_tokens": total_tokens,
+            "avg_tokens_per_query": total_tokens // total if total else 0
+        }
+
+    def print_summary(self, summary, report_path):
         print("="*50)
         print("SUMMARY")
         print("="*50)
-        print(f"Total Cases:    {total}")
-        print(f"Passed:         {passed}")
-        print(f"Failed:         {total - passed - errors}")
-        print(f"Errors:         {errors}")
-        print(f"Avg Score:      {avg_score:.1f}/10")
-        print(f"Avg Duration:   {avg_duration:.2f}s")
+        print(f"Total Cases:    {summary['total_cases']}")
+        print(f"Passed:         {summary['passed']}")
+        print(f"Failed:         {summary['failed']}")
+        print(f"Errors:         {summary['errors']}")
+        print(f"Avg Score:      {summary['avg_score']:.1f}/10")
+        print(f"Total Duration: {summary['total_duration_sec']:.2f}s")
+        print(f"Avg Duration:   {summary['avg_duration_sec']:.2f}s")
         print(f"---")
-        print(f"Prompt Tokens:  {total_prompt:,}")
-        print(f"Output Tokens:  {total_completion:,}")
-        print(f"Total Tokens:   {total_tokens:,}")
-        print(f"Avg Tokens/Q:   {total_tokens // total if total else 0:,}")
+        print(f"Prompt Tokens:  {summary['total_prompt_tokens']:,}")
+        print(f"Output Tokens:  {summary['total_completion_tokens']:,}")
+        print(f"Total Tokens:   {summary['total_tokens']:,}")
+        print(f"Avg Tokens/Q:   {summary['avg_tokens_per_query']:,}")
         print(f"---")
         print(f"Report:         {report_path}")
         print("="*50)
