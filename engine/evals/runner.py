@@ -81,7 +81,19 @@ class EvalRunner:
                                 files_read.append(tc['args'].get('note_path'))
                             elif tc['name'] == 'read_toc':
                                 files_read.append("Table of Contents.md")
+                            elif tc['name'] == 'get_vault_structure':
+                                vs_path = tc['args'].get('path')
+                                files_read.append(f"[structure] {vs_path or 'root'}")
                 
+                # Extract token usage from AI messages
+                token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                for msg in messages:
+                    usage = getattr(msg, 'usage_metadata', None)
+                    if usage:
+                        token_usage["prompt_tokens"] += usage.get("input_tokens", 0)
+                        token_usage["completion_tokens"] += usage.get("output_tokens", 0)
+                        token_usage["total_tokens"] += usage.get("total_tokens", 0)
+
                 # Grade the answer
                 grade = self.grade_answer(question, expected, actual_answer, files_read)
                 
@@ -93,6 +105,7 @@ class EvalRunner:
                     "files_read": list(set(files_read)),
                     "target_source": target_source,
                     "duration_sec": round(duration, 2),
+                    "token_usage": token_usage,
                     "score": grade.get("score"),
                     "reasoning": grade.get("reasoning"),
                     "grounded": grade.get("grounded"),
@@ -109,7 +122,9 @@ class EvalRunner:
                 }
             
             results.append(result)
+            tok = result.get('token_usage', {})
             print(f"  Result: {result.get('status')} (Score: {result.get('score', 'N/A')}/10)")
+            print(f"  Duration: {result.get('duration_sec', 'N/A')}s | Tokens: {tok.get('total_tokens', 'N/A')}")
             print(f"  Files Read: {result.get('files_read', [])}\n")
 
         # Save results
@@ -150,17 +165,30 @@ class EvalRunner:
         passed = len([r for r in results if r.get("status") == "PASS"])
         errors = len([r for r in results if r.get("status") == "ERROR"])
         avg_score = sum([r.get("score", 0) for r in results]) / (total - errors) if total > errors else 0
+        avg_duration = sum([r.get("duration_sec", 0) for r in results]) / total if total else 0
         
-        print("="*45)
+        # Token totals
+        total_prompt = sum(r.get("token_usage", {}).get("prompt_tokens", 0) for r in results)
+        total_completion = sum(r.get("token_usage", {}).get("completion_tokens", 0) for r in results)
+        total_tokens = sum(r.get("token_usage", {}).get("total_tokens", 0) for r in results)
+        
+        print("="*50)
         print("SUMMARY")
-        print("="*45)
-        print(f"Total Cases:  {total}")
-        print(f"Passed:       {passed}")
-        print(f"Failed:       {total - passed - errors}")
-        print(f"Errors:       {errors}")
-        print(f"Avg Score:    {avg_score:.1f}/10")
-        print(f"Report:       {report_path}")
-        print("="*45)
+        print("="*50)
+        print(f"Total Cases:    {total}")
+        print(f"Passed:         {passed}")
+        print(f"Failed:         {total - passed - errors}")
+        print(f"Errors:         {errors}")
+        print(f"Avg Score:      {avg_score:.1f}/10")
+        print(f"Avg Duration:   {avg_duration:.2f}s")
+        print(f"---")
+        print(f"Prompt Tokens:  {total_prompt:,}")
+        print(f"Output Tokens:  {total_completion:,}")
+        print(f"Total Tokens:   {total_tokens:,}")
+        print(f"Avg Tokens/Q:   {total_tokens // total if total else 0:,}")
+        print(f"---")
+        print(f"Report:         {report_path}")
+        print("="*50)
 
 if __name__ == "__main__":
     runner = EvalRunner()

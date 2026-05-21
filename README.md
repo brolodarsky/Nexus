@@ -218,7 +218,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `engine/main.py` | Universal coordinator for the Brain 2 Engine. Features a persistent mission control menu and background Telegram bot. | `python engine/main.py` |
 | `engine/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m engine.evals.runner` |
 | `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). | `python engine/main.py <query>` |
-| `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation. | N/A |
+| `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`, `get_vault_structure`). Supports targeted subtree search and frontmatter tag filtering. | N/A |
 | `resume_engine/` | PDF and DOCX rendering for the Master Resume. | `node tools/resume_engine/render.js` |
 
 ### PowerShell Integration

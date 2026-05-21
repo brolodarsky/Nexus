@@ -1,0 +1,127 @@
+[
+  {
+    "case_id": 1,
+    "question": "What is called a \"major key\" in the objectives section of the agentic engine project?",
+    "expected_answer": "Human-In-The-Loop.",
+    "actual_answer": "In the objectives section of the Agentic Engine project, a **\u201cmajor key\u201d** is **Human-In-The-Loop (HITL)**.\n\nThe note says: **\u201cHuman-In-The-Loop is a major key.\u201d**\n\n[Sources]\n- 6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md",
+    "files_read": [
+      "[structure] root",
+      "[structure] 6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine",
+      "[structure] 6. Forge/6.2. Library & Learning/6.2.11. Intelligent Agents & Autonomy",
+      "6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md"
+    ],
+    "target_source": "Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md",
+    "duration_sec": 14.78,
+    "score": 10,
+    "reasoning": "The actual answer matches the expected answer exactly: the 'major key' in the objectives section is Human-In-The-Loop (HITL). It is grounded in the cited project file and does not introduce unsupported facts.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 2,
+    "question": "When was the Timing Belt last changed on the Honda Pilot and at what mileage?",
+    "expected_answer": "April 9, 2026, at 196,000 miles.",
+    "actual_answer": "The timing belt on the Honda Pilot was last changed on **2026-04-09** at **196,000 miles**.\n\n[Sources]\n- 3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md",
+    "files_read": [
+      "3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md",
+      "[structure] 3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto",
+      "[structure] root"
+    ],
+    "target_source": "Vault/3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md",
+    "duration_sec": 5.29,
+    "score": 10,
+    "reasoning": "The actual answer exactly matches the expected answer: the timing belt was last changed on April 9, 2026 at 196,000 miles. It is grounded in the cited Maintenance Log file and does not introduce unsupported facts.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 3,
+    "question": "What were the example places to play chess in parks from my activities list?",
+    "expected_answer": "Washington Square Park and Bryant Park.",
+    "actual_answer": "The example places to play chess in parks from your activities list were:\n\n- Washington Square Park\n- Bryant Park\n\n[Sources]\n- 4. Playground/4.1. Social Life & Community/Activities List.md",
+    "files_read": [
+      "[structure] root",
+      "4. Playground/4.1. Social Life & Community/Activities List.md"
+    ],
+    "target_source": "Vault/4. Playground/4.1. Social Life & Community/Activities List.md",
+    "duration_sec": 4.29,
+    "score": 10,
+    "reasoning": "The actual answer exactly matches the expected answer by naming Washington Square Park and Bryant Park. It is also grounded in the cited file, Activities List.md, which is the correct source from the files read. No hallucinations are present.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 4,
+    "question": "What is the \"Sniper Protocol\" for job hunting?",
+    "expected_answer": "Identify key people (EM/Founder/PI), send a tailored narrative bridging AI Rating experience to their challenges, and provide proof of work (deployed projects).",
+    "actual_answer": "The \u201cSniper Protocol\u201d is the direct-outreach job-hunting loop used for target companies instead of mass-applying.\n\nIt has three core steps:\n1. Identify the EM, Founder, Founding Engineer, or PI.\n2. Send a tailored DM/email that bridges your AI rating experience to their specific product challenge.\n3. Include a direct link to a deployed proof-of-work project.\n\nThe note also says the core principle is: \u201cMake them aware of you first \u2014 then the DM is a follow-up, not a cold open.\u201d\n\nBefore outreach, the playbook recommends doing at least one of these:\n- build something for them\n- post a public product teardown\n- record a 2\u20133 minute Loom demo\n- engage with their content for weeks\n- contribute to their open source\n- get a weak-tie intro\n\nIt explicitly frames this as a higher-signal alternative to LinkedIn/Indeed mass applications.\n\n[Sources]\n- 3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md\n- 3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.2. Interview Prep & Technical Depth/Summary - How To Stand Out To Employers Regardless of Experience.md\n- 3. Operations & Wealth/3.1. Career Strategy & Revenue/Saved Job Listings/Software Engineer (New Grads 2025-2026) - EliseAI.md\n- 1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md",
+    "files_read": [
+      "1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md",
+      "3. Operations & Wealth/3.1. Career Strategy & Revenue/4.1?dummy",
+      "3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.2. Interview Prep & Technical Depth/Summary - How To Stand Out To Employers Regardless of Experience.md",
+      "3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md",
+      "[structure] 3. Operations & Wealth/3.1. Career Strategy & Revenue",
+      "3. Operations & Wealth/3.1. Career Strategy & Revenue/Saved Job Listings/Software Engineer (New Grads 2025-2026) - EliseAI.md",
+      "[structure] root",
+      "[structure] 3. Operations & Wealth/3.1. Career Strategy & Revenue/Saved Job Listings"
+    ],
+    "target_source": "Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md",
+    "duration_sec": 8.01,
+    "score": 10,
+    "reasoning": "The actual answer matches the expected answer closely: it identifies key people (EM, Founder, Founding Engineer, PI), recommends a tailored outreach narrative connecting AI rating experience to their challenge, and emphasizes proof of work via deployed projects. It also stays consistent with the described job-hunting protocol and does not introduce obvious unsupported facts beyond added elaboration from the source notes.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 5,
+    "question": "What are the user's daily medications for allergies?",
+    "expected_answer": "Fexofenadine (Allegra) 180 mg daily and Dymista (Azelastine/Fluticasone) 1 spray each nostril 2x/day.",
+    "actual_answer": "The daily allergy medications in the vault are:\n\n- **Fexofenadine (Allegra) 180 mg once daily** for allergies/sinus\n- **Dymista (azelastine/fluticasone) 1 spray in each nostril 2x/day** for allergic rhinitis\n\nThe allergist note also says **Allegra is \u201c1 tablet by mouth daily as needed,\u201d** but the health summary lists it as a daily medication.\n\n[Sources]\n- 2. Health/2.2. Medical/Health Summary.md\n- 2. Health/2.2. Medical/Health_Logs/Visit - 2026_04_02 - Allergist.md",
+    "files_read": [
+      "2. Health/2.2. Medical/Health_Logs/Visit - 2026_04_02 - Allergist.md",
+      "[structure] root",
+      "2. Health/2.2. Medical/Health Summary.md",
+      "[structure] 2. Health/2.2. Medical"
+    ],
+    "target_source": "Vault/2. Health/2.2. Medical/Health Summary.md",
+    "duration_sec": 7.92,
+    "score": 10,
+    "reasoning": "The answer matches the expected medications and dosages: Fexofenadine (Allegra) 180 mg daily and Dymista (azelastine/fluticasone) 1 spray each nostril twice daily. It is grounded in the cited Health Summary and Allergist note, and it does not introduce unsupported facts beyond a minor clarification about PRN wording in one note.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 6,
+    "question": "What was the name of my brother's girlfriends dog that stayed with us for a week?",
+    "expected_answer": "Magnolia",
+    "actual_answer": "The dog was named Magnolia.\n\n[Sources]\n- 1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md\n- 1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Memories/Memories Log.md",
+    "files_read": [
+      "1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md",
+      "[structure] root",
+      "1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Memories/Memories Log.md"
+    ],
+    "target_source": "Vault/1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md",
+    "duration_sec": 7.75,
+    "score": 10,
+    "reasoning": "The actual answer matches the expected answer exactly in meaning: it identifies the dog as Magnolia. The response is concise and does not introduce any unsupported facts. It is also grounded in the referenced personal journal/memories files.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 7,
+    "question": "What is the user's current checking account balance?",
+    "expected_answer": "I cannot find the specific checking account balance in the vault. The notes focus on financial strategy, savings targets (like the Bronx Fund), and recurring payments rather than real-time balances.",
+    "actual_answer": "[Not Found] I was unable to find information about the user's current checking account balance in the vault.\n\nI searched the following areas:\n- 3. Operations & Wealth\n- 3. Operations & Wealth/3.2. Wealth & Asset Management\n- 3. Operations & Wealth/3.2. Wealth & Asset Management/Receipts\n- 3. Operations & Wealth/3.2. Wealth & Asset Management/Project - Personal Finance & Budgeting System.md\n\n[Sources]\n- 3. Operations & Wealth/3.2. Wealth & Asset Management/Project - Personal Finance & Budgeting System.md",
+    "files_read": [
+      "3. Operations & Wealth/3.2. Wealth & Asset Management/Project - Personal Finance & Budgeting System.md",
+      "[structure] root",
+      "[structure] 3. Operations & Wealth"
+    ],
+    "target_source": null,
+    "duration_sec": 7.94,
+    "score": 10,
+    "reasoning": "The actual answer matches the expected answer: it states that the specific checking account balance could not be found in the vault. It is grounded in the claimed file read, especially the personal finance/budgeting project note, and it does not introduce unsupported facts. The search areas also align with the type of content expected to contain such information, but no balance was present.",
+    "grounded": true,
+    "status": "PASS"
+  }
+]

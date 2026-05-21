@@ -3,6 +3,21 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.17.0] - 2026-05-21
+
+### Added
+- **Phase 2 Search: Tree-Based Navigation & Targeted Grep (Librarian Item 9):**
+  - New `get_vault_structure(path)` tool — recursive "Agentic ls" that returns the full folder tree (root) or files + folders (drilled subtree). Replaces blind full-vault searches with cheap structural orientation.
+  - New `search_vault(keyword, path, tags)` params — optional `path` for targeted subtree grep and `tags` for YAML frontmatter filtering via lightweight regex.
+  - New `_parse_frontmatter_tags()` and `_build_tree()` helpers in `vault_tools.py`.
+- **Dynamic Structure Injection:** `execute_vault_query()` now calls `get_vault_structure()` programmatically at query time and injects the live folder tree into the system prompt via `{vault_structure}` placeholder. Eliminates one LLM round-trip per query while staying fresh after vault restructures.
+- **Token Usage Tracking:** Both `run_logs.jsonl` and `evals/runner.py` now extract `usage_metadata` from LangChain AI messages and log `prompt_tokens`, `completion_tokens`, and `total_tokens` per query. Eval summary prints aggregate token stats.
+
+### Changed
+- **Librarian System Prompt Rewrite:** Enforces a "navigate-first, search-second" strategy. Step 1 is now "review the vault structure above" (pre-injected), followed by targeted drill-down and scoped grep. Full-vault search is an explicit last resort.
+- **Ignored Directories:** Added `.stfolder`, `.vscode`, `__pycache__` to `IGNORE_DIRS` in `constants.py`.
+- **Eval Runner Output:** Now displays per-case duration and token count, plus aggregate token stats in the summary (prompt/output/total tokens, avg tokens/query).
+
 ## [1.16.0] - 2026-05-19
 
 ### Added

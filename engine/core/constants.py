@@ -19,9 +19,12 @@ IGNORE_DIRS = {
     "Audio",
     ".trash",
     ".obsidian",
+    ".stfolder",
+    ".vscode",
     "Memories_Log_Images",
     "Pilot Diagrams",
     "node_modules",
+    "__pycache__",
     ".venv",
     ".git",
 }

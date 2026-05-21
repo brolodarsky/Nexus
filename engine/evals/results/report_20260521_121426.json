@@ -1,0 +1,161 @@
+[
+  {
+    "case_id": 1,
+    "question": "What is called a \"major key\" in the objectives section of the agentic engine project?",
+    "expected_answer": "Human-In-The-Loop.",
+    "actual_answer": "In the objectives section, \u201cmajor key\u201d refers to **Human-In-The-Loop (HITL)**.\n\nThe note says: \u201c**Human-In-The-Loop is a major key.**\u201d\n\n[Sources]\n- 6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md",
+    "files_read": [
+      "6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md",
+      "[structure] 6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine",
+      "[structure] 6. Forge/6.2. Library & Learning/6.2.11. Intelligent Agents & Autonomy"
+    ],
+    "target_source": "Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md",
+    "duration_sec": 4.59,
+    "token_usage": {
+      "prompt_tokens": 17757,
+      "completion_tokens": 303,
+      "total_tokens": 18060
+    },
+    "score": 10,
+    "reasoning": "The actual answer matches the expected answer exactly in substance: it identifies \"Human-In-The-Loop\" as the \"major key\" in the objectives section. It is grounded in the cited project file, and there is no evident hallucination.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 2,
+    "question": "When was the Timing Belt last changed on the Honda Pilot and at what mileage?",
+    "expected_answer": "April 9, 2026, at 196,000 miles.",
+    "actual_answer": "The Timing Belt on the Honda Pilot was last changed on **2026-04-09** at **196,000 miles**.\n\n[Sources]\n- 3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md",
+    "files_read": [
+      "3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md",
+      "[structure] 3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto"
+    ],
+    "target_source": "Vault/3. Operations & Wealth/3.3. Infrastructure & Logistics/3.3.3. Auto/Maintenance Log.md",
+    "duration_sec": 4.82,
+    "token_usage": {
+      "prompt_tokens": 9862,
+      "completion_tokens": 239,
+      "total_tokens": 10101
+    },
+    "score": 10,
+    "reasoning": "The actual answer exactly matches the expected answer: the timing belt was last changed on April 9, 2026 at 196,000 miles. It is grounded in the cited Maintenance Log file, with no evident hallucination.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 3,
+    "question": "What were the example places to play chess in parks from my activities list?",
+    "expected_answer": "Washington Square Park and Bryant Park.",
+    "actual_answer": "The example places listed for playing chess in parks were:\n\n- Washington Square Park\n- Bryant Park\n\n[Sources]\n- 4. Playground/4.1. Social Life & Community/Activities List.md",
+    "files_read": [
+      "4. Playground/4.1. Social Life & Community/Activities List.md",
+      "[structure] 4. Playground"
+    ],
+    "target_source": "Vault/4. Playground/4.1. Social Life & Community/Activities List.md",
+    "duration_sec": 4.15,
+    "token_usage": {
+      "prompt_tokens": 14592,
+      "completion_tokens": 137,
+      "total_tokens": 14729
+    },
+    "score": 10,
+    "reasoning": "The actual answer exactly matches the expected answer and is grounded in the cited Activities List file. No unsupported facts were introduced.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 4,
+    "question": "What is the \"Sniper Protocol\" for job hunting?",
+    "expected_answer": "Identify key people (EM/Founder/PI), send a tailored narrative bridging AI Rating experience to their challenges, and provide proof of work (deployed projects).",
+    "actual_answer": "The vault\u2019s \u201cSniper Protocol\u201d is a direct-outreach job-hunting playbook, not a mass-application strategy.\n\nCore idea:\n- Don\u2019t rely on portals for the main move.\n- Identify a target Engineering Manager, Founder, or PI.\n- Send a tailored DM/email that connects your AI Rating / eval background to their specific problem.\n- Include a direct link to deployed proof-of-work, especially Brain 2 or Feeder.\n- The best version is when they already know who you are first, so the DM becomes a follow-up instead of a cold open.\n\nThe protocol also recommends \u201cpre-outreach moves\u201d before messaging:\n- build something for them\n- post a public teardown\n- record a 2\u20133 minute Loom demo\n- engage with their content for weeks\n- contribute to their open source\n- get a weak-tie intro\n\nIt appears in the job-hunt notes as a high-signal outreach method tied to EliseAI and Brain 2 positioning.\n\n[Sources]\n- 3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md\n- 3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.4. Networking & Professional CRM/Professional CRM.md\n- 3. Operations & Wealth/3.1. Career Strategy & Revenue/Saved Job Listings/Software Engineer (New Grads 2025-2026) - EliseAI.md\n- 3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Project - Brain 2 Architecture Loom Demo.md",
+    "files_read": [
+      "6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Brain 2 Agentic Engine/Project - Brain 2 Agentic Engine.md",
+      "3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md",
+      "3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Project - Brain 2 Architecture Loom Demo.md",
+      "[structure] 3. Operations & Wealth/3.1. Career Strategy & Revenue",
+      "[structure] 6. Forge/6.2. Library & Learning",
+      "[structure] 6. Forge/6.1. Projects",
+      "3. Operations & Wealth/3.1. Career Strategy & Revenue/Saved Job Listings/Software Engineer (New Grads 2025-2026) - EliseAI.md",
+      "3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.4. Networking & Professional CRM/Professional CRM.md"
+    ],
+    "target_source": "Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md",
+    "duration_sec": 10.09,
+    "token_usage": {
+      "prompt_tokens": 35442,
+      "completion_tokens": 888,
+      "total_tokens": 36330
+    },
+    "score": 10,
+    "reasoning": "The actual answer matches the expected answer closely: it identifies key target people (Engineering Manager, Founder, PI), recommends a tailored narrative connecting AI Rating/eval experience to their problems, and emphasizes proof of work via deployed projects. It is also grounded in the cited job-hunt and portfolio files, with no obvious hallucinated facts beyond reasonable elaboration.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 5,
+    "question": "What are the user's daily medications for allergies?",
+    "expected_answer": "Fexofenadine (Allegra) 180 mg daily and Dymista (Azelastine/Fluticasone) 1 spray each nostril 2x/day.",
+    "actual_answer": "The daily allergy medications listed in the vault are:\n\n- **Fexofenadine (Allegra)** \u2014 **180 mg once daily**  \n- **Dymista (azelastine/fluticasone)** \u2014 **1 spray in each nostril twice daily**\n\nThe allergist note also says **Allegra can be taken daily as needed**, but the health summary lists it as a daily medication.\n\n[Sources]\n- 2. Health/2.2. Medical/Health Summary.md\n- 2. Health/2.2. Medical/Health_Logs/Visit - 2026_04_02 - Allergist.md\n- 2. Health/2.2. Medical/Health_Logs/Visit - 2026_04_08 - PCP Followup.md",
+    "files_read": [
+      "2. Health/2.2. Medical/Health_Logs/Visit - 2026_04_08 - PCP Followup.md",
+      "2. Health/2.2. Medical/Health Summary.md",
+      "[structure] 2. Health/2.2. Medical",
+      "2. Health/2.2. Medical/Health_Logs/Visit - 2026_04_02 - Allergist.md"
+    ],
+    "target_source": "Vault/2. Health/2.2. Medical/Health Summary.md",
+    "duration_sec": 3.97,
+    "token_usage": {
+      "prompt_tokens": 16708,
+      "completion_tokens": 392,
+      "total_tokens": 17100
+    },
+    "score": 10,
+    "reasoning": "The actual answer matches the expected answer exactly on both medications and dosing. It also cites relevant medical summary and visit notes consistent with the claim, with no apparent hallucinations.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 6,
+    "question": "What was the name of my brother's girlfriends dog that stayed with us for a week?",
+    "expected_answer": "Magnolia",
+    "actual_answer": "The dog was named **Magnolia**.\n\n[Sources]\n- 1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Memories/Memories Log.md",
+    "files_read": [
+      "[structure] 1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs",
+      "1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Memories/Memories Log.md",
+      "1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md"
+    ],
+    "target_source": "Vault/1. The Core/1.1. Philosophy & Personal North Star/1.1.1. Personal Logs/Journal/2026 - Journal.md",
+    "duration_sec": 3.86,
+    "token_usage": {
+      "prompt_tokens": 14117,
+      "completion_tokens": 387,
+      "total_tokens": 14504
+    },
+    "score": 10,
+    "reasoning": "The actual answer matches the expected answer exactly in meaning and content: the dog was named Magnolia. The cited/read file list includes the Memories Log, which is the provided source for this fact. No hallucinations are present.",
+    "grounded": true,
+    "status": "PASS"
+  },
+  {
+    "case_id": 7,
+    "question": "What is the user's current checking account balance?",
+    "expected_answer": "I cannot find the specific checking account balance in the vault. The notes focus on financial strategy, savings targets (like the Bronx Fund), and recurring payments rather than real-time balances.",
+    "actual_answer": "[Not Found] I was unable to find information about the user's current checking account balance in the vault.\n\nI searched the following areas:\n- 3. Operations & Wealth/3.2. Wealth & Asset Management/\n- 3. Operations & Wealth/3.2. Wealth & Asset Management/Receipts/\n- 3. Operations & Wealth/\n\n[Sources]\n(none)",
+    "files_read": [
+      "[structure] 3. Operations & Wealth/3.2. Wealth & Asset Management",
+      "3. Operations & Wealth/3.2. Wealth & Asset Management/Project - Personal Finance & Budgeting System.md",
+      "[structure] 3. Operations & Wealth/3.2. Wealth & Asset Management/Receipts",
+      "3. Operations & Wealth/3.2. Wealth & Asset Management/Master Framework.md"
+    ],
+    "target_source": null,
+    "duration_sec": 4.99,
+    "token_usage": {
+      "prompt_tokens": 14116,
+      "completion_tokens": 427,
+      "total_tokens": 14543
+    },
+    "score": 10,
+    "reasoning": "The actual answer matches the expected answer: it correctly states that the vault does not contain the user's current checking account balance. It is also grounded in the reported files read, which are planning and budgeting documents rather than a source of live account balances. No unsupported facts were introduced.",
+    "grounded": true,
+    "status": "PASS"
+  }
+]

@@ -14,13 +14,14 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_openai import ChatOpenAI
 
 from core.constants import AI_MODEL
-from tools.vault_tools import read_toc, read_note, search_vault
+from tools.vault_tools import read_toc, read_note, search_vault, get_vault_structure
+from tools.vault_tools import get_vault_structure as _get_vault_structure_fn
 from agents.librarian.prompts import SYSTEM_PROMPT
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
-tools = [read_toc, read_note, search_vault]
+tools = [read_toc, read_note, search_vault, get_vault_structure]
 tool_node = ToolNode(tools)
 
 llm = ChatOpenAI(model=AI_MODEL, temperature=0.0)
@@ -83,6 +84,9 @@ def log_query_run(query: str, final_state=None, error=None):
                             cited_sources.append(note_path)
                     elif tc.get("name") == "read_toc":
                         cited_sources.append("Table of Contents.md")
+                    elif tc.get("name") == "get_vault_structure":
+                        vs_path = tc.get("args", {}).get("path")
+                        cited_sources.append(f"[structure] {vs_path or 'root'}")
 
         # Extract sources from the final assistant message content (using the [Sources] section)
         if messages:
@@ -125,11 +129,22 @@ def log_query_run(query: str, final_state=None, error=None):
             seen.add(src_clean)
             unique_sources.append(src_clean)
 
+    # Extract token usage from AI messages
+    token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    if final_state and "messages" in final_state:
+        for msg in final_state["messages"]:
+            usage = getattr(msg, 'usage_metadata', None)
+            if usage:
+                token_usage["prompt_tokens"] += usage.get("input_tokens", 0)
+                token_usage["completion_tokens"] += usage.get("output_tokens", 0)
+                token_usage["total_tokens"] += usage.get("total_tokens", 0)
+
     log_entry = {
         "timestamp": timestamp,
         "query": query,
         "status": status,
         "cited_sources": unique_sources,
+        "token_usage": token_usage,
         "errors": error_str,
         "tool_calls": tool_calls
     }
@@ -156,13 +171,26 @@ def ask_librarian(query: str, filters: dict = None) -> str:
     except Exception as e:
         return f"❌ Agent encountered an error: {e}"
 
+def _build_system_prompt() -> str:
+    """
+    Builds the system prompt with the live vault folder structure injected.
+    This is called at query time so the agent always sees the current structure
+    without wasting an LLM round-trip on a get_vault_structure() tool call.
+    """
+    try:
+        vault_tree = _get_vault_structure_fn.invoke({})
+    except Exception:
+        vault_tree = "(vault structure unavailable)"
+    return SYSTEM_PROMPT.format(vault_structure=vault_tree)
+
 def execute_vault_query(query: str, thread_id: str = None):
     """
     Executes a query against the vault reader agent and returns the final state.
     This is designed to be called by programmatic interfaces like the Telegram bot.
     """
+    system_prompt = _build_system_prompt()
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=system_prompt),
         HumanMessage(content=query)
     ]
     
