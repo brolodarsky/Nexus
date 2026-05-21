@@ -177,9 +177,9 @@ def render_docx(source_path=None):
     md = source.read_text(encoding="utf-8")
 
     # Strip YAML frontmatter
-    md = re.sub(r'^---.*?---\n', '', md, count=1, flags=re.DOTALL)
+    md = re.sub(r'^---.*?---\r?\n', '', md, count=1, flags=re.DOTALL)
     # Strip Obsidian navigation links ("Back to:" lines with wiki-links)
-    md = re.sub(r'^Back to:.*\n?', '', md, count=1, flags=re.MULTILINE)
+    md = re.sub(r'^Back to:.*\r?\n?', '', md, count=1, flags=re.MULTILINE)
     lines = md.strip().splitlines()
 
     # Derive output name from source filename

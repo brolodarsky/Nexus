@@ -100,7 +100,7 @@ def _parse_frontmatter_tags(content: str) -> list:
         - b
     """
     # Match the frontmatter block between --- delimiters
-    fm_match = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
+    fm_match = re.match(r'^---\s*\r?\n(.*?)\r?\n---', content, re.DOTALL)
     if not fm_match:
         return []
 

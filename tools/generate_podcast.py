@@ -50,7 +50,7 @@ def clean_markdown_for_tts(content):
     things like "hash symbol parenthesis link right bracket"
     """
     # Remove YAML frontmatter
-    content = re.sub(r"^---\n.*?\n---", "", content, flags=re.DOTALL)
+    content = re.sub(r"^---\r?\n.*?\r?\n---", "", content, flags=re.DOTALL)
     
     # Remove code blocks
     content = re.sub(r"```.*?```", " Code block omitted for audio. ", content, flags=re.DOTALL)

@@ -92,10 +92,10 @@ async function renderToPdf(mdPath, browser) {
     const markdownContent = fs.readFileSync(mdPath, 'utf-8');
 
     // Remove YAML frontmatter
-    const contentWithoutFrontmatter = markdownContent.replace(/^---[\s\S]*?---\n/, '');
+    const contentWithoutFrontmatter = markdownContent.replace(/^---[\s\S]*?---\r?\n/, '');
 
     // Remove Obsidian navigation links (the "Back to:" line with wiki-links)
-    const contentClean = contentWithoutFrontmatter.replace(/^Back to:.*\n?/m, '');
+    const contentClean = contentWithoutFrontmatter.replace(/^Back to:.*\r?\n?/m, '');
 
     // Derive output filename from the source filename
     const baseName = path.basename(mdPath, '.md');

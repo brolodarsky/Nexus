@@ -20,6 +20,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Eval Runner Output:** Now displays per-case duration and token count, plus aggregate token stats in the summary (prompt/output/total tokens, avg tokens/query).
 - **Eval Runner Output:** Restructured `report_*.json` output to include a top-level `summary` object containing aggregate token stats, scores, and runtimes, alongside the `results` array.
 
+### Fixed
+- **YAML Frontmatter & Link Stripping:** Updated frontmatter and navigation link parsing regexes across the resume engine (`render.js`, `render_docx.py`), podcast generator (`generate_podcast.py`), and vault tools (`vault_tools.py`) to support Windows CRLF (`\r\n`) line endings, preventing frontmatter leak into rendered output.
+
 ## [1.16.0] - 2026-05-19
 
 ### Added
