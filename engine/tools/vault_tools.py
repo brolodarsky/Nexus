@@ -113,9 +113,9 @@ def _parse_frontmatter_tags(content: str) -> list:
         return [t.strip().strip('"').strip("'") for t in raw.split(',') if t.strip()]
 
     # Try list style: tags:\n  - tag1\n  - tag2
-    list_match = re.search(r'tags:\s*\n((?:\s+-\s+.*\n?)+)', frontmatter)
+    list_match = re.search(r'tags:\s*\r?\n((?:\s+-\s+.*\r?\n?)+)', frontmatter)
     if list_match:
-        raw_lines = list_match.group(1).strip().split('\n')
+        raw_lines = list_match.group(1).strip().splitlines()
         tags = []
         for line in raw_lines:
             line = line.strip()
