@@ -1,27 +1,30 @@
-# Nexus: Agentic Knowledge OS & Personal Second Brain
+# Nexus: Agent-Integrated Knowledge OS & Cognitive Engine
 
-This is my personal agentic operating system that manages my notes, thoughts, projects, career strategy, health records, learning materials and more.  It is a work in progress and is constantly evolving. I think it can be of great use to you too.
+Nexus is a local-first, agent-orchestrated knowledge engine designed to bridge unstructured markdown notes (Zettelkasten) with autonomous agentic workflows, deterministic tools, and dynamic semantic search.
 
-## The Human Context Statement (Why This Is Public)
+Rather than a static archive or a generic note template, Nexus acts as a cognitive framework. It couples a structured knowledge vault with a backend agent engine to ingest, search, process, and output real-world information.
 
-This repository is **not** a generic, blank-slate template. It is a live, production system that runs my actual life. I have chosen a strategy of **Radical Transparency** and made this repository public to demonstrate real-world agentic orchestration on a complex, live system. 
+## Key Technical Pillars
 
-You will see that the Agent Skills (`.agents/skills/`) and instructions (`AGENTS.md`) explicitly reference my personal context—like my health tracking, career goals, or specific personal protocols. This is intentional. The personal specificity is the proof that this system manages real human complexity.
+*   **Agentic Search Engine (`engine/`):** A custom LangGraph-based ReAct agent ("The Librarian") that dynamically navigates the local filesystem to locate, read, and cross-reference documents—delivering grounded answers with precise source citations without requiring pre-indexing or external vector databases. Specialized evaluation agents automatically run test suites to benchmark performance, with additional domain-specific agents planned.
+*   **Context-Aware Workflows (`.agents/workflows/`):** Multi-step agent instructions (exposed as slash commands) that automate complex tasks like extracting skills from job descriptions, parsing medical records, and synthesizing dense source material into atomic notes.
+*   **Enforced Agent Skills (`.agents/skills/`):** Mandatory system behaviors acting as background constraints ("laws of physics") that intercept agent actions to guarantee data integrity, formatting rules, and contextual safety guidelines.
+*   **Deterministic Automation Layer (`tools/`):** Python and Node.js integrations for phone chat screen-scraping (ADB), secure OAuth2 email retrieval, edge-TTS audio podcast generation, and automated PDF portfolio rendering.
 
-**What's included in this public repo:**
-- **The Engine Layer:** All the tools, agent skills, evaluation framework, and workflows I use to automate my life.
-- **The Vault Structure:** The folder skeleton and the `Table of Contents.md`.
-- **(Private) The Vault Content:** The actual markdown notes, images, and PDFs in my vault are **local-only**. They are gitignored or encrypted, meaning you can't read my private thoughts, but you can see the architecture of the system.
+## Production Case Study: Radical Transparency
 
-## The Table of Contents (The Cognitive Map)
+To demonstrate real-world utility and verify agent performance under complex, non-trivial conditions, this repository is configured as a live, production deployment. 
 
-The `Vault/Table of Contents.md` is intentionally tracked and public. It demonstrates the *scope* of what a personal cognitive OS can manage—ranging from health and fitness to system design learning, caregiving, and professional networking—without exposing the content itself. It serves as both a structural map if you want to fork this, and a proof-of-concept for recruiters reviewing my work.
+The configuration files (`AGENTS.md`) and agent skills are mapped to actual operational scenarios—such as health tracking, professional CRM maintenance, and multi-generational caregiving logistics. 
+
+*   **Public Engine Layer:** The entire agent architecture, tools, evaluations, and directory structures are public to serve as a reference implementation.
+*   **Private Data Layer (Gitignored):** The actual markdown content, files, and personal databases are kept strictly local (synced via Syncthing and encrypted/gitignored), preserving privacy while showing the system's structural schema in action.
 
 ## How It Operates & Roadmap
 
 This system currently follows a "best tool for the job" architecture:
 - **The Content UI (Obsidian):** The daily interaction with notes, thoughts, and the knowledge graph happens entirely within Obsidian. It is the best tool for visualizing links, reading, and writing markdown.
-- **The Engine UI (CLI & Agentic IDEs):** Deterministic tools and RAG queries can be executed directly via terminal. Complex agentic workflows (slash commands) are currently orchestrated using Agentic IDEs (like Cursor, Windsurf, or specialized agents) to follow the `.agents/` instructions.
+- **The Engine UI (CLI & Agentic IDEs):** Deterministic tools and agentic queries can be executed directly via terminal. Complex agentic workflows (slash commands) are currently orchestrated using Agentic IDEs (like Cursor, Windsurf, or specialized agents) to follow the `.agents/` instructions.
 
 **Future Evolution:**
 While the current setup relies on Obsidian for viewing and an IDE for orchestrating agentic workflows, the roadmap points toward a fully unified, standalone application. Future iterations will include:
@@ -124,7 +127,7 @@ Nexus/
 │   └── Table of Contents.md   # Master index — source of truth for structure
 ├── AGENTS.md                   # AI agent constitution
 ├── CHANGELOG.md                # Running log of notable changes
-├── engine/                      # RAG engine agent
+├── engine/                      # Agentic search & coordinator engine
 │   ├── main.py                  # Universal coordinator & mission control
 │   ├── agents/                  # Domain-specific agents
 │   │   └── librarian/        # Librarian agent logic

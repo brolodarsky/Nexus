@@ -3,6 +3,12 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.17.2] - 2026-05-23
+
+### Changed
+- **README Technical Restructure:** Refactored the introduction of [README.md](file:///c:/Users/Willi/Documents/Projects/Nexus/README.md) to prioritize technical utility, highlighting the system's architectural pillars (Agentic search engine, workflows, skills, and tools) and framing the personal vault layout as a live production case study.
+- **RAG Architecture Cleanup:** Removed outdated RAG architecture references in the overview text and directory tree diagram to align with the active local agent-based traversal architecture.
+
 ## [1.17.1] - 2026-05-22
 
 ### Added
