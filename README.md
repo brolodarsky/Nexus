@@ -1,6 +1,6 @@
 # Nexus: Agentic Knowledge OS & Personal Second Brain
 
-This is my personal "second brain" and knowledge management system. It acts as an agentic operating system that manages my notes, thoughts, projects, career strategy, health records, and learning materials.
+This is my personal agentic operating system that manages my notes, thoughts, projects, career strategy, health records, learning materials and more.  It is a work in progress and is constantly evolving. I think it can be of great use to you too.
 
 ## The Human Context Statement (Why This Is Public)
 
