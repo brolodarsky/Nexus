@@ -61,5 +61,8 @@ brain-key.key
 # Local query run logs
 engine/logs/
 
+# HITL transaction database (runtime state)
+engine/hitl.db
+
 __pycache__/
 *.pyc

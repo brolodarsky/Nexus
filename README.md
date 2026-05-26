@@ -134,7 +134,8 @@ Nexus/
 │   ├── core/                    # Shared engine configuration
 │   │   ├── audio.py             # Whisper transcription service
 │   │   ├── constants.py         # Global constants
-│   │   └── google_auth.py       # Reusable OAuth2 manager
+│   │   ├── google_auth.py       # Reusable OAuth2 manager
+│   │   └── hitl_queue.py        # SQLite HITL transaction queue
 │   ├── evals/                   # Benchmarking & Golden Dataset
 │   │   ├── dataset.json         # 12 real-world Q&A cases
 │   │   ├── runner.py            # Automated eval script
@@ -145,6 +146,7 @@ Nexus/
 │       └── vault_tools.py       # Vault navigation tools
 ├── tools/                      # Automation tools
 │   └── resume_engine/          # Premium PDF rendering system
+├── start.ps1                   # Launches backend + frontend Control Panel
 ├── requirements.txt            # Pinned Python dependencies
 └── .gitignore
 ```
@@ -228,7 +230,10 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `engine/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m engine.evals.runner` |
 | `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). | `python engine/main.py <query>` |
 | `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`, `get_vault_structure`). Supports targeted subtree search and frontmatter tag filtering. | N/A |
+| `engine/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
+| `engine/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve (write to disk), reject. | Via GUI or API |
 | `resume_engine/` | PDF and DOCX rendering with page fill metrics. Outputs fill %, verdict, and room remaining after every render. | `node tools/resume_engine/render.js` |
+| `start.ps1` | Launches the full Nexus Control Panel (FastAPI + Next.js). | `.\start.ps1` |
 
 ### PowerShell Integration
 

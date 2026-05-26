@@ -13,10 +13,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - **Ask Brain Chat Interface (`/ask`):** Conversational page wired to the Librarian agent via `POST /api/agents/ask`. Features message history, example queries, typing indicator, and responsive layout.
   - **Typed API Client (`gui/src/lib/api.ts`):** Centralized fetch wrapper with full TypeScript types for all backend endpoints.
   - **Sidebar Navigation:** Logo, active-link highlighting, disabled items for future phases (Vault Explorer, HITL Queue, Audit Log), live system status indicator.
-- **Dependency:** Added `fastapi` and `starlette` to `.venv` and `requirements.txt`.
+- **HITL Transaction Queue & Review Surface (Phase 1.5 — Core Safety):**
+  - **SQLite HITL Queue (`engine/core/hitl_queue.py`):** Persistent transaction queue storing proposed agent writes with original content, proposed content, agent reasoning, and approval status. Durable across restarts.
+  - **HITL API Router (`engine/api/routers/hitl.py`):** Endpoints for listing pending transactions, approving (writes to disk with PROJECT_ROOT resolution), rejecting, and mock seeding for development.
+  - **HITL Review Page (`gui/src/app/hitl/page.tsx`):** Full review surface with a sidebar queue list, agent reasoning context panel, and Monaco Editor (`@monaco-editor/react`) side-by-side diff viewer for VS Code-quality pre-commit previews.
+  - **Dashboard Integration:** Mission Control now fetches live pending HITL counts from the API and displays a "Review Queue" quick-action button with badge count.
+- **Dependency:** Added `fastapi` and `starlette` to `.venv` and `requirements.txt`. Added `@monaco-editor/react` to `gui/`.
 
 ### Changed
 - **`.gitignore`:** Added `gui/node_modules/`, `gui/.next/`, `gui/out/` exclusions for the frontend build artifacts.
+- **`start.ps1` Process Cleanup:** Replaced `Stop-Process` with `taskkill /T /F` to kill the entire uvicorn process tree on exit, preventing zombie worker processes from holding port 8000 across restarts.
 
 ### Fixed
 - **`start.ps1` Encoding:** Saved `start.ps1` with UTF-8 BOM encoding to prevent PowerShell 5.1 from misinterpreting Unicode characters (such as emojis and boxes) as ANSI smart quotes, resolving the script parsing and launch errors.

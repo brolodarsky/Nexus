@@ -22,7 +22,7 @@ Notes follow the Zettelkasten methodology. Vault folder structure is defined in 
 | `tools/` | Python scripts for brain automation |
 | `engine/` | Agent engine in development - modular architecture (`main.py`, `core/`, `interfaces/`, `agents/`, `evals/`) |
 | `engine/api/` | FastAPI backend — HTTP bridge between the GUI Control Panel and the Python engine |
-| `gui/` | Next.js + Tailwind CSS frontend — Engine Control Panel (Mission Control dashboard, HITL review surface) |
+| `gui/` | Next.js + Tailwind CSS frontend — Engine Control Panel (Mission Control dashboard, HITL review surface, Monaco diff viewer) |
 | `requirements.txt` | Python dependencies |
 | `.venv/` | Virtual environment (gitignored) |
 | `.agents/skills/` | AI agent skill definitions |
@@ -104,9 +104,12 @@ Deterministic scripts for vault and engine maintenance.
 | `engine/interfaces/telegram.py` | Telegram interface implementation. |
 | `engine/tools/email_tool.py` | Core email fetching and parsing logic for the agentic engine. |
 | `engine/core/google_auth.py` | Centralized Google OAuth2 management (refreshing, token handling). |
+| `engine/core/hitl_queue.py` | SQLite-backed HITL transaction queue. Stores pending agent writes with original/proposed content, reasoning, and status for human review. |
 | `engine/api/main.py` | FastAPI application entry point for the GUI Control Panel. CORS, health check, router mounts. |
 | `engine/api/routers/agents.py` | Agent status registry and `/ask` endpoint bridging the Librarian to the frontend. |
 | `engine/api/routers/vault.py` | Vault structure, note reading, and search endpoints for the frontend. |
+| `engine/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve (write to disk), reject, and mock seeding for testing. |
+| `start.ps1` | Launches the full Control Panel (FastAPI backend + Next.js frontend). Kills the entire uvicorn process tree on exit. |
 
 ### Workflows
 

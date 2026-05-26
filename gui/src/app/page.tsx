@@ -3,24 +3,28 @@
 import { useEffect, useState } from "react";
 import AgentCard from "@/components/AgentCard";
 import StatCard from "@/components/StatCard";
-import { getAgentStatus, getHealth } from "@/lib/api";
-import type { AgentStatus, HealthResponse } from "@/lib/api";
+import { getAgentStatus, getHealth, getPendingHitl } from "@/lib/api";
+import type { AgentStatus, HealthResponse, Transaction } from "@/lib/api";
+import Link from "next/link";
 
 export default function DashboardPage() {
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [pendingHitl, setPendingHitl] = useState<Transaction[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const [healthData, agentData] = await Promise.all([
+        const [healthData, agentData, hitlData] = await Promise.all([
           getHealth(),
           getAgentStatus(),
+          getPendingHitl()
         ]);
         setHealth(healthData);
         setAgents(agentData);
+        setPendingHitl(hitlData);
         setError(null);
       } catch (e) {
         setError(
@@ -40,7 +44,7 @@ export default function DashboardPage() {
 
   // Derived stats
   const activeAgents = agents.filter((a) => a.status === "idle" || a.status === "running").length;
-  const pendingHitl = agents.filter((a) => a.status === "waiting_hitl").length;
+  const pendingHitlCount = pendingHitl.length;
   const totalAgents = agents.length;
   const notBuilt = agents.filter((a) => a.status === "not_built").length;
 
@@ -91,7 +95,7 @@ export default function DashboardPage() {
         />
         <StatCard
           label="Pending HITL"
-          value={loading ? "..." : pendingHitl}
+          value={loading ? "..." : pendingHitlCount}
           icon="🔒"
           accentColor="accent-amber"
           subtitle="Decisions awaiting review"
@@ -144,6 +148,12 @@ export default function DashboardPage() {
           Quick Actions
         </h2>
         <div className="flex flex-wrap gap-3">
+          <Link
+            href="/hitl"
+            className="glass-card px-5 py-3 text-sm font-medium text-accent-amber hover:text-text-primary transition-colors flex items-center gap-2 border border-accent-amber/30"
+          >
+            <span>🔒</span> Review Queue ({pendingHitlCount})
+          </Link>
           <a
             href="/ask"
             className="glass-card px-5 py-3 text-sm font-medium text-accent-cyan hover:text-text-primary transition-colors flex items-center gap-2"
@@ -161,12 +171,6 @@ export default function DashboardPage() {
             className="glass-card px-5 py-3 text-sm font-medium text-text-muted opacity-40 cursor-not-allowed flex items-center gap-2"
           >
             <span>🔍</span> Audit Engine
-          </button>
-          <button
-            disabled
-            className="glass-card px-5 py-3 text-sm font-medium text-text-muted opacity-40 cursor-not-allowed flex items-center gap-2"
-          >
-            <span>🗂️</span> Vault Health
           </button>
         </div>
       </section>

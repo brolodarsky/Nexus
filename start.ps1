@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Launches the Nexus Engine Control Panel (backend + frontend).
 .DESCRIPTION
@@ -48,10 +48,13 @@ try {
     npm run dev
 } finally {
     # Clean up backend when frontend exits
+    # NOTE: taskkill /T kills the entire process tree. This is critical
+    # because uvicorn --reload spawns child workers that survive if only
+    # the parent PID is killed, leaving zombie processes on port 8000.
     if ($backend -and !$backend.HasExited) {
         Write-Host ""
         Write-Host "  Shutting down backend (PID $($backend.Id))..." -ForegroundColor Yellow
-        Stop-Process -Id $backend.Id -Force -ErrorAction SilentlyContinue
+        taskkill /T /F /PID $backend.Id 2>$null | Out-Null
     }
     Write-Host "  👋 Nexus Control Panel stopped." -ForegroundColor DarkGray
     Set-Location $PROJECT_ROOT

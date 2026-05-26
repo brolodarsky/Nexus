@@ -81,8 +81,32 @@ export async function getVaultStructure(
   return apiFetch<VaultStructureResponse>(`/api/vault/structure${params}`);
 }
 
+export interface Transaction {
+  id: number;
+  agent_name: string;
+  action_type: string;
+  target_file: string;
+  original_content: string | null;
+  proposed_content: string;
+  reasoning: string | null;
+  status: string;
+  created_at: string;
+}
+
 export async function getNote(path: string): Promise<NoteContentResponse> {
   return apiFetch<NoteContentResponse>(
     `/api/vault/note?path=${encodeURIComponent(path)}`
   );
+}
+
+export async function getPendingHitl(): Promise<Transaction[]> {
+  return apiFetch<Transaction[]>("/api/hitl/pending");
+}
+
+export async function approveHitl(id: number): Promise<{status: string, message: string}> {
+  return apiFetch<{status: string, message: string}>(`/api/hitl/${id}/approve`, { method: "POST" });
+}
+
+export async function rejectHitl(id: number): Promise<{status: string, message: string}> {
+  return apiFetch<{status: string, message: string}>(`/api/hitl/${id}/reject`, { method: "POST" });
 }

@@ -5,7 +5,7 @@ Serves as the HTTP bridge between the Next.js frontend and the Python engine.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import agents, vault
+from api.routers import agents, vault, hitl
 
 app = FastAPI(
     title="Nexus Engine API",
@@ -28,6 +28,7 @@ app.add_middleware(
 # ── Route Mounts ──────────────────────────────────────────────
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(vault.router, prefix="/api/vault", tags=["vault"])
+app.include_router(hitl.router, prefix="/api/hitl", tags=["hitl"])
 
 
 # ── Health Check ──────────────────────────────────────────────
