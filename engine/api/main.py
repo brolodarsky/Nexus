@@ -36,6 +36,6 @@ async def health_check():
     """Basic health check — confirms the API is reachable."""
     return {
         "status": "ok",
-        "engine": "nexus",
-        "version": "0.1.0",
+        "engine": "Nexus",
+        "version": "2.0.0",
     }
