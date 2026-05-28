@@ -97,7 +97,9 @@ Deterministic scripts for vault and engine maintenance.
 | `resume_engine/` | Node.js (Playwright) for PDF rendering + Python (`python-docx`) for DOCX generation. Interactive document picker scans `3.1.3. Professional Portfolio & Evidence/Resumes/` and `Cover Letters/` for renderable markdown documents. Outputs page fill metrics (fill %, verdict, room remaining) after every render so agents can add/trim content to optimize page utilization. Also accepts a CLI path argument for scripted use. |
 | `engine/main.py` | Universal entry point & coordinator for the Agentic Engine. Features a persistent mission control menu with background Telegram bot support. |
 | `engine/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset using 12 real-world Q&A cases. |
-| `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). |
+| `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service for all domain agents. |
+| `engine/agents/router/agent.py` | Content Router Agent. LangGraph classifier that categorizes incoming content (career, health, general) and routes to the appropriate domain agent. Entry point for the multi-agent pipeline. |
+| `engine/agents/career/agent.py` | Career Agent. Domain-specialized LangGraph agent for job analysis, skill gap detection, and career strategy. Implements Deterministic Pre-flight Hydration (DPFH) to inject live Vault data (`My Skills.md`, `Employer Skill Requirements.md`) into its system prompt before each LLM call. Escalates cross-domain queries to the Librarian. Proposes writes via HITL queue. |
 | `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`, `get_vault_structure`). Supports targeted subtree search and frontmatter tag filtering. |
 | `engine/interfaces/cli.py` | CLI interface implementation. |
 | `engine/interfaces/voice.py` | Voice interface implementation (Whisper). |

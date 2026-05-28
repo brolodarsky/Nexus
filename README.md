@@ -130,7 +130,9 @@ Nexus/
 ├── engine/                      # Agentic search & coordinator engine
 │   ├── main.py                  # Universal coordinator & mission control
 │   ├── agents/                  # Domain-specific agents
-│   │   └── librarian/        # Librarian agent logic
+│   │   ├── librarian/           # Librarian agent (cross-domain vault search)
+│   │   ├── router/              # Content Router agent (classifier → domain dispatch)
+│   │   └── career/              # Career agent (DPFH, skill gap analysis, HITL writes)
 │   ├── core/                    # Shared engine configuration
 │   │   ├── audio.py             # Whisper transcription service
 │   │   ├── constants.py         # Global constants
@@ -228,7 +230,9 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python tools/ingest_phone.py --screens 50` |
 | `engine/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `python engine/main.py` |
 | `engine/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m engine.evals.runner` |
-| `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). | `python engine/main.py <query>` |
+| `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service. | `python engine/main.py <query>` |
+| `engine/agents/router/agent.py` | Content Router Agent. LangGraph classifier that routes incoming content to domain agents. | `python engine/agents/router/agent.py` |
+| `engine/agents/career/agent.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python engine/agents/career/agent.py` |
 | `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`, `get_vault_structure`). Supports targeted subtree search and frontmatter tag filtering. | N/A |
 | `engine/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
 | `engine/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve (write to disk), reject. | Via GUI or API |

@@ -3,6 +3,18 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.1.0] - 2026-05-28
+
+### Added
+- **Multi-Agent Pipeline (Content Router → Career Agent → Librarian):**
+  - **Content Router Agent (`engine/agents/router/`):** LangGraph-based classifier that categorizes incoming content into domain categories (career, health, general) via structured JSON output and routes to the appropriate domain agent using conditional edges. Includes fallback handling for unparseable LLM responses.
+  - **Career Agent (`engine/agents/career/`):** Domain-specialized LangGraph ReAct agent for job analysis, skill gap detection, and career strategy. Implements the **Deterministic Pre-flight Hydration (DPFH)** pattern — before each LLM invocation, a pure-Python orchestration node reads the career domain file listing (`os.listdir`), `My Skills.md`, and `Employer Skill Requirements.md` and injects them into the system prompt at zero LLM cost. Includes domain-scoped `search_career_domain` tool, `ask_librarian` escalation tool for cross-domain queries, and `propose_write` tool that submits modifications to the existing HITL transaction queue for human approval.
+  - **Librarian Integration:** The existing Librarian Agent (`engine/agents/librarian/`) now serves as the cross-domain search escalation service, callable as a tool by the Career Agent for queries outside its domain folder.
+  - **End-to-End Orchestration:** The Router's `career_agent` node invokes the real Career Agent subgraph (replacing the Step 1 placeholder), enabling a full pipeline: raw content → classification → domain-specific analysis with live vault context → optional cross-domain retrieval → structured response.
+- **Direct Execution Fix:** Added `sys.path` bootstrapping to both `router/agent.py` and `career/agent.py` so they can be run directly from the project root (`python engine/agents/router/agent.py`) without `ModuleNotFoundError`.
+
+
+
 ## [2.0.0] - 2026-05-26
 
 ### Added
