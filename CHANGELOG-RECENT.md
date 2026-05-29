@@ -16,6 +16,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - Updated `maintain_project_docs` skill (`.agents/skills/maintain_project_docs/SKILL.md`) to instruct agents to write to `.changeset/` instead of directly modifying `CHANGELOG.md`.
   - Updated `AGENTS.md` Git & Changelog Policy rules to mandate changesets for engine changes.
   - Checked off Phase 1 tasks in the `Project - Agent Context Optimization & Changeset Automation.md` project log.
+  - **Conversation Logging Optimization:**
+  - Updated `log_llm_conversation` skill instructions to prepend entries at the top of `Log - LLM Conversations.md` instead of appending them at the bottom.
+  - Re-ordered `Log - LLM Conversations.md` to place newer entries first, enabling future agents to verify duplicates by reading only the first 20 lines of the file.
 
 ## [2.1.0] - 2026-05-28
 
@@ -46,27 +49,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - Simplified the `maintain_project_docs` skill rules to remove the obsolete "Compiler Pattern" for auto-generating `AGENTS.md`.
 
 
-
-## [2.0.0] - 2026-05-26
-
-### Added
-- **Nexus Engine Control Panel — Phase 1 (Full-Stack Foundation):**
-  - **FastAPI Backend (`engine/api/`):** New HTTP bridge layer between the Next.js GUI and the Python engine. Includes CORS middleware, health check endpoint, agent status registry (6 agents), real `ask_librarian()` integration, vault structure/note/search endpoints.
-  - **Next.js Frontend (`gui/`):** Scaffolded with TypeScript, Tailwind CSS v4, App Router. Premium dark-mode design system with deep space palette, glassmorphism cards, glowing status pills, staggered entrance animations, and gradient text.
-  - **Mission Control Dashboard (`/`):** Real-time agent fleet overview with summary stat cards (engine status, active agents, pending HITL, errors), agent cards populated from the live API with 15-second polling, and quick-launch action buttons.
-  - **Ask Brain Chat Interface (`/ask`):** Conversational page wired to the Librarian agent via `POST /api/agents/ask`. Features message history, example queries, typing indicator, and responsive layout.
-  - **Typed API Client (`gui/src/lib/api.ts`):** Centralized fetch wrapper with full TypeScript types for all backend endpoints.
-  - **Sidebar Navigation:** Logo, active-link highlighting, disabled items for future phases (Vault Explorer, HITL Queue, Audit Log), live system status indicator.
-- **HITL Transaction Queue & Review Surface (Phase 1.5 — Core Safety):**
-  - **SQLite HITL Queue (`engine/core/hitl_queue.py`):** Persistent transaction queue storing proposed agent writes with original content, proposed content, agent reasoning, and approval status. Durable across restarts.
-  - **HITL API Router (`engine/api/routers/hitl.py`):** Endpoints for listing pending transactions, approving (writes to disk with PROJECT_ROOT resolution), rejecting, and mock seeding for development.
-  - **HITL Review Page (`gui/src/app/hitl/page.tsx`):** Full review surface with a sidebar queue list, agent reasoning context panel, and Monaco Editor (`@monaco-editor/react`) side-by-side diff viewer for VS Code-quality pre-commit previews.
-  - **Dashboard Integration:** Mission Control now fetches live pending HITL counts from the API and displays a "Review Queue" quick-action button with badge count.
-- **Dependency:** Added `fastapi` and `starlette` to `.venv` and `requirements.txt`. Added `@monaco-editor/react` to `gui/`.
-
-### Changed
-- **`.gitignore`:** Added `gui/node_modules/`, `gui/.next/`, `gui/out/` exclusions for the frontend build artifacts.
-- **`start.ps1` Process Cleanup:** Replaced `Stop-Process` with `taskkill /T /F` to kill the entire uvicorn process tree on exit, preventing zombie worker processes from holding port 8000 across restarts.
-
-### Fixed
-- **`start.ps1` Encoding:** Saved `start.ps1` with UTF-8 BOM encoding to prevent PowerShell 5.1 from misinterpreting Unicode characters (such as emojis and boxes) as ANSI smart quotes, resolving the script parsing and launch errors.

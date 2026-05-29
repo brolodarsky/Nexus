@@ -16,6 +16,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - Updated `maintain_project_docs` skill (`.agents/skills/maintain_project_docs/SKILL.md`) to instruct agents to write to `.changeset/` instead of directly modifying `CHANGELOG.md`.
   - Updated `AGENTS.md` Git & Changelog Policy rules to mandate changesets for engine changes.
   - Checked off Phase 1 tasks in the `Project - Agent Context Optimization & Changeset Automation.md` project log.
+  - **Conversation Logging Optimization:**
+  - Updated `log_llm_conversation` skill instructions to prepend entries at the top of `Log - LLM Conversations.md` instead of appending them at the bottom.
+  - Re-ordered `Log - LLM Conversations.md` to place newer entries first, enabling future agents to verify duplicates by reading only the first 20 lines of the file.
 
 ## [2.1.0] - 2026-05-28
 
