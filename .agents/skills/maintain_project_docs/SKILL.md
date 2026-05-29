@@ -17,16 +17,22 @@ description: Keep README.md, AGENTS.md, CHANGELOG.md, and requirements.txt in sy
 1. **AGENTS.md Maintenance:** `AGENTS.md` serves as your developer agent constitution. Do NOT compile skills, workflows, or tools into it. Keep it strictly focused on the core developer guidelines, rules, and core engine architectural principles.
 2. **README.md Manual Updates:** Whenever you add, remove, or significantly change a script in `tools/` or a workflow/skill in `.agents/`, you MUST ensure that `README.md` is updated manually to accurately reflect the changes (e.g. updating the script/tool/workflow lists).
 
-**CRITICAL RULES FOR CHANGELOG:**
-1. **Read `CHANGELOG.md` first**.
-2. **Same-Day Entries:** If an entry for the current date already exists (e.g., `## [1.0.3] - 2026-03-18`), you MUST append your new changes under that existing date's `### Added` or `### Fixed` headers. Do NOT create duplicate `## [Version] - Date` headers for the same day.
-3. **Version Bumping:** Increment the version number only if it is a new day, OR if you believe the changes constitute a significant overhaul, major feature addition, or breaking change. In those significant cases, bumping the version on the same day is acceptable.
+**CRITICAL RULES FOR CHANGELOG (CHANGESETS):**
+1. **Never edit `CHANGELOG.md` or `CHANGELOG-RECENT.md` directly** during tasks.
+2. **Create a Changeset Fragment:** Whenever you make a change that requires a changelog entry (according to the Git & Changelog Policy in `AGENTS.md`), you MUST write a new markdown file in the `.changeset/` directory: `.changeset/<unique-slug>.md` (e.g., `.changeset/add-email-tool-12345.md`).
+3. **Changeset Format:**
+   - YAML frontmatter specifying `type: patch | minor | major`.
+   - Markdown body containing standard Keep a Changelog headings (e.g. `### Added`, `### Changed`, `### Fixed`, `### Removed`, `### Deprecated`, `### Security`) detailing the changes.
 
-Example of appending to an existing day:
+Example of a changeset file (`.changeset/add-email-tool-12345.md`):
 ```markdown
+---
+type: patch
+---
 ### Added
-- New Vector Embeddings note in section 5
-- (Your new appended feature goes here)
+- Integrated IMAP email client library under `tools/read_email.py`.
+### Changed
+- Refactored `tools/.secrets/` ignore rules in `.gitignore`.
 ```
 
 For scripts, update the relevant section in `README.md` under `## Scripts`. Each script entry should include:

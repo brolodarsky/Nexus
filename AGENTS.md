@@ -28,18 +28,19 @@ When modifying or extending the Nexus Engine, you MUST respect and preserve the 
 1. Never delete user content without explicit confirmation.
 2. Always use the .venv — resolve Python tools from .venv/Scripts/, not system PATH. Never install dependencies globally. Always use .venv\Scripts\pip.exe for installations. If a new requirement is added, immediately trigger the maintain_project_docs skill.
 3. Commit messages must follow Conventional Commits — see conventional_commits skill. 
-4. Git & Changelog Policy. Use this table to determine whether a change requires a git commit and/or a CHANGELOG.md entry:
+4. Git & Changelog Policy. Use this table to determine whether a change requires a git commit and/or a changeset entry:
 
-| What changed? | Commit? | Changelog? | Version bump |
+| What changed? | Commit? | Changeset? | Version bump |
 |---|---|---|---|
-| Tool, skill, or workflow code | ✅ | ✅ | Minor or patch |
-| New H1/H2 *section* in TOC / global structural paradigm change | ✅ | ✅ | Minor or patch |
-| Project docs (AGENTS.md, README.md) | ✅ | ✅ | Patch |
+| Tool, skill, or workflow code | ✅ | ✅ (write fragment to `.changeset/`) | Minor or patch (via release script) |
+| New H1/H2 *section* in TOC / global structural paradigm change | ✅ | ✅ (write fragment to `.changeset/`) | Minor or patch (via release script) |
+| Project docs (AGENTS.md, README.md) | ✅ | ✅ (write fragment to `.changeset/`) | Patch (via release script) |
 | `.gitkeep` additions for new empty folders | ✅ | ❌ | — |
 | Note wiki-links added to existing TOC sections | ❌ | ❌ | — |
 | Individual note creation, edits, or deletions in `Vault/` | ❌ | ❌ | — |
 
-- Key principles: Git is solely for the Engine (tools, skills, workflows, project docs) and Vault structure (new sections — not individual notes). Individual notes/thoughts are encrypted and backed up locally — avoid micro-commits. If there's an existing changelog version on the same day, update the existing version unless the change is significant.
+- Key principles: Git is solely for the Engine (tools, skills, workflows, project docs) and Vault structure (new sections — not individual notes). Individual notes/thoughts are encrypted and backed up locally — avoid micro-commits.
+- Changeset rule: When a changeset is required, write a small description to a new file in `.changeset/<unique-name>.md` with frontmatter `type: major|minor|patch` (see the `maintain_project_docs` skill). Never edit `CHANGELOG.md` or `CHANGELOG-RECENT.md` directly.
 5. The TOC is the single source of truth for Vault folder structure and the high-level concept of this entire project, but Physical Folder Structure on Disk takes precedence when resolving duplicate/split directory discrepancies to avoid breaking existing paths. Do not clutter the TOC with individual granular notes (e.g. single medical visits, individual articles, daily logs). Those should be linked and organized inside specialized "Hub" or "Map of Content" (MOC) notes (e.g., Health Summary, Auto Knowledge Base).
 6. All notes must have YAML frontmatter with aliases, tags, and type fields.
 7. Audio files are gitignored — they sync via Syncthing, not Git.

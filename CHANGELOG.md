@@ -3,6 +3,20 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.2.0] - 2026-05-28
+
+### Added
+- **Changeset Release Compilation System (Agent Context Optimization - Phase 1):**
+  - Created `.changeset/` staging directory with `.gitkeep` for storing fragmented change notes.
+  - Implemented `tools/release.py` Python compiler script to parse changeset fragments, determine semantic version bumps, update `CHANGELOG.md` and keep a rolling 3-release window in `CHANGELOG-RECENT.md`, and clean up staging.
+  - Created `CHANGELOG-RECENT.md` as a low-token active context file for developer agents.
+
+### Changed
+- **Changelog Policies & Skills:**
+  - Updated `maintain_project_docs` skill (`.agents/skills/maintain_project_docs/SKILL.md`) to instruct agents to write to `.changeset/` instead of directly modifying `CHANGELOG.md`.
+  - Updated `AGENTS.md` Git & Changelog Policy rules to mandate changesets for engine changes.
+  - Checked off Phase 1 tasks in the `Project - Agent Context Optimization & Changeset Automation.md` project log.
+
 ## [2.1.0] - 2026-05-28
 
 ### Added
