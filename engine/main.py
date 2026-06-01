@@ -9,7 +9,12 @@ import threading
 import logging
 import time
 
-from agents.librarian.agent import ask_librarian
+# Fix Windows console emoji printing
+sys.stdout.reconfigure(encoding='utf-8')
+import logging
+import time
+
+from agents.router.agent import route_content
 
 # Disable noisy logs
 logging.getLogger('httpx').setLevel(logging.WARNING)
@@ -31,7 +36,7 @@ def start_telegram_interface():
 def print_header():
     os.system('cls' if os.name == 'nt' else 'clear')
     print("  " + "═" * 45)
-    print("  ║" + " " * 12 + "🧠 Nexus.0 ENGINE" + " " * 13 + "║")
+    print("  ║" + " " * 12 + "🧠 Nexus ENGINE" + " " * 13 + "║")
     print("  " + "═" * 45)
     status = "🟢 ONLINE" if BOT_ONLINE else "⏳ STARTING"
     print(f"  [ Telegram Bot: {status} ]\n")
@@ -44,12 +49,18 @@ def show_menu():
 
 def print_agent_response(query: str, filters: dict = None):
     print(f"🧠 Querying Vault Agent: {query}")
-    print("Agent is reasoning and searching the vault...\n")
-    response = ask_librarian(query, filters=filters)
+    print("Agent is reasoning and routing...\n")
+    
+    result = route_content(query, filters=filters)
+    
+    # Optional: Display routing context
+    if result["domain"]:
+        print(f"  [Router Classifed: {result['domain']} | Confidence: {result['confidence']:.2f}]")
+    
     print("\n" + "="*45)
     print("🤖 Response:")
     print("="*45)
-    print(response)
+    print(result["response"])
     print("="*45 + "\n")
 
 def main():

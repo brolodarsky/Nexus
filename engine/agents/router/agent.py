@@ -33,6 +33,7 @@ class RouterState(TypedDict):
     """State that flows through the routing graph."""
     messages: Annotated[Sequence[BaseMessage], operator.add]
     raw_content: str                     # The original content to classify
+    filters: Optional[dict]              # Optional filters (domain, tag, type) passed from CLI
     domain: Optional[str]                # Classified domain: career | health | general
     summary: Optional[str]              # Short summary extracted by the router
     confidence: Optional[float]         # Router's confidence in classification
@@ -109,7 +110,7 @@ def classify_content(state: RouterState) -> dict:
     }
 
 
-def route_after_classify(state: RouterState) -> Literal["tools", "career_agent", "general_response"]:
+def route_after_classify(state: RouterState) -> Literal["tools", "career_agent", "run_librarian_node"]:
     """
     Conditional edge: routes to tools if tool call made, else to appropriate domain agent.
     """
@@ -121,25 +122,28 @@ def route_after_classify(state: RouterState) -> Literal["tools", "career_agent",
     domain = state.get("domain", "general")
     if domain == "career":
         return "career_agent"
-    return "general_response"
-
-
-def general_response(state: RouterState) -> dict:
+    return "run_librarian_node"
+def run_librarian_node(state: RouterState) -> dict:
     """
-    Placeholder node for domains without a dedicated agent yet.
-    Returns a message indicating the classification result.
+    Fallback for domains without a dedicated agent yet, or explicit general knowledge queries.
+    Passes the query and any CLI filters to the Librarian subgraph.
     """
-    domain = state.get("domain", "general")
-    summary = state.get("summary", "")
-    confidence = state.get("confidence", 0.0)
+    from agents.librarian.agent import ask_librarian
 
-    msg = (
-        f"📋 **Content classified as: `{domain}`** (confidence: {confidence:.0%})\n\n"
-        f"**Summary:** {summary}\n\n"
-        f"_No dedicated `{domain}` agent is implemented yet. "
-        f"This content would be routed to the `{domain}` domain agent once built._"
-    )
-    return {"messages": [HumanMessage(content=msg)]}
+    raw_content = state.get("raw_content", "")
+    filters = state.get("filters", None)
+    
+    # Also pass context from messages if tools were used
+    context_str = ""
+    for msg in state.get("messages", []):
+        if hasattr(msg, "name") and msg.name == "fetch_emails" and msg.content:
+            context_str += f"\n[Fetched Email Data]:\n{msg.content}\n"
+            
+    final_content = raw_content + "\n" + context_str if context_str else raw_content
+
+    response_text = ask_librarian(final_content, filters=filters)
+
+    return {"messages": [HumanMessage(content=response_text)]}
 
 
 def run_career_agent_node(state: RouterState) -> dict:
@@ -173,26 +177,27 @@ workflow = StateGraph(RouterState)
 workflow.add_node("classify", classify_content)
 workflow.add_node("tools", tool_node)
 workflow.add_node("career_agent", run_career_agent_node)
-workflow.add_node("general_response", general_response)
+workflow.add_node("run_librarian_node", run_librarian_node)
 
 # Edges
 workflow.add_edge(START, "classify")
 workflow.add_conditional_edges("classify", route_after_classify)
 workflow.add_edge("tools", "classify")
 workflow.add_edge("career_agent", END)
-workflow.add_edge("general_response", END)
+workflow.add_edge("run_librarian_node", END)
 
 router_graph = workflow.compile()
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def route_content(content: str) -> dict:
+def route_content(content: str, filters: dict = None) -> dict:
     """
     Entry point: classify and route a piece of raw content.
 
     Args:
         content: The raw text to classify (email body, note, job description, etc.)
+        filters: Optional filters dict to pass along to the Librarian agent
 
     Returns:
         dict with keys: domain, summary, confidence, reasoning, response
@@ -200,6 +205,7 @@ def route_content(content: str) -> dict:
     initial_state = {
         "messages": [],
         "raw_content": content,
+        "filters": filters,
         "domain": None,
         "summary": None,
         "confidence": None,

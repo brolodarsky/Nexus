@@ -12,7 +12,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
-from agents.librarian.agent import execute_vault_query
+from agents.router.agent import route_content
 from core.audio import transcribe_audio
 
 # Load environment variables
@@ -43,8 +43,15 @@ def format_telegram_response(final_state: dict) -> str:
     """Format the LangGraph final state into a Telegram-friendly Markdown string."""
     # We are omitting sources in Telegram for now because obsidian:// deep links 
     # do not always render properly in mobile Telegram clients.
-    answer = final_state["messages"][-1].content
-    return answer
+    if "response" in final_state:
+        # It's from the router
+        return final_state["response"]
+    
+    # Fallback if it's the old state format
+    if "messages" in final_state and len(final_state["messages"]) > 0:
+        return final_state["messages"][-1].content
+        
+    return "No response generated."
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await auth_middleware(update):
@@ -90,7 +97,8 @@ async def process_query(update: Update, query: str):
         # We run the synchronous RAG pipeline in the same thread for simplicity here.
         # This will block the event loop for the duration of the query,
         # but since it's a personal bot for one user, this is acceptable.
-        final_state = execute_vault_query(query, thread_id=str(update.message.chat_id))
+        # We don't currently pass thread_id to router, but we could in the future.
+        final_state = route_content(query)
         response_text = format_telegram_response(final_state)
         
         # Try sending with Markdown parsing first
