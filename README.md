@@ -130,6 +130,7 @@ Nexus/
 ├── engine/                      # Agentic search & coordinator engine
 │   ├── main.py                  # Universal coordinator & mission control
 │   ├── agents/                  # Domain-specific agents
+│   │   ├── email/               # Email Agent (compiled subgraph for IMAP fetch/search)
 │   │   ├── librarian/           # Librarian agent (cross-domain vault search)
 │   │   ├── router/              # Content Router agent (classifier → domain dispatch)
 │   │   └── career/              # Career agent (DPFH, skill gap analysis, HITL writes)
@@ -233,7 +234,8 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `engine/agents/router/evals/runner.py` | Deterministic evaluation of the Content Router agent logic. | `python engine/agents/router/evals/runner.py` |
 | `engine/agents/career/evals/runner.py` | LLM-as-a-judge evaluation of the Career Agent and HITL compliance. | `python engine/agents/career/evals/runner.py` |
 | `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service. | `python engine/main.py <query>` |
-| `engine/agents/router/agent.py` | Content Router Agent. LangGraph classifier that routes incoming content to domain agents. | `python engine/agents/router/agent.py` |
+| `engine/agents/email/agent.py` | Email Agent subgraph (LangGraph). Handles IMAP connections to fetch and search emails. | `N/A (Called by Router)` |
+| `engine/agents/router/agent.py` | Content Router Agent. LangGraph classifier that fetches context via tools and routes incoming content to domain agents. | `python engine/agents/router/agent.py` |
 | `engine/agents/career/agent.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python engine/agents/career/agent.py` |
 | `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`, `get_vault_structure`). Supports targeted subtree search and frontmatter tag filtering. | N/A |
 | `engine/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
