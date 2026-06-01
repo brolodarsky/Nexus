@@ -34,6 +34,8 @@ from agents.career.prompts import CAREER_SYSTEM_PROMPT
 # ── Constants ────────────────────────────────────────────────────────────────
 
 CAREER_DOMAIN_PATH = VAULT_PATH / "3. Operations & Wealth" / "3.1. Career Strategy & Revenue"
+RESUMES_PATH = CAREER_DOMAIN_PATH / "3.1.3. Professional Portfolio & Evidence" / "Resumes"
+MASTER_RESUME_PATH = RESUMES_PATH / "Resume - Master.md"
 
 # Files to pre-load into the system prompt (DPFH Tier 2: Declared Dependencies)
 DPFH_FILES = {
@@ -136,6 +138,23 @@ def read_note(note_path: str) -> str:
 
 
 @tool
+def get_master_resume() -> str:
+    """Read the master resume (Resume - Master.md) and return its full content.
+
+    Use this when you need to tailor a resume for a specific job description.
+    Read the master resume first, then craft a tailored version and propose it
+    via propose_write.
+    """
+    if not MASTER_RESUME_PATH.exists():
+        return "(Resume - Master.md not found)"
+    try:
+        with open(MASTER_RESUME_PATH, "r", encoding="utf-8") as f:
+            return f"--- Resume - Master.md ---\n\n{f.read()}"
+    except Exception as e:
+        return f"Error reading master resume: {e}"
+
+
+@tool
 def search_career_domain(keyword: str) -> str:
     """Search for a keyword within the career domain files only. Returns matching file paths with context snippets."""
     results = []
@@ -221,7 +240,7 @@ def propose_write(target_file: str, proposed_content: str, reasoning: str) -> st
 
 # ── LLM Setup ────────────────────────────────────────────────────────────────
 
-tools = [read_note, search_career_domain, ask_librarian, propose_write]
+tools = [read_note, get_master_resume, search_career_domain, ask_librarian, propose_write]
 tool_node = ToolNode(tools)
 
 llm = ChatOpenAI(model=AI_MODEL, temperature=0.0)
@@ -264,6 +283,21 @@ def run_career_agent(content: str, summary: str = "") -> str:
     Returns:
         The agent's final response string.
     """
+    result = run_career_agent_with_trace(content, summary)
+    return result["response"]
+
+
+def run_career_agent_with_trace(content: str, summary: str = "") -> dict:
+    """
+    Entry point with full trace. Returns response + tool call metadata.
+
+    Args:
+        content: The raw content to analyze (e.g., a job description email).
+        summary: Optional short summary from the Router for context.
+
+    Returns:
+        dict with keys: response (str), tool_calls (list of {name, args} dicts)
+    """
     # DPFH: Build the system prompt with live Vault data injected
     system_prompt = build_career_system_prompt()
 
@@ -279,10 +313,28 @@ def run_career_agent(content: str, summary: str = "") -> str:
 
     try:
         final_state = career_graph.invoke({"messages": messages})
+
+        # Extract tool calls from all messages in the trace
+        tool_calls = []
+        for msg in final_state["messages"]:
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    tool_calls.append({
+                        "name": tc.get("name", ""),
+                        "args": {k: v[:200] if isinstance(v, str) and len(v) > 200 else v
+                                 for k, v in tc.get("args", {}).items()},
+                    })
+
         last_message = final_state["messages"][-1]
-        return last_message.content
+        return {
+            "response": last_message.content,
+            "tool_calls": tool_calls,
+        }
     except Exception as e:
-        return f"❌ Career Agent encountered an error: {e}"
+        return {
+            "response": f"❌ Career Agent encountered an error: {e}",
+            "tool_calls": [],
+        }
 
 
 # ── CLI Smoke Test ───────────────────────────────────────────────────────────

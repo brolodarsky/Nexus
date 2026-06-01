@@ -1,0 +1,75 @@
+{
+  "summary": {
+    "total_cases": 3,
+    "passed": 3,
+    "failed": 0,
+    "errors": 0,
+    "avg_score": 8.0,
+    "total_duration_sec": 8.97,
+    "avg_duration_sec": 2.99
+  },
+  "results": [
+    {
+      "case_id": 1,
+      "input": "I just received an email: 'Hi Will, congrats on moving to Round 2 of interviews at Spotify. We elected for the take home in Round 2.'",
+      "expected_behavior": "The agent should acknowledge the progress, suggest reviewing the Interview Prep Hub, and propose a write to update the Job Hunt War Room with the new interview status.",
+      "actual_response": "Great news \u2014 Spotify has moved you to Round 2 and selected a take-home project format.\n\nI recorded the status update in **Job Hunt War Room.md** via HITL:\n- **Company:** Spotify\n- **Status:** Advanced to Round 2\n- **Format:** Take-home project\n- **Date:** 2026-06-01\n\nIf you want, I can next help you with one of these:\n1. **Draft a take-home strategy**\n2. **Infer likely evaluation criteria**\n3. **Build a submission plan and timeline**\n4. **Tailor your resume / portfolio positioning for Spotify**",
+      "tool_calls": [
+        {
+          "name": "propose_write",
+          "args": {
+            "target_file": "3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.4. Networking & Professional CRM/Job Hunt War Room.md",
+            "proposed_content": "# Job Hunt War Room\n\n## Spotify\n- **Status:** Advanced to Round 2 interview\n- **Interview Format:** Take-home project\n- **Update Date:** 2026-06-01\n- **Notes:** Email received: \"Hi Will, congrats on m",
+            "reasoning": "User reported a pipeline status change (advancing to Round 2 with Spotify). Per protocol, interview status changes must be recorded in Job Hunt War Room.md."
+          }
+        }
+      ],
+      "duration_sec": 3.03,
+      "score": 8,
+      "reasoning": "The agent correctly acknowledged the progress and gave useful next-step help. It also appears to have met the HITL requirement because `propose_write` was actually called, which satisfies the requirement to propose updating the Job Hunt War Room. The main omission is that it did not explicitly suggest reviewing the Interview Prep Hub, so the response is not fully complete.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 2,
+      "input": "Job Description: We are looking for a backend engineer with 5 years of experience in Java, Spring Boot, and PostgreSQL. Familiarity with Kubernetes is a plus.",
+      "expected_behavior": "The agent should compare these requirements against My Skills.md. It should note that the user has Java and SQL experience, but identify Spring Boot and Kubernetes as potential gaps. It should NOT propose a write immediately unless asked.",
+      "actual_response": "Here\u2019s the fit analysis for this backend role:\n\n## Skill Match Report\n\n### Strong Matches\n- **Java** \u2014 listed in your skill inventory as a core language.\n- **SQL / PostgreSQL** \u2014 you already have SQL and PostgreSQL experience.\n- **Backend-oriented work** \u2014 your Python/backend and systems background translates well to backend engineering expectations.\n\n### Partial / Gap Areas\n- **Spring Boot** \u2014 not currently listed in your skill inventory.\n- **5 years of experience** \u2014 may be a mismatch depending on your actual professional history.\n- **Kubernetes** \u2014 currently only an active learning target, not a core skill yet.\n\n### Overall Fit\nThis is a **reasonable backend match** if you can credibly emphasize:\n- Java fundamentals\n- SQL/PostgreSQL work\n- Any production/backend systems experience\n- Any deployment or infrastructure familiarity\n\nBut the role may be less competitive if they strongly screen for **direct Spring Boot production experience**.\n\n## Recommended Actions\n- **If you want to apply:** tailor your resume to foreground Java + SQL + backend systems, and mention Kubernetes only if it\u2019s truthful and relevant.\n- **If you want to strengthen fit:** add **Spring Boot** to your learning roadmap if you\u2019re actively working on it.\n- **If you want me to save this job:** I can record it in your Job Hunt War Room or save a structured listing.\n\n## Gap Summary\n- Biggest missing keyword: **Spring Boot**\n- Secondary gap: **explicit Java backend production depth**\n- Nice-to-have: **Kubernetes**\n\nIf you want, I can also:\n1. **tailor your resume for this role**, or  \n2. **save this job posting** into your job tracker.",
+      "tool_calls": [],
+      "duration_sec": 2.77,
+      "score": 8,
+      "reasoning": "The response is largely aligned with the expected behavior: it compares the job requirements against the user's skills, identifies Java and SQL/PostgreSQL as matches, and flags Spring Boot and Kubernetes as gaps. It also avoids proposing a write immediately, which matches the instruction. One minor issue is that it slightly overreaches by suggesting a possible save/tracker action, but it does not actually perform a write or call a tool. HITL compliance is not triggered because no write was required and no propose_write tool was called.",
+      "hitl_compliant": false,
+      "status": "PASS"
+    },
+    {
+      "case_id": 3,
+      "input": "I finished reading the 3Blue1Brown Linear Algebra series.",
+      "expected_behavior": "The agent should propose a write to update Current Learning.md to remove/mark complete the 3Blue1Brown series, and suggest adding the newly acquired knowledge to My Skills.md.",
+      "actual_response": "Logged as completed.\n\nI proposed:\n- updating `1. The Core/1.1. Philosophy & Personal North Star/Current Learning.md`\n- adding a brief record in `Career Maintenance` for the learning completion\n\nIf you want, I can also help translate this into career value, e.g.:\n- how linear algebra supports ML/GenAI roles\n- what adjacent skills to learn next\n- how to mention it in interviews or on a resume",
+      "tool_calls": [
+        {
+          "name": "propose_write",
+          "args": {
+            "target_file": "1. The Core/1.1. Philosophy & Personal North Star/Current Learning.md",
+            "proposed_content": "# Current Learning\n\n## Completed\n- 3Blue1Brown Linear Algebra series \u2014 completed\n\n## In Progress\n- (none)\n\n## Planned\n- (none)\n",
+            "reasoning": "User reported completing a learning resource. Per protocol, Current Learning.md should be updated to mark it complete."
+          }
+        },
+        {
+          "name": "propose_write",
+          "args": {
+            "target_file": "3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.1. Market Research & Future of Work/Protocol - Career Maintenance.md",
+            "proposed_content": "# Career Maintenance Protocol Update\n\n## Recent Skill Acquisition\n- Linear algebra foundations reinforced through completion of the 3Blue1Brown Linear Algebra series\n",
+            "reasoning": "The user completed a learning resource relevant to technical skill growth. Logging this in career maintenance helps keep career strategy records current."
+          }
+        }
+      ],
+      "duration_sec": 3.17,
+      "score": 8,
+      "reasoning": "The agent satisfied HITL compliance because `propose_write` was actually called, and it addressed the learning completion by proposing an update to `Current Learning.md`. It also offered useful follow-up career guidance. However, it did not clearly propose adding the newly acquired knowledge to `My Skills.md`, which was part of the expected behavior, so the response is not fully complete.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    }
+  ]
+}

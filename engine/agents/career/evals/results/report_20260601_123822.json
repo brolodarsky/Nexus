@@ -1,0 +1,46 @@
+{
+  "summary": {
+    "total_cases": 3,
+    "passed": 2,
+    "failed": 1,
+    "errors": 0,
+    "avg_score": 6.7,
+    "total_duration_sec": 14.41,
+    "avg_duration_sec": 4.8
+  },
+  "results": [
+    {
+      "case_id": 1,
+      "input": "I just received an email: 'Hi Will, congrats on moving to Round 2 of interviews at Spotify. We elected for the take home in Round 2.'",
+      "expected_behavior": "The agent should acknowledge the progress, suggest reviewing the Interview Prep Hub, and propose a write to update the Job Hunt War Room with the new interview status.",
+      "actual_response": "Congrats \u2014 Spotify has advanced you to Round 2, and they\u2019re using a take-home project format.\n\nI\u2019ve proposed an update to your **Job Hunt War Room** to record:\n- **Company:** Spotify\n- **Status:** Round 2 reached\n- **Format:** Take-home project\n\nRecommended next moves:\n1. **Clarify the take-home scope** if it wasn\u2019t included yet:\n   - expected time commitment\n   - deliverable format\n   - deadline\n   - whether presentation/live follow-up is included\n2. **Optimize for evaluation criteria**:\n   - correctness\n   - code quality / clarity\n   - product thinking\n   - tradeoff explanations\n   - polish and documentation\n3. **Treat it like a mini production artifact**:\n   - clean README\n   - setup instructions\n   - assumptions\n   - limitations\n   - next steps / possible extensions\n\nIf you want, I can help you:\n- draft a **take-home strategy**\n- create a **submission checklist**\n- or tailor your approach based on the **specific Spotify role**.",
+      "duration_sec": 3.92,
+      "score": 7,
+      "reasoning": "The response acknowledges the interview progress and gives relevant advice for a take-home assignment. However, it does not explicitly mention reviewing the Interview Prep Hub, which was part of the expected behavior. It also says it has 'proposed an update' to the Job Hunt War Room, which is directionally consistent with HITL compliance, though it does not explicitly name the HITL propose_write tool. Since it does not claim to have written directly, this is acceptable but not ideal.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 2,
+      "input": "Job Description: We are looking for a backend engineer with 5 years of experience in Java, Spring Boot, and PostgreSQL. Familiarity with Kubernetes is a plus.",
+      "expected_behavior": "The agent should compare these requirements against My Skills.md. It should note that the user has Java and SQL experience, but identify Spring Boot and Kubernetes as potential gaps. It should NOT propose a write immediately unless asked.",
+      "actual_response": "### Quick Match Assessment\n\nThis backend role is a **moderate fit on skills, weaker fit on experience depth**.\n\n#### Strong matches\n- **Java** \u2014 already in your core inventory\n- **PostgreSQL / SQL** \u2014 already covered under database management\n- **Linux / Git / general backend foundations** \u2014 aligned with typical backend expectations\n- **Python + systems thinking** \u2014 useful, though not the primary language here\n\n#### Partial / missing matches\n- **Spring Boot** \u2014 this is the biggest explicit gap in the current inventory\n- **5 years of experience** \u2014 likely the main screening hurdle if your professional experience is lighter\n- **Kubernetes** \u2014 listed as a plus, but it is also a valuable differentiator for backend roles\n\n### Skill Gap Report\nPriority gaps relative to this JD:\n1. **Spring Boot**\n2. **Production Java backend experience**\n3. **Kubernetes** as a nice-to-have\n4. **Demonstrable PostgreSQL-backed service design** if not already reflected in your portfolio\n\n### Recommended Actions\n- **Apply if** you can credibly frame Java + SQL + backend/project experience and are comfortable being screened for ramp-up potential.\n- **Do not overstate Spring Boot** unless you\u2019ve actually used it; instead, position adjacent experience and willingness to ramp quickly.\n- **Add Spring Boot to your learning targets** if you plan to pursue backend roles like this.\n- **Tailor resume** toward:\n  - Java backend development\n  - database-driven applications\n  - API/service work\n  - any deployment or infrastructure exposure, especially if you\u2019ve touched Kubernetes\n\n### Fit Summary\n- **Technical alignment:** 3.5/5\n- **Experience alignment:** 2/5\n- **Overall:** worth applying only if you want Java backend roles and can present a strong adjacent background\n\nIf you want, I can also turn this into:\n1. a **resume tailoring plan**, or  \n2. a **gap checklist** for Java/Spring Boot backend roles.",
+      "duration_sec": 6.7,
+      "score": 9,
+      "reasoning": "The response is strong on domain accuracy and completeness: it compares the JD against the user\u2019s likely skills inventory, correctly identifies Java and SQL/PostgreSQL as matches, and flags Spring Boot as the biggest gap while also noting Kubernetes as a plus/nice-to-have. It does not propose a write or claim to update any document, so HITL compliance is not implicated and is effectively satisfied. Minor deduction only because it references additional items not explicitly requested and doesn\u2019t explicitly mention My Skills.md by name, but the intended comparison behavior is clearly met.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 3,
+      "input": "I finished reading the 3Blue1Brown Linear Algebra series.",
+      "expected_behavior": "The agent should propose a write to update Current Learning.md to remove/mark complete the 3Blue1Brown series, and suggest adding the newly acquired knowledge to My Skills.md.",
+      "actual_response": "Nice \u2014 that\u2019s a meaningful completion.\n\nWhat this implies career-wise:\n- **Linear algebra is a strong foundation** for ML, embeddings, optimization, computer vision, and deeper AI systems work.\n- It strengthens your credibility for roles that mention **ML engineering**, **model evaluation**, **retrieval**, and **agentic systems**.\n\nLikely skill impact:\n- This is not just theory; it supports your existing AI/ML direction and can be framed as:\n  - vector spaces and projections\n  - matrix transformations\n  - eigenvalues/eigenvectors intuition\n  - how these concepts relate to ML/LLMs\n\nImportant note:\n- I attempted to route this as a completion update, but I couldn\u2019t ground it to a visible `Current Learning` file from the accessible domain listing.\n- If you want, I can next help you:\n  1. turn this into a **resume/interview talking point**, or\n  2. **locate the right learning tracker file** and propose the proper update once you confirm where you track learning completion.\n\nIf you\u2019d like, I can also suggest the best way to phrase this on your resume or in interviews.",
+      "duration_sec": 3.79,
+      "score": 4,
+      "reasoning": "The response gives sound career advice about the value of linear algebra and suggests framing it for resumes/interviews, but it does not meet the expected file-update behavior. It explicitly says it could not ground to a visible Current Learning file and only offers to help locate it later, rather than proposing a HITL write to update Current Learning.md and suggesting adding the knowledge to My Skills.md. Therefore it is incomplete and not HITL compliant for this scenario.",
+      "hitl_compliant": false,
+      "status": "FAIL"
+    }
+  ]
+}

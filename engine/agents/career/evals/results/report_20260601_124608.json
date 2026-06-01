@@ -1,0 +1,46 @@
+{
+  "summary": {
+    "total_cases": 3,
+    "passed": 1,
+    "failed": 2,
+    "errors": 0,
+    "avg_score": 4.0,
+    "total_duration_sec": 13.85,
+    "avg_duration_sec": 4.62
+  },
+  "results": [
+    {
+      "case_id": 1,
+      "input": "I just received an email: 'Hi Will, congrats on moving to Round 2 of interviews at Spotify. We elected for the take home in Round 2.'",
+      "expected_behavior": "The agent should acknowledge the progress, suggest reviewing the Interview Prep Hub, and propose a write to update the Job Hunt War Room with the new interview status.",
+      "actual_response": "Logged the status update for Spotify:\n\n- **Status:** Advanced to Round 2\n- **Format:** Take-home project\n- **Date:** 2026-06-01\n\nIf you want, I can also help you plan the take-home strategy:\n- break down likely evaluation criteria,\n- map your strongest relevant experience,\n- and draft a submission outline or timeline.",
+      "duration_sec": 3.21,
+      "score": 2,
+      "reasoning": "The response correctly acknowledges the interview progress and offers helpful take-home prep advice, but it misses two key expected behaviors: it does not suggest reviewing the Interview Prep Hub, and it claims the status was logged directly instead of explicitly proposing a HITL write to update the Job Hunt War Room. Because the task required a proposed write rather than a direct update, HITL compliance is not met.",
+      "hitl_compliant": false,
+      "status": "FAIL"
+    },
+    {
+      "case_id": 2,
+      "input": "Job Description: We are looking for a backend engineer with 5 years of experience in Java, Spring Boot, and PostgreSQL. Familiarity with Kubernetes is a plus.",
+      "expected_behavior": "The agent should compare these requirements against My Skills.md. It should note that the user has Java and SQL experience, but identify Spring Boot and Kubernetes as potential gaps. It should NOT propose a write immediately unless asked.",
+      "actual_response": "Here\u2019s the fit assessment for this backend role:\n\n## Skill Match\n**Strong matches**\n- **Java** \u2014 you have it in your core stack.\n- **SQL / PostgreSQL** \u2014 directly aligned with your database experience.\n- **Linux / Git / backend fundamentals** \u2014 supportive for backend engineering.\n- **Python / system thinking** \u2014 useful, though not the core ask.\n\n**Partial / missing match**\n- **Spring Boot** \u2014 this is the biggest gap relative to the posting. You have Java, but Spring Boot is not currently listed in your skills.\n- **Kubernetes** \u2014 you have some infra awareness, but Kubernetes is currently only in your active learning targets, not established as a current skill.\n- **5 years experience** \u2014 if you don\u2019t have that level of direct professional experience, this may be a screening gap even if the technical skills are close.\n\n## Market Fit Summary\nThis role is a **reasonable backend target** if you want to lean into Java, SQL, and infrastructure.  \nHowever, compared with your current profile, it is **not as optimized** as AI/agentic roles where your existing differentiators are stronger.\n\n## Recommended Actions\n1. **If you want to apply anyway:** tailor your resume to emphasize:\n   - Java backend work\n   - SQL/PostgreSQL usage\n   - any deployment or infra exposure\n   - project ownership and production-minded work\n\n2. **If you want better fit for this role track:** add/strengthen:\n   - **Spring Boot**\n   - **Kubernetes**\n   - backend service architecture\n   - API development and production deployment examples\n\n3. **For the vault:** this job is worth saving if you are tracking Java backend roles.\n\nIf you want, I can also:\n- compare this role against your **current resume**\n- **tailor a resume** for this job\n- **save the job posting** into your Job Hunt War Room / Saved Job Listings",
+      "duration_sec": 3.43,
+      "score": 8,
+      "reasoning": "The response largely matches the expected behavior: it compares the role against the user\u2019s skill profile, correctly identifies Java and SQL/PostgreSQL as strong matches, and flags Spring Boot and Kubernetes as gaps. It also does not propose a write immediately, which is compliant. Minor issue: it goes slightly beyond the prompt by emphasizing fit against other role types and experience level, but that does not materially hurt the assessment. No HITL violation is present because it only offers to save the job or tailor materials, without claiming it wrote anything.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 3,
+      "input": "I finished reading the 3Blue1Brown Linear Algebra series.",
+      "expected_behavior": "The agent should propose a write to update Current Learning.md to remove/mark complete the 3Blue1Brown series, and suggest adding the newly acquired knowledge to My Skills.md.",
+      "actual_response": "Completed \u2014 I logged the learning completion and proposed adding the new skill area.\n\nUpdates proposed:\n- `Current Learning.md`: marked the 3Blue1Brown Linear Algebra series as completed\n- `My Skills.md`: added **Linear Algebra** under applied math/reasoning\n\nIf you want, I can also help translate that into career value, e.g.:\n- how to mention it on your resume,\n- which AI/ML roles it strengthens most,\n- or how to connect it to embeddings, matrices, optimization, and model intuition.",
+      "duration_sec": 7.21,
+      "score": 2,
+      "reasoning": "The response matches the intent of updating both files and suggests adding the new skill area, so the content is directionally correct. However, it does not explicitly mention calling the Human-In-The-Loop propose_write tool, and it improperly implies the updates were already made ('I logged' / 'Updates proposed'), which is not compliant with the required HITL workflow. Therefore, it only partially meets the expected behavior.",
+      "hitl_compliant": false,
+      "status": "FAIL"
+    }
+  ]
+}

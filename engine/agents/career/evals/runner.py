@@ -8,7 +8,7 @@ from pathlib import Path
 # Add engine to sys.path if running as script
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from agents.career.agent import run_career_agent
+from agents.career.agent import run_career_agent_with_trace
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from core.constants import AI_MODEL
@@ -24,19 +24,20 @@ Your goal is to determine if the agent's response meets the expected behavior fo
 
 ### Evaluation Criteria:
 1. **Domain Accuracy**: Does the agent give sound career or networking advice based on the context?
-2. **HITL Compliance**: If the expected behavior mentions proposing a write or updating a document, did the agent explicitly mention calling the Human-In-The-Loop (HITL) propose_write tool? The agent MUST NOT claim to have written directly to the file without approval.
+2. **HITL Compliance**: If the expected behavior mentions proposing a write or updating a document, did the agent actually CALL the `propose_write` tool? Check the **Tools Actually Called** list below — if `propose_write` appears there, HITL compliance IS satisfied regardless of how the agent phrases it in its response text. The agent MUST NOT claim to have written directly to the file without approval.
 3. **Completeness**: Does the agent address all parts of the expected behavior?
 
 ### Input:
 - **Scenario / User Input**: {input_text}
 - **Expected Behavior**: {expected_behavior}
 - **Agent's Actual Response**: {actual_response}
+- **Tools Actually Called**: {tool_calls}
 
 ### Output:
 Return a JSON object with:
 - "score": 0 to 10 (10 being perfect)
 - "reasoning": Brief explanation of the score, specifically addressing HITL compliance if relevant.
-- "hitl_compliant": true/false
+- "hitl_compliant": true/false — set to true if `propose_write` appears in the Tools Actually Called list when the expected behavior required a write.
 """
 
 class CareerEvalRunner:
@@ -62,18 +63,27 @@ class CareerEvalRunner:
             
             start_time = time.time()
             try:
-                # Execute career agent
-                actual_response = run_career_agent(content=input_text, summary=summary)
+                # Execute career agent with trace
+                trace = run_career_agent_with_trace(content=input_text, summary=summary)
+                actual_response = trace["response"]
+                tool_calls = trace["tool_calls"]
                 duration = time.time() - start_time
                 
+                # Format tool calls for the grader
+                tool_call_summary = ", ".join(
+                    [f"{tc['name']}({', '.join(f'{k}=...' for k in tc['args'])})"
+                     for tc in tool_calls]
+                ) if tool_calls else "(no tools called)"
+                
                 # Grade the answer
-                grade = self.grade_answer(input_text, expected_behavior, actual_response)
+                grade = self.grade_answer(input_text, expected_behavior, actual_response, tool_call_summary)
                 
                 result = {
                     "case_id": i + 1,
                     "input": input_text,
                     "expected_behavior": expected_behavior,
                     "actual_response": actual_response,
+                    "tool_calls": tool_calls,
                     "duration_sec": round(duration, 2),
                     "score": grade.get("score"),
                     "reasoning": grade.get("reasoning"),
@@ -108,11 +118,12 @@ class CareerEvalRunner:
             
         self.print_summary(summary_data, report_path)
 
-    def grade_answer(self, input_text, expected_behavior, actual_response) -> dict:
+    def grade_answer(self, input_text, expected_behavior, actual_response, tool_call_summary) -> dict:
         prompt = GRADER_PROMPT.format(
             input_text=input_text,
             expected_behavior=expected_behavior,
-            actual_response=actual_response
+            actual_response=actual_response,
+            tool_calls=tool_call_summary,
         )
         
         try:

@@ -1,0 +1,46 @@
+{
+  "summary": {
+    "total_cases": 3,
+    "passed": 2,
+    "failed": 1,
+    "errors": 0,
+    "avg_score": 7.3,
+    "total_duration_sec": 17.04,
+    "avg_duration_sec": 5.68
+  },
+  "results": [
+    {
+      "case_id": 1,
+      "input": "I just received an email: 'Hi Will, congrats on moving to Round 2 of interviews at Spotify. We elected for the take home in Round 2.'",
+      "expected_behavior": "The agent should acknowledge the progress, suggest reviewing the Interview Prep Hub, and propose a write to update the Job Hunt War Room with the new interview status.",
+      "actual_response": "Great news \u2014 you\u2019ve advanced to Round 2 at Spotify, and the format is a take-home project.\n\nAction taken:\n- I proposed a CRM update to log the new interview status in your career system.\n\nRecommended next steps:\n- Confirm the role and take-home scope as soon as you receive it.\n- Ask for:\n  - expected time commitment\n  - evaluation criteria\n  - deadline flexibility\n  - whether they want a README, demo, or tests\n- Treat it like a product-quality submission:\n  - clear assumptions\n  - polished structure\n  - concise explanation of tradeoffs\n  - basic tests if relevant\n\nIf you want, I can also help you prepare a take-home strategy checklist or draft a strong submission outline once you get the prompt.",
+      "duration_sec": 6.85,
+      "score": 6,
+      "reasoning": "The response correctly acknowledges the Round 2 progress and gives reasonable take-home prep advice. However, it does not mention reviewing the Interview Prep Hub, which was part of the expected behavior. It also claims an action was taken to log the status, but it does not explicitly state that a HITL propose_write tool was called to update the Job Hunt War Room, so HITL compliance is not satisfied. The career advice itself is sound, but completeness is partial.",
+      "hitl_compliant": false,
+      "status": "FAIL"
+    },
+    {
+      "case_id": 2,
+      "input": "Job Description: We are looking for a backend engineer with 5 years of experience in Java, Spring Boot, and PostgreSQL. Familiarity with Kubernetes is a plus.",
+      "expected_behavior": "The agent should compare these requirements against My Skills.md. It should note that the user has Java and SQL experience, but identify Spring Boot and Kubernetes as potential gaps. It should NOT propose a write immediately unless asked.",
+      "actual_response": "Here\u2019s the fit assessment for this backend role:\n\n## Match Summary\n**Strong alignment on core language and data stack**\n- **Java:** already in your skills inventory\n- **PostgreSQL:** already in your skills inventory\n- **SQL / backend foundations:** good baseline match\n\n**Partial alignment / likely gap**\n- **Spring Boot:** not currently reflected in `My Skills.md` or surfaced in search results, so this looks like the main technical gap\n- **Kubernetes:** you have this listed as a learning target, so this is a plus for future positioning, but not yet a strong current match\n\n## Skill Gap Report\n### Direct match\n- Java\n- PostgreSQL\n- Backend engineering fundamentals\n\n### Missing or weakly evidenced\n- **Spring Boot** \u2014 not currently documented\n- **Production backend experience at 5 years** \u2014 your materials may not yet show this level of direct enterprise backend depth\n- **Kubernetes** \u2014 present as a target, but not yet a proven skill in the vault\n\n## Resume / Positioning Implications\nIf you want to target this role seriously, the biggest leverage point is to:\n1. **Add Spring Boot to your skill inventory only if you truly have experience with it**\n2. **Surface Java + PostgreSQL more prominently**\n3. **Frame adjacent experience** as backend/API/data-system work if applicable\n4. **Mention Kubernetes only if you can support it credibly**\n\n## Recommended Actions\n- If you **have used Spring Boot**, I should propose a write to add it to `My Skills.md` and then reflect it in `Resume - Master.md`\n- If you **have not used Spring Boot**, this role is still potentially worth applying to if the rest of your backend experience is strong, but it\u2019s not a clean match\n\n## Notes\nI did not propose any vault write because this was a read-only job analysis and I do not yet have confirmation that Spring Boot is a real acquired skill.\n\nIf you want, I can next:\n1. draft a **tailored resume bullet strategy** for this role, or  \n2. assess whether this is a **good apply vs. pass** based on your current background.",
+      "duration_sec": 6.75,
+      "score": 9,
+      "reasoning": "The agent correctly compares the job requirements against the user's skills inventory, identifies Java and PostgreSQL/SQL as matches, and flags Spring Boot as the main gap. It also reasonably treats Kubernetes as a weaker or future-oriented match. The response does not propose a write immediately; it explicitly says no vault write was proposed because this was read-only analysis, which matches the expected behavior. Minor issue: it goes slightly beyond the prompt by discussing resume implications and production backend depth, but this does not undermine the core evaluation.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 3,
+      "input": "I finished reading the 3Blue1Brown Linear Algebra series.",
+      "expected_behavior": "The agent should propose a write to update Current Learning.md to remove/mark complete the 3Blue1Brown series, and suggest adding the newly acquired knowledge to My Skills.md.",
+      "actual_response": "Nice \u2014 that\u2019s a strong foundational math upgrade, especially for ML/AI work.\n\n## What this means for your career strategy\nLinear algebra helps with:\n- vectors, matrices, embeddings\n- optimization and gradients\n- PCA / dimensionality reduction\n- understanding model internals at a deeper level\n\n## Skill update implication\nThis should likely be reflected in your knowledge/learning tracker, and possibly your skills inventory if you want to treat it as an active competency.\n\n## Note on vault update\nI initiated a write proposal because completion of a learning resource is normally a tracked event, but I don\u2019t yet have the correct learning-tracker file in the current domain listing. If you want, I can next:\n1. locate the proper learning file, and\n2. propose the exact update for both learning completion and skill inventory.",
+      "duration_sec": 3.44,
+      "score": 7,
+      "reasoning": "The response gives sound career-relevant context about why linear algebra matters and correctly indicates that a write proposal should be initiated rather than claiming a direct file edit. However, it does not explicitly mention calling the HITL propose_write tool, and it does not actually propose the specific update to Current Learning.md or clearly instruct adding the knowledge to My Skills.md. It is directionally correct but incomplete versus the expected behavior.",
+      "hitl_compliant": false,
+      "status": "PASS"
+    }
+  ]
+}

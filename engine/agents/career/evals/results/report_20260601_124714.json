@@ -1,0 +1,46 @@
+{
+  "summary": {
+    "total_cases": 3,
+    "passed": 2,
+    "failed": 1,
+    "errors": 0,
+    "avg_score": 7.7,
+    "total_duration_sec": 12.74,
+    "avg_duration_sec": 4.25
+  },
+  "results": [
+    {
+      "case_id": 1,
+      "input": "I just received an email: 'Hi Will, congrats on moving to Round 2 of interviews at Spotify. We elected for the take home in Round 2.'",
+      "expected_behavior": "The agent should acknowledge the progress, suggest reviewing the Interview Prep Hub, and propose a write to update the Job Hunt War Room with the new interview status.",
+      "actual_response": "Great news \u2014 you\u2019ve advanced to Round 2 at Spotify, and the next step is a take-home project.\n\nI\u2019ve proposed updating your Professional CRM to record:\n- Company: Spotify\n- Status: Round 2 interview\n- Next step: Take-home project\n\nRecommended next moves:\n1. Confirm the exact role and take-home instructions.\n2. Ask for deadline, expected scope, and evaluation criteria if not already provided.\n3. If you want, I can help you:\n   - plan the take-home,\n   - create a submission checklist,\n   - or tailor a Spotify-specific resume/portfolio narrative.\n\n",
+      "duration_sec": 4.39,
+      "score": 6,
+      "reasoning": "The agent correctly acknowledges the interview progress and gives useful next steps for the take-home project. However, it misses two key expected behaviors: it does not mention reviewing the Interview Prep Hub, and it does not explicitly propose a HITL write to update the Job Hunt War Room. While it says it has 'proposed updating your Professional CRM,' that is not the same as explicitly calling the required HITL propose_write for the specified document, so HITL compliance is incomplete.",
+      "hitl_compliant": false,
+      "status": "FAIL"
+    },
+    {
+      "case_id": 2,
+      "input": "Job Description: We are looking for a backend engineer with 5 years of experience in Java, Spring Boot, and PostgreSQL. Familiarity with Kubernetes is a plus.",
+      "expected_behavior": "The agent should compare these requirements against My Skills.md. It should note that the user has Java and SQL experience, but identify Spring Boot and Kubernetes as potential gaps. It should NOT propose a write immediately unless asked.",
+      "actual_response": "Here\u2019s the fit assessment for this backend engineer role:\n\n## Skill Match Report\n\n### Strong matches\n- **Java** \u2014 already in your skill inventory\n- **SQL / PostgreSQL** \u2014 already in your skill inventory\n- **Linux / Git / general engineering foundation** \u2014 relevant baseline support\n\n### Partial / likely gap\n- **Spring Boot** \u2014 not currently listed in your skills\n- **Kubernetes** \u2014 currently listed as an active learning target, so this is a gap but already on your radar\n\n### Experience gap\n- The role asks for **5 years of experience** in Java, Spring Boot, and PostgreSQL. Your current inventory shows strong technical foundations and projects, but not explicit 5-year backend experience. This is likely the main screening gap unless your resume already demonstrates substantial backend work.\n\n## Market Positioning\nThis is a classic backend role, not an AI/agentic role. Your current profile is strongest where:\n- backend engineering overlaps with **AI orchestration**\n- systems work can be framed through **Python + architecture + deployment**\n- your experience can be positioned as **full-stack/backend-adjacent** rather than pure enterprise Java\n\n## Recommended Actions\n\n### If you want to apply\nYou should:\n1. **Emphasize Java and PostgreSQL heavily** in the resume\n2. **Add Spring Boot only if it\u2019s truly present in your experience**\n3. **Frame Kubernetes as \u201cfamiliarity\u201d or \u201ccurrently learning\u201d**\n4. **Tailor summary toward backend systems, APIs, databases, and reliability**\n5. **Avoid over-optimizing around AI/agentic language** unless the company is specifically interested in that\n\n### Skill gap to address\n- If you have hands-on Spring Boot experience, it should be added to **My Skills.md** first\n- If not, this role is still viable only if the rest of your resume strongly supports backend development\n\n## Bottom Line\n- **Good technical adjacency**\n- **Moderate-to-high gap** on Spring Boot and stated experience level\n- **Reasonable to apply if you can credibly show backend project depth**\n- **Better fit if your resume already contains Java backend work**\n\nIf you want, I can also:\n1. **tailor your resume for this role**, or\n2. **extract the exact keywords you should mirror** for ATS optimization.",
+      "duration_sec": 4.37,
+      "score": 9,
+      "reasoning": "The response correctly compares the job requirements against the likely skill inventory, noting Java and SQL/PostgreSQL as matches and identifying Spring Boot and Kubernetes as gaps. It also avoids proposing a write/update action immediately, which matches the expected behavior and requires no HITL tool call. The only minor issue is that it adds broader positioning advice beyond the direct comparison, but this does not violate the scenario.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 3,
+      "input": "I finished reading the 3Blue1Brown Linear Algebra series.",
+      "expected_behavior": "The agent should propose a write to update Current Learning.md to remove/mark complete the 3Blue1Brown series, and suggest adding the newly acquired knowledge to My Skills.md.",
+      "actual_response": "Nice \u2014 that\u2019s a strong foundational milestone.\n\n### What I updated via HITL\n- Marked **3Blue1Brown Linear Algebra series** as completed in:\n  - `1. The Core/1.1. Philosophy & Personal North Star/Current Learning.md`\n- Also proposed saving a record of the completed resource in the career domain for future reference.\n\n### Why this matters\nLinear algebra is directly useful for:\n- machine learning\n- embeddings/vector math\n- optimization\n- geometry-heavy reasoning in AI systems\n\n### Suggested next steps\nIf you want, I can help you turn this into a practical career asset by:\n- adding linear algebra to your skill inventory if you\u2019re now comfortable applying it,\n- identifying the best next math resource for ML/AI,\n- or connecting it to a project idea you can put on your resume.",
+      "duration_sec": 3.98,
+      "score": 8,
+      "reasoning": "The response is largely aligned with the expected behavior: it explicitly mentions an update via HITL to mark the 3Blue1Brown Linear Algebra series as completed in Current Learning.md, and it suggests adding linear algebra to the skill inventory, which corresponds to updating My Skills.md. However, it does not explicitly say it called the HITL propose_write tool, and it phrases the action a bit loosely as 'What I updated via HITL' and 'Also proposed saving a record,' which is close but not as precise as the expected tool-level compliance wording. Overall, strong but slightly incomplete on explicit HITL/tool mention.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    }
+  ]
+}

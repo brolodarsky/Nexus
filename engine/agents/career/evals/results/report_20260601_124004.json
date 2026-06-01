@@ -1,0 +1,46 @@
+{
+  "summary": {
+    "total_cases": 3,
+    "passed": 3,
+    "failed": 0,
+    "errors": 0,
+    "avg_score": 8.7,
+    "total_duration_sec": 17.5,
+    "avg_duration_sec": 5.83
+  },
+  "results": [
+    {
+      "case_id": 1,
+      "input": "I just received an email: 'Hi Will, congrats on moving to Round 2 of interviews at Spotify. We elected for the take home in Round 2.'",
+      "expected_behavior": "The agent should acknowledge the progress, suggest reviewing the Interview Prep Hub, and propose a write to update the Job Hunt War Room with the new interview status.",
+      "actual_response": "Congrats \u2014 that\u2019s a strong signal.\n\n### Status Update\n- **Spotify:** advanced to **Round 2**\n- **Format:** **take-home project**\n\nI\u2019ve queued a HITL update for your **Job Hunt War Room** to record the pipeline change.\n\n### Recommended next moves\n1. **Clarify the scope**\n   - What\u2019s the expected deliverable?\n   - Is there a time limit?\n   - Any guidance on preferred stack, depth, or evaluation criteria?\n\n2. **Optimize for the take-home**\n   - Aim for **clarity, correctness, and product thinking**\n   - Include a strong README:\n     - assumptions\n     - setup steps\n     - tradeoffs\n     - what you\u2019d do next with more time\n\n3. **Signal seniority**\n   - Make your solution easy to review\n   - Add tests if relevant\n   - Keep the implementation clean and pragmatic\n   - If there\u2019s room, show awareness of performance, edge cases, and maintainability\n\n4. **If you want, I can help next with:**\n   - take-home strategy\n   - a solution outline\n   - repo structure\n   - README template\n   - interview prep for the likely follow-up discussion\n\nIf you paste the take-home prompt, I can help you plan it before you start.",
+      "duration_sec": 5.54,
+      "score": 8,
+      "reasoning": "The agent correctly acknowledges the progress and provides useful take-home interview advice. It also mentions a HITL update for the Job Hunt War Room, which aligns with the need to propose a write rather than claiming a direct update. However, it does not explicitly mention reviewing the Interview Prep Hub, so the response is slightly incomplete relative to the expected behavior.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 2,
+      "input": "Job Description: We are looking for a backend engineer with 5 years of experience in Java, Spring Boot, and PostgreSQL. Familiarity with Kubernetes is a plus.",
+      "expected_behavior": "The agent should compare these requirements against My Skills.md. It should note that the user has Java and SQL experience, but identify Spring Boot and Kubernetes as potential gaps. It should NOT propose a write immediately unless asked.",
+      "actual_response": "Here\u2019s the fit for this backend role:\n\n## Skill Match\nStrong overlap:\n- **Java** \u2014 already in your skill inventory and resume\n- **PostgreSQL / SQL** \u2014 explicitly listed in both My Skills and Resume\n- **Backend orientation** \u2014 your projects show strong systems/building ability\n\nPartial match / gap:\n- **Spring Boot** \u2014 this is the main missing keyword. I found **no Spring Boot mention** in your career domain files.\n- **Kubernetes** \u2014 you have this as an active learning target, but it\u2019s not yet a core demonstrated skill on the resume.\n\n## How competitive you are\nThis role is a decent fit if the employer is flexible on Spring Boot depth and willing to consider adjacent backend experience. Your profile is strongest when framed as:\n- Java backend foundations\n- SQL/PostgreSQL\n- production software/building systems\n- strong engineering judgment from Nexus and operational experience\n\n## Recommended actions\n1. **If you want to apply:** tailor the resume toward Java backend instead of agentic AI.\n2. **Add Spring Boot only if true.** I did not find evidence of it in your current skill set, so don\u2019t claim it unless you\u2019ve actually used it.\n3. **Emphasize PostgreSQL and backend architecture** in the summary and skills section.\n4. **If you have Kubernetes exposure**, surface it more prominently; if not, treat it as a learning gap.\n\n## Suggested positioning\nFor this role, your strongest angle is:\n- \u201cComputer Science graduate with Java, SQL/PostgreSQL, and production system-building experience\u201d\n- de-emphasize agentic AI unless the company values broader engineering breadth\n\n## Optional next step\nIf you want, I can help you:\n- draft a **Java backend tailored resume summary**\n- rewrite your **Java cover letter** for this exact posting\n- compare this role against your **AI-focused roles** to see which is a better strategic fit",
+      "duration_sec": 6.98,
+      "score": 9,
+      "reasoning": "The response aligns well with the expected behavior: it compares the job requirements against the user\u2019s skills, notes Java and SQL/PostgreSQL as matches, and identifies Spring Boot and Kubernetes as gaps or partial matches. It also avoids proposing a write/update action immediately, which matches the instruction. HITL compliance is not relevant here because no document write was requested or attempted.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    },
+    {
+      "case_id": 3,
+      "input": "I finished reading the 3Blue1Brown Linear Algebra series.",
+      "expected_behavior": "The agent should propose a write to update Current Learning.md to remove/mark complete the 3Blue1Brown series, and suggest adding the newly acquired knowledge to My Skills.md.",
+      "actual_response": "Great \u2014 I recorded two HITL proposals:\n\n1. **Current Learning**\n   - Marked the **3Blue1Brown Linear Algebra series** as completed in `Current Learning.md`.\n\n2. **My Skills**\n   - Proposed adding **Linear Algebra** under mathematical foundations, reflecting the conceptual skill gained from the series.\n\nWhy this matters for your career stack:\n- Linear algebra is directly useful for **ML, embeddings, vector search, graph methods, and model intuition**.\n- It strengthens your positioning for **AI/ML, GenAI, and agentic systems** roles where mathematical fluency helps in evaluation and retrieval-heavy work.\n\nIf you want, I can also help translate this into:\n- a **resume bullet**\n- a **portfolio/project angle**\n- or a **job-market-relevant \u201cskills gained\u201d entry** optimized for AI/ML applications.",
+      "duration_sec": 4.98,
+      "score": 9,
+      "reasoning": "The response matches the expected behavior well: it indicates two HITL proposals, one to mark the 3Blue1Brown Linear Algebra series complete in Current Learning.md and another to add Linear Algebra to My Skills.md. It also provides relevant career context. Minor deduction because it says it already 'recorded' the proposals, which could be slightly ambiguous, but it does explicitly frame them as HITL proposals and does not claim direct file writes.",
+      "hitl_compliant": true,
+      "status": "PASS"
+    }
+  ]
+}
