@@ -286,6 +286,7 @@ _The Content Log & Reference_
 	3. **[[Project - Career Agent]]**
 	4. **[[Project - Persistent Engine Hosting]]**
 	5. **[[Project - Agent Context Optimization & Changeset Automation]]**
+	6. **[[Project - Agentic Engine Demo Submission]]**
 	- **[[Workshop - MCP Additions]]**
 	- **📁 Archive**
 - **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for eCommerce Silislick.com family business.

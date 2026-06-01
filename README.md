@@ -230,6 +230,8 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python tools/ingest_phone.py --screens 50` |
 | `engine/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `python engine/main.py` |
 | `engine/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m engine.evals.runner` |
+| `engine/agents/router/evals/runner.py` | Deterministic evaluation of the Content Router agent logic. | `python engine/agents/router/evals/runner.py` |
+| `engine/agents/career/evals/runner.py` | LLM-as-a-judge evaluation of the Career Agent and HITL compliance. | `python engine/agents/career/evals/runner.py` |
 | `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service. | `python engine/main.py <query>` |
 | `engine/agents/router/agent.py` | Content Router Agent. LangGraph classifier that routes incoming content to domain agents. | `python engine/agents/router/agent.py` |
 | `engine/agents/career/agent.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python engine/agents/career/agent.py` |

@@ -1,0 +1,42 @@
+[
+  {
+    "input": "Hi Will, congrats on moving on to Round 2 of interviews. We elected for the take home in Round 2 as the team is traveling.",
+    "expected_domain": "career"
+  },
+  {
+    "input": "I've been having this sharp pain in my lower back after sitting for too long.",
+    "expected_domain": "health"
+  },
+  {
+    "input": "Can you summarize this article on the history of Rome?",
+    "expected_domain": "general"
+  },
+  {
+    "input": "Got my blood test results back. LDL cholesterol is 110, HDL is 65.",
+    "expected_domain": "health"
+  },
+  {
+    "input": "Here is a list of skills I want to add to my resume: Python, LangGraph, Machine Learning.",
+    "expected_domain": "career"
+  },
+  {
+    "input": "Let's plan a trip to Japan next year. We should visit Kyoto and Tokyo.",
+    "expected_domain": "general"
+  },
+  {
+    "input": "I am feeling really burned out and anxious about the upcoming project deadline at work.",
+    "expected_domain": "health"
+  },
+  {
+    "input": "Should I negotiate my salary offer from Google? They offered 150k base.",
+    "expected_domain": "career"
+  },
+  {
+    "input": "Can we set up a new project note for repairing the Pilot's AC blower motor?",
+    "expected_domain": "general"
+  },
+  {
+    "input": "I need to start taking 10mg of Lexapro daily.",
+    "expected_domain": "health"
+  }
+]

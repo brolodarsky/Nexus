@@ -1,0 +1,17 @@
+[
+  {
+    "input": "I just received an email: 'Hi Will, congrats on moving to Round 2 of interviews at Spotify. We elected for the take home in Round 2.'",
+    "summary": "Round 2 interview take-home project from Spotify.",
+    "expected_behavior": "The agent should acknowledge the progress, suggest reviewing the Interview Prep Hub, and propose a write to update the Job Hunt War Room with the new interview status."
+  },
+  {
+    "input": "Job Description: We are looking for a backend engineer with 5 years of experience in Java, Spring Boot, and PostgreSQL. Familiarity with Kubernetes is a plus.",
+    "summary": "Backend engineer job description requiring Java, Spring Boot, PostgreSQL, and Kubernetes.",
+    "expected_behavior": "The agent should compare these requirements against My Skills.md. It should note that the user has Java and SQL experience, but identify Spring Boot and Kubernetes as potential gaps. It should NOT propose a write immediately unless asked."
+  },
+  {
+    "input": "I finished reading the 3Blue1Brown Linear Algebra series.",
+    "summary": "User completed a learning resource on Linear Algebra.",
+    "expected_behavior": "The agent should propose a write to update Current Learning.md to remove/mark complete the 3Blue1Brown series, and suggest adding the newly acquired knowledge to My Skills.md."
+  }
+]
