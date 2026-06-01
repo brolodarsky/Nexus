@@ -54,6 +54,7 @@ Nexus/
 │   └── workflows/              # Structured procedures (slash commands)
 │       ├── add_job_requirement.md    # Job criteria extraction
 │       ├── audit_inbox.md            # Zettelkasten inbox sorting
+│       ├── capture_content.md        # Raw external content capture
 │       ├── create_new_note.md        # Obsidian note creation
 │       ├── create_project.md         # Project planning/tasks
 │       ├── distill_learning.md       # Atomic note synthesis
@@ -221,6 +222,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `youtube_transcript.py` | Downloads YouTube transcripts to text files. | `python tools/youtube_transcript.py <url>` |
 | `read_webpage.py` | Extracts clean markdown content from single webpages via trafilatura. | `python tools/read_webpage.py <url> [-o output.md]` |
 | `read_email.py` | Fetches a single email by IMAP UID and returns clean markdown. Supports Google OAuth2. | `python tools/read_email.py <uid> [-o output.md]` / `python tools/read_email.py --list-recent 10` |
+| `release.py` | Compiles `.changeset/*.md` fragments into the changelog and bumps version. | `python tools/release.py` |
 | `generate_podcast.py` | Converts a specific markdown note to MP3 via edge-tts. | `python tools/generate_podcast.py <path> [--force]` |
 | `create_folders.py` | Idempotently creates the folder structure from TOC. | `python tools/create_folders.py` |
 | `check_folders.py` | Validates Vault structure against TOC (dry-run). | `python tools/check_folders.py` |
