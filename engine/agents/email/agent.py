@@ -18,8 +18,12 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_openai import ChatOpenAI
 
 from core.constants import AI_MODEL
+from core.trace import AgentTracer, _truncate, RESULT_TRUNCATE_LEN
 from agents.email.tools import fetch_email_by_uid, list_recent_emails, search_emails
 from agents.email.prompts import EMAIL_SYSTEM_PROMPT
+
+# ── Tracer ───────────────────────────────────────────────────────────────────
+email_tracer = AgentTracer("EmailAgent", color="magenta")
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
@@ -32,12 +36,31 @@ llm_with_tools = llm.bind_tools(tools)
 
 def call_model(state: AgentState):
     messages = state['messages']
+    email_tracer.llm_call()
     response = llm_with_tools.invoke(messages)
+
+    # Trace tool calls or text response
+    if hasattr(response, "tool_calls") and response.tool_calls:
+        for tc in response.tool_calls:
+            email_tracer.tool_call(tc.get("name", "unknown"), tc.get("args", {}))
+    else:
+        email_tracer.llm_response(response.content if response.content else "")
+
     return {"messages": [response]}
+
+
+def traced_tool_node(state: AgentState):
+    """Runs tools and traces their results."""
+    result = tool_node.invoke(state)
+    for msg in result.get("messages", []):
+        tool_name = getattr(msg, "name", "unknown")
+        content = msg.content if hasattr(msg, "content") else str(msg)
+        email_tracer.tool_result(tool_name, _truncate(content, RESULT_TRUNCATE_LEN))
+    return result
 
 workflow = StateGraph(AgentState)
 workflow.add_node("agent", call_model)
-workflow.add_node("tools", tool_node)
+workflow.add_node("tools", traced_tool_node)
 
 workflow.add_edge(START, "agent")
 workflow.add_conditional_edges("agent", tools_condition)
@@ -51,6 +74,7 @@ def fetch_emails(query: str, thread_id: str = None) -> str:
     Accepts a natural language query, runs the agent to fetch/search emails,
     and returns a structured JSON array of the results.
     """
+    email_tracer.agent_start(f"Query: {query[:80]}")
     messages = [
         SystemMessage(content=EMAIL_SYSTEM_PROMPT),
         HumanMessage(content=query)
@@ -63,6 +87,8 @@ def fetch_emails(query: str, thread_id: str = None) -> str:
     try:
         final_state = app.invoke({"messages": messages}, config=config)
         last_message = final_state["messages"][-1]
+        email_tracer.agent_end()
         return last_message.content
     except Exception as e:
+        email_tracer.info(f"❌ Error: {e}")
         return f"[]"  # Return empty array on error to keep JSON parsing safe in Router

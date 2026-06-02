@@ -9,6 +9,7 @@ This is the entry point for the multi-agent pipeline:
 import json
 import os
 import sys
+import time
 from typing import TypedDict, Annotated, Sequence, Literal, Optional
 import operator
 
@@ -24,7 +25,11 @@ from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 
 from core.constants import AI_MODEL
+from core.trace import AgentTracer
 from agents.router.prompts import ROUTER_SYSTEM_PROMPT
+
+# ── Tracer ───────────────────────────────────────────────────────────────────
+router_tracer = AgentTracer("Router", color="yellow")
 
 
 # ── State Schema ─────────────────────────────────────────────────────────────
@@ -67,6 +72,7 @@ def classify_content(state: RouterState) -> dict:
     messages = list(state.get("messages", []))
     
     if not messages:
+        router_tracer.agent_start(f"Classifying: {raw_content[:80]}")
         messages = [
             SystemMessage(content=ROUTER_SYSTEM_PROMPT),
             HumanMessage(content=raw_content),
@@ -74,8 +80,10 @@ def classify_content(state: RouterState) -> dict:
 
     # If we just executed a tool, remind the LLM to output ONLY JSON
     if len(messages) > 0 and hasattr(messages[-1], "type") and messages[-1].type == "tool":
+        router_tracer.info("Tool data received, re-prompting LLM for classification JSON...")
         messages.append(SystemMessage(content="You have retrieved the necessary data. Now, you MUST return ONLY a valid JSON object containing your final routing decision (domain, summary, confidence, reasoning). No conversational text."))
 
+    router_tracer.llm_call()
     response = llm_with_tools.invoke(messages)
 
     domain = None
@@ -94,12 +102,19 @@ def classify_content(state: RouterState) -> dict:
             summary = classification.get("summary", "")
             confidence = classification.get("confidence", 0.0)
             reasoning = classification.get("reasoning", "")
+            router_tracer.route(domain, confidence)
+            if reasoning:
+                router_tracer.info(f"Reasoning: {reasoning[:120]}")
         except json.JSONDecodeError:
             # Fallback: if the LLM didn't return clean JSON, default to general
             domain = "general"
             summary = "Could not parse classification — defaulting to general."
             confidence = 0.0
             reasoning = f"JSON parse error. Raw LLM output: {response_text[:200]}"
+            router_tracer.info(f"⚠️ JSON parse failed, defaulting to 'general'")
+    else:
+        for tc in response.tool_calls:
+            router_tracer.tool_call(tc.get("name", "unknown"), tc.get("args", {}))
 
     return {
         "messages": [response],
@@ -130,6 +145,8 @@ def run_librarian_node(state: RouterState) -> dict:
     """
     from agents.librarian.agent import ask_librarian
 
+    router_tracer.delegate("Librarian")
+
     raw_content = state.get("raw_content", "")
     filters = state.get("filters", None)
     
@@ -152,6 +169,8 @@ def run_career_agent_node(state: RouterState) -> dict:
     Passes the raw content and the router's summary for context.
     """
     from agents.career.agent import run_career_agent
+
+    router_tracer.delegate("CareerAgent")
 
     raw_content = state.get("raw_content", "")
     summary = state.get("summary", "")
@@ -212,9 +231,13 @@ def route_content(content: str, filters: dict = None) -> dict:
         "reasoning": None,
     }
 
+    t0 = time.time()
     final_state = router_graph.invoke(initial_state)
+    elapsed = time.time() - t0
 
     last_message = final_state["messages"][-1] if final_state["messages"] else None
+    router_tracer.agent_end()
+    router_tracer.info(f"Pipeline completed in {elapsed:.1f}s")
 
     return {
         "domain": final_state.get("domain"),

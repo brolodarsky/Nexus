@@ -28,7 +28,11 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_openai import ChatOpenAI
 
 from core.constants import AI_MODEL, VAULT_PATH, IGNORE_DIRS
+from core.trace import AgentTracer, _truncate, RESULT_TRUNCATE_LEN
 from agents.career.prompts import CAREER_SYSTEM_PROMPT
+
+# ── Tracer ───────────────────────────────────────────────────────────────────
+career_tracer = AgentTracer("CareerAgent", color="cyan")
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -252,8 +256,28 @@ llm_with_tools = llm.bind_tools(tools)
 def call_model(state: CareerAgentState) -> dict:
     """Invoke the LLM with the current message history."""
     messages = state["messages"]
+    career_tracer.llm_call()
     response = llm_with_tools.invoke(messages)
+
+    # Trace tool calls or text response
+    if hasattr(response, "tool_calls") and response.tool_calls:
+        for tc in response.tool_calls:
+            career_tracer.tool_call(tc.get("name", "unknown"), tc.get("args", {}))
+    else:
+        career_tracer.llm_response(response.content if response.content else "")
+
     return {"messages": [response]}
+
+
+def traced_tool_node(state: CareerAgentState) -> dict:
+    """Runs tools and traces their results."""
+    result = tool_node.invoke(state)
+    # result is a dict with "messages" key containing ToolMessage objects
+    for msg in result.get("messages", []):
+        tool_name = getattr(msg, "name", "unknown")
+        content = msg.content if hasattr(msg, "content") else str(msg)
+        career_tracer.tool_result(tool_name, _truncate(content, RESULT_TRUNCATE_LEN))
+    return result
 
 
 # ── Graph Assembly ───────────────────────────────────────────────────────────
@@ -261,7 +285,7 @@ def call_model(state: CareerAgentState) -> dict:
 workflow = StateGraph(CareerAgentState)
 
 workflow.add_node("agent", call_model)
-workflow.add_node("tools", tool_node)
+workflow.add_node("tools", traced_tool_node)
 
 workflow.add_edge(START, "agent")
 workflow.add_conditional_edges("agent", tools_condition)
@@ -299,7 +323,9 @@ def run_career_agent_with_trace(content: str, summary: str = "") -> dict:
         dict with keys: response (str), tool_calls (list of {name, args} dicts)
     """
     # DPFH: Build the system prompt with live Vault data injected
+    career_tracer.agent_start(f"DPFH hydration + query")
     system_prompt = build_career_system_prompt()
+    career_tracer.info("System prompt hydrated with live Vault data")
 
     # Compose the user message with routing context
     user_msg = content
@@ -326,11 +352,13 @@ def run_career_agent_with_trace(content: str, summary: str = "") -> dict:
                     })
 
         last_message = final_state["messages"][-1]
+        career_tracer.agent_end()
         return {
             "response": last_message.content,
             "tool_calls": tool_calls,
         }
     except Exception as e:
+        career_tracer.info(f"❌ Error: {e}")
         return {
             "response": f"❌ Career Agent encountered an error: {e}",
             "tool_calls": [],
