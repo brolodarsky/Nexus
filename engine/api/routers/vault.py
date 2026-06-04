@@ -42,9 +42,8 @@ async def get_vault_structure(path: str | None = Query(default=None)):
     With a path, returns folders AND files in that subtree.
     """
     try:
-        from tools.vault_tools import get_vault_structure as _get_structure
-
-        tree = _get_structure.invoke({"path": path} if path else {})
+        from shared_tools.vault_reader import get_directory_tree
+        tree = get_directory_tree(path=path, show_files=path is not None)
         return VaultStructureResponse(tree=tree, path=path)
     except Exception as e:
         raise HTTPException(
@@ -62,9 +61,8 @@ async def get_note(path: str = Query(..., description="Relative path from Vault 
         raise HTTPException(status_code=400, detail="Path cannot be empty.")
 
     try:
-        from tools.vault_tools import read_note as _read_note
-
-        content = _read_note.invoke({"note_path": path})
+        from shared_tools.vault_reader import read_note_content
+        content = read_note_content(path)
 
         if content.startswith("File not found:"):
             raise HTTPException(status_code=404, detail=content)
@@ -91,13 +89,8 @@ async def search_vault(
         raise HTTPException(status_code=400, detail="Keyword cannot be empty.")
 
     try:
-        from tools.vault_tools import search_vault as _search_vault
-
-        args = {"keyword": keyword}
-        if path:
-            args["path"] = path
-
-        results = _search_vault.invoke(args)
+        from shared_tools.vault_reader import search_within
+        results = search_within(keyword, root_path=path)
         return SearchResult(results=results, keyword=keyword, path=path)
     except Exception as e:
         raise HTTPException(

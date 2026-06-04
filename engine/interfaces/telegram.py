@@ -12,7 +12,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
-from agents.router.agent import route_content
+from agents.router.api import route_content
 from core.audio import transcribe_audio
 
 # Load environment variables

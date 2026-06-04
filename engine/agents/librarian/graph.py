@@ -1,16 +1,12 @@
 """
-agent.py — Core ReAct agent logic for the Email Agent.
-Uses LangGraph to orchestrate a tool-calling loop that queries the IMAP mailbox.
+agent.py — Core ReAct agent logic for the Vault Reader.
+Uses LangGraph to orchestrate a tool-calling loop that navigates the local Vault filesystem.
 """
 import os
 import sys
 from typing import TypedDict, Annotated, Sequence
 import operator
-
-# Add engine root to sys.path for internal imports
-ENGINE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if ENGINE_ROOT not in sys.path:
-    sys.path.insert(0, ENGINE_ROOT)
+from pathlib import Path
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END, START
@@ -19,16 +15,17 @@ from langchain_openai import ChatOpenAI
 
 from core.constants import AI_MODEL
 from core.trace import AgentTracer, _truncate, RESULT_TRUNCATE_LEN
-from agents.email.tools import fetch_email_by_uid, list_recent_emails, search_emails
-from agents.email.prompts import EMAIL_SYSTEM_PROMPT
+from agents.librarian.tools import read_toc, read_note, search_vault, get_vault_structure
+from agents.librarian.tools import get_vault_structure as _get_vault_structure_fn
+from agents.librarian.prompts import SYSTEM_PROMPT
 
 # ── Tracer ───────────────────────────────────────────────────────────────────
-email_tracer = AgentTracer("EmailAgent", color="magenta")
+librarian_tracer = AgentTracer("Librarian", color="green")
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
-tools = [fetch_email_by_uid, list_recent_emails, search_emails]
+tools = [read_toc, read_note, search_vault, get_vault_structure]
 tool_node = ToolNode(tools)
 
 llm = ChatOpenAI(model=AI_MODEL, temperature=0.0)
@@ -36,15 +33,15 @@ llm_with_tools = llm.bind_tools(tools)
 
 def call_model(state: AgentState):
     messages = state['messages']
-    email_tracer.llm_call()
+    librarian_tracer.llm_call()
     response = llm_with_tools.invoke(messages)
 
     # Trace tool calls or text response
     if hasattr(response, "tool_calls") and response.tool_calls:
         for tc in response.tool_calls:
-            email_tracer.tool_call(tc.get("name", "unknown"), tc.get("args", {}))
+            librarian_tracer.tool_call(tc.get("name", "unknown"), tc.get("args", {}))
     else:
-        email_tracer.llm_response(response.content if response.content else "")
+        librarian_tracer.llm_response(response.content if response.content else "")
 
     return {"messages": [response]}
 
@@ -55,7 +52,7 @@ def traced_tool_node(state: AgentState):
     for msg in result.get("messages", []):
         tool_name = getattr(msg, "name", "unknown")
         content = msg.content if hasattr(msg, "content") else str(msg)
-        email_tracer.tool_result(tool_name, _truncate(content, RESULT_TRUNCATE_LEN))
+        librarian_tracer.tool_result(tool_name, _truncate(content, RESULT_TRUNCATE_LEN))
     return result
 
 workflow = StateGraph(AgentState)
@@ -68,27 +65,15 @@ workflow.add_edge("tools", "agent")
 
 app = workflow.compile()
 
-def fetch_emails(query: str, thread_id: str = None) -> str:
+def _build_system_prompt() -> str:
     """
-    Entry point for the Email Agent.
-    Accepts a natural language query, runs the agent to fetch/search emails,
-    and returns a structured JSON array of the results.
+    Builds the system prompt with the live vault folder structure injected.
+    This is called at query time so the agent always sees the current structure
+    without wasting an LLM round-trip on a get_vault_structure() tool call.
     """
-    email_tracer.agent_start(f"Query: {query[:80]}")
-    messages = [
-        SystemMessage(content=EMAIL_SYSTEM_PROMPT),
-        HumanMessage(content=query)
-    ]
-    
-    config = {}
-    if thread_id:
-        config = {"configurable": {"thread_id": thread_id}}
-        
     try:
-        final_state = app.invoke({"messages": messages}, config=config)
-        last_message = final_state["messages"][-1]
-        email_tracer.agent_end()
-        return last_message.content
-    except Exception as e:
-        email_tracer.info(f"❌ Error: {e}")
-        return f"[]"  # Return empty array on error to keep JSON parsing safe in Router
+        vault_tree = _get_vault_structure_fn.invoke({})
+    except Exception:
+        vault_tree = "(vault structure unavailable)"
+    return SYSTEM_PROMPT.format(vault_structure=vault_tree)
+

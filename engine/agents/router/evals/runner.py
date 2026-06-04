@@ -8,7 +8,7 @@ from pathlib import Path
 # Add engine to sys.path if running as script
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from agents.router.agent import classify_content
+from agents.router.graph import classify_content
 
 # Configuration
 DATASET_PATH = Path(__file__).parent / "dataset.json"

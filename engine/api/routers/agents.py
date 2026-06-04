@@ -106,7 +106,7 @@ async def ask_brain(request: AskRequest):
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     try:
-        from agents.librarian.agent import ask_librarian
+        from agents.librarian.api import ask_librarian
 
         response_text = ask_librarian(request.query)
 

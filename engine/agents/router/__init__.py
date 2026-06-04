@@ -1,1 +1,1 @@
-# Content Router Agent — classifies and routes incoming content to domain agents.
+from agents.router.api import route_content

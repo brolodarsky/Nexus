@@ -8,7 +8,7 @@ from pathlib import Path
 # Add engine to sys.path if running as script
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from agents.career.agent import run_career_agent_with_trace
+from agents.career.api import run_career_agent_with_trace
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from core.constants import AI_MODEL

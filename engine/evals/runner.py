@@ -9,7 +9,7 @@ from typing import List, Dict, Any
 # Add engine to sys.path if running as script
 sys.path.append(str(Path(__file__).parent.parent))
 
-from agents.librarian.agent import execute_vault_query
+from agents.librarian.api import execute_vault_query
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from core.constants import AI_MODEL

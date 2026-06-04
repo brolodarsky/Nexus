@@ -47,11 +47,7 @@ class RouterState(TypedDict):
 
 # ── LLM Setup ────────────────────────────────────────────────────────────────
 
-@tool
-def fetch_emails(query: str) -> str:
-    """If the user asks to check their email, read a recent email, or mentions an email, use this tool to retrieve the email data."""
-    from agents.email.agent import fetch_emails as _fetch
-    return _fetch(query)
+from agents.router.tools import fetch_emails
 
 tools = [fetch_emails]
 tool_node = ToolNode(tools)
@@ -143,7 +139,7 @@ def run_librarian_node(state: RouterState) -> dict:
     Fallback for domains without a dedicated agent yet, or explicit general knowledge queries.
     Passes the query and any CLI filters to the Librarian subgraph.
     """
-    from agents.librarian.agent import ask_librarian
+    from agents.librarian.api import ask_librarian
 
     router_tracer.delegate("Librarian")
 
@@ -168,7 +164,7 @@ def run_career_agent_node(state: RouterState) -> dict:
     Invokes the real Career Agent with DPFH and full ReAct tool loop.
     Passes the raw content and the router's summary for context.
     """
-    from agents.career.agent import run_career_agent
+    from agents.career.api import run_career_agent
 
     router_tracer.delegate("CareerAgent")
 
@@ -208,67 +204,4 @@ workflow.add_edge("run_librarian_node", END)
 router_graph = workflow.compile()
 
 
-# ── Public API ───────────────────────────────────────────────────────────────
 
-def route_content(content: str, filters: dict = None) -> dict:
-    """
-    Entry point: classify and route a piece of raw content.
-
-    Args:
-        content: The raw text to classify (email body, note, job description, etc.)
-        filters: Optional filters dict to pass along to the Librarian agent
-
-    Returns:
-        dict with keys: domain, summary, confidence, reasoning, response
-    """
-    initial_state = {
-        "messages": [],
-        "raw_content": content,
-        "filters": filters,
-        "domain": None,
-        "summary": None,
-        "confidence": None,
-        "reasoning": None,
-    }
-
-    t0 = time.time()
-    final_state = router_graph.invoke(initial_state)
-    elapsed = time.time() - t0
-
-    last_message = final_state["messages"][-1] if final_state["messages"] else None
-    router_tracer.agent_end()
-    router_tracer.info(f"Pipeline completed in {elapsed:.1f}s")
-
-    return {
-        "domain": final_state.get("domain"),
-        "summary": final_state.get("summary"),
-        "confidence": final_state.get("confidence"),
-        "reasoning": final_state.get("reasoning"),
-        "response": last_message.content if last_message else "",
-    }
-
-
-# ── CLI End-to-End Test ──────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    print("=" * 60)
-    print("  NEXUS 3-AGENT PIPELINE: END-TO-END TEST")
-    print("  Router (Email Subgraph) -> Career Agent (DPFH) -> Librarian (if needed)")
-    print("=" * 60)
-
-    test_query = "check my email for any recent job messages or recruiter outreach"
-
-    print(f"\n📨 INPUT: {test_query}\n")
-    print("-" * 60)
-
-    result = route_content(test_query)
-
-    print(f"\n🔀 ROUTER CLASSIFICATION:")
-    print(f"   Domain:     {result['domain']}")
-    print(f"   Confidence: {result['confidence']}")
-    print(f"   Summary:    {result['summary']}")
-    print(f"   Reasoning:  {result['reasoning']}")
-    print(f"\n{'='*60}")
-    print(f"🎯 CAREER AGENT RESPONSE:")
-    print(f"{'='*60}\n")
-    print(result["response"])

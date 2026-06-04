@@ -9,7 +9,7 @@ from typing import List, Dict
 # Add engine to sys.path if running as script
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from agents.email.agent import app
+from agents.email.graph import app
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from core.constants import AI_MODEL

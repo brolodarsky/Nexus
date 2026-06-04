@@ -12,7 +12,7 @@ import time
 # Fix Windows console emoji printing
 sys.stdout.reconfigure(encoding='utf-8')
 
-from agents.router.agent import route_content
+from agents.router.api import route_content
 
 # Disable noisy logs
 logging.getLogger('httpx').setLevel(logging.WARNING)

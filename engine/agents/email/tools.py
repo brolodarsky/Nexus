@@ -135,10 +135,10 @@ def fetch_email_by_uid(uid: str) -> Optional[str]:
     except Exception as exc:
         return f"Exception while reading email UID {uid}: {exc}"
 
+import json
+
 @tool
-def list_recent_emails(count: int = 5) -> list[dict]:
-    """List the most recent `count` emails. Returns metadata, no body."""
-    try:
+def list_recent_emails(count: int = 5) -> str:
         mail = _connect()
         status, data = mail.uid("search", None, "ALL")
         if status != "OK":
@@ -160,12 +160,12 @@ def list_recent_emails(count: int = 5) -> list[dict]:
                 "date": msg.get("Date", ""),
             })
         mail.logout()
-        return results
+        return json.dumps(results)
     except Exception as exc:
-        return [{"error": f"Exception while listing emails: {exc}"}]
+        return json.dumps([{"error": f"Exception while listing emails: {exc}"}])
 
 @tool
-def search_emails(query: str, count: int = 5) -> list[dict]:
+def search_emails(query: str, count: int = 5) -> str:
     """Search the mailbox using IMAP search syntax (e.g. SUBJECT "offer" or FROM "google"). Returns metadata of matching emails."""
     try:
         mail = _connect()
@@ -189,6 +189,6 @@ def search_emails(query: str, count: int = 5) -> list[dict]:
                 "date": msg.get("Date", ""),
             })
         mail.logout()
-        return results
+        return json.dumps(results)
     except Exception as exc:
-        return [{"error": f"Exception while searching emails: {exc}"}]
+        return json.dumps([{"error": f"Exception while searching emails: {exc}"}])
