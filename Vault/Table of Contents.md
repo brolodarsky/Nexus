@@ -130,6 +130,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 ### 3.1.2. Interview Prep & Technical Depth
 - **[[Interview Prep Hub]]**
 - **[[Interview Question Bank]]:** Pre-written application responses and narratives.
+- **[[Project - Lockheed Martin Interview]]:** Game plan and specific prep for the Lockheed Martin role.
 - **[[My Skills]]:** Master inventory of competencies.
 - **[[Summary - How To Stand Out To Employers Regardless of Experience]]:** Fordham Foundry panel on startup job hunting, networking, and creative outreach.
 
@@ -289,12 +290,14 @@ _The Content Log & Reference_
 	6. **[[Project - Persistent Engine Hosting]]**
 	7. **[[Project - Agent Context Optimization & Changeset Automation]]**
 	8. **[[Project - Nexus Demo]]**
+	9. **[[Project - StockBot]]**
 	- **[[Workshop - MCP Additions]]**
 	- **📁 Archive**
 - **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for eCommerce Silislick.com family business.
 - **Resources:**
 	- **[Codex Docs](https://developers.openai.com/codex/app)**
 	- **[Google Cloud Console](https://console.cloud.google.com/)**
+	- **[LangSmith](https://smith.langchain.com/o/d59feb9e-e33c-4313-8135-b7bfa2796c37)**
 	- **[OpenAI API](https://developers.openai.com/)**
 		- **[Documentation](https://developers.openai.com/api/docs)**
 		- **[Usage](https://platform.openai.com/usage)** - Track token usage.

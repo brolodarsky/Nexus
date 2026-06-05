@@ -86,3 +86,6 @@ When creating a note with the `Protocol -` or `Project -` prefix, you MUST also 
 ### Final Step
 *  **Update the date** at the bottom of `To Do List.md` to reflect the current date.
 
+## 8. Canonical Project Note Template
+
+When creating a new `Project - *.md` note, you MUST follow the canonical format. See the `project_work` skill for details. The required sections are: Overview, Current State, Architecture, Standing Guidelines, Build Log, Roadmap, Resources.

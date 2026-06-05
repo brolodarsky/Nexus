@@ -1,6 +1,6 @@
 ---
 name: project_work
-description: Keep active project documents inside the Vault up to date whenever changes are planned, implemented, completed, or conceptually modified. Make sure to use this skill whenever you complete a task related to a project, plan modifications, create a new sub-project, or add/remove tasks conceptually from any Project - *.md file, even if the user does not explicitly request it.
+description: Keep active project documents inside the Vault up to date whenever changes are planned, implemented, completed, or conceptually modified. Make sure to use this skill whenever you complete a task related to a project, plan modifications, create a new project, or add/remove tasks conceptually from any Project - *.md file, even if the user does not explicitly request it.
 ---
 
 # Mandatory Behavior
@@ -15,18 +15,21 @@ Identify the relevant project note inside the Vault. Project notes always have t
 
 ## 2. Update Tasks and Checklist Items
 
+Project notes (`Project - *.md`) follow a canonical section ordering: Overview, Current State, Architecture, Standing Guidelines, Build Log, Roadmap, Resources. 
+
 When tasks are completed, started, or modified:
-- Locate the relevant checkbox or task status indicator within the project note.
-- Update the checkbox from uncompleted (e.g., ⬜ Not Started, - [ ]) to completed (e.g., 🟩 Completed (YYYY-MM-DD), - [x]) or in-progress (e.g., ⏳ Workshopping).
-- Maintain the existing format of the task list within that specific file.
-- If a task is completed, append the completion date in YYYY-MM-DD format (e.g. (2026-05-19) or [2026-05-19]) to improve temporal traceability.
+- Locate the relevant task within the `Roadmap` section of the project note.
+- Update uncompleted tasks (e.g., `- [ ]`) to in-progress (e.g., `- [/]`) when working on them.
+- **CRITICAL**: When a task in the `Roadmap` is completed, do NOT just mark it as `- [x]`. Instead, **MOVE** the item to the `Build Log` section as a bullet point under a date heading (e.g., `### YYYY-MM-DD — Brief Description`). The Roadmap should only contain uncompleted items.
+- **CRITICAL**: Items in the `Standing Guidelines` section are permanent architectural rules. They are ongoing obligations and are NEVER checked off.
 
 ## 3. Update Project Planning and Scope
 
 When conceptual items are added, removed, or changed:
-- Update the relevant sections of the project note (such as Objectives, Build Sections, Roadmap Goals, or Proposed Changes).
+- Update the relevant sections of the project note (such as Overview, Architecture, Roadmap, or Resources).
+- **CRITICAL**: You MUST update the `Current State` section whenever you modify a project's codebase, capabilities, or file tree. It should be a living snapshot.
 - Document any shifts in implementation strategy, target dates, or architectural decisions.
-- Add new tasks to the task list as they are discovered or planned. Remove or mark obsolete tasks if they are no longer relevant.
+- Add new tasks to the `Roadmap` as they are discovered or planned. Remove or mark obsolete tasks if they are no longer relevant.
 
 ## 4. Keep Global Tracking Documents in Sync
 
