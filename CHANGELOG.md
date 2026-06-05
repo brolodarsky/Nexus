@@ -3,6 +3,20 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.4.0] - 2026-06-04
+
+### Changed
+- Add real-time console tracing to all agents (Router, Career, Librarian, Email) via new `core/trace.py` AgentTracer. Replace interactive 1/2/3 menu in `main.py` with a persistent chat REPL that never clears the console.
+- Refactored entire agent swarm architecture (Router, Email, Career, Librarian) into modular `api.py`, `graph.py`, `tools.py` structure.
+- Globalized pure Python vault filesystem I/O operations into `engine/shared_tools/vault_reader.py`.
+- Extracted shared cross-agent @tool wrappers (e.g. `ask_librarian_escalation`, `propose_write`) into `engine/shared_tools/shared.py`.
+- Updated all API routes and CLI tools to consume agents strictly via their public `api.py` boundaries.
+- Refactor career agent to move tools from `agent.py` to a dedicated `tools.py` file, matching other agents' structure and improving separation of concerns.
+- Updated `generate_obsidian_note` and `project_work` skills to enforce the new canonical project template structure (Overview, Current State, Architecture, Standing Guidelines, Build Log, Roadmap).
+
+### Removed
+- Deleted legacy monolithic `engine/tools/vault_tools.py` and `engine/tools/` directory.
+
 ## [2.3.0] - 2026-06-01
 
 ### Added
