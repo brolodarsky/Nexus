@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { askBrain } from "@/lib/api";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { askBrainStream } from "@/lib/api";
+import type { TraceEvent } from "@/lib/api";
+
+// ── Types ────────────────────────────────────────────────────
 
 interface Message {
   role: "user" | "assistant";
@@ -10,64 +13,211 @@ interface Message {
   agent?: string;
   domain?: string | null;
   confidence?: number | null;
+  trace?: TraceEvent[];
 }
+
+// ── Icon map for trace event types ───────────────────────────
+
+const TRACE_ICONS: Record<string, string> = {
+  agent_start: "▶",
+  agent_end: "■",
+  llm_call: "🤖",
+  llm_response: "💬",
+  tool_call: "🔧",
+  tool_result: "✅",
+  tool_error: "❌",
+  route: "🔀",
+  delegate: "📤",
+  info: "ℹ️",
+};
+
+// Agent color → Tailwind text class
+const AGENT_COLORS: Record<string, string> = {
+  yellow: "text-amber-400",
+  cyan: "text-cyan-400",
+  green: "text-emerald-400",
+  magenta: "text-fuchsia-400",
+  blue: "text-blue-400",
+  red: "text-red-400",
+  white: "text-zinc-300",
+};
+
+// ── Thinking Panel (collapsible trace log) ───────────────────
+
+function ThinkingPanel({
+  events,
+  isLive,
+  defaultExpanded = true,
+}: {
+  events: TraceEvent[];
+  isLive: boolean;
+  defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll while live
+  useEffect(() => {
+    if (expanded && isLive && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [events, expanded, isLive]);
+
+  // Auto-collapse when pipeline finishes
+  useEffect(() => {
+    if (!isLive && events.length > 0) {
+      setExpanded(false);
+    }
+  }, [isLive, events.length]);
+
+  if (events.length === 0) return null;
+
+  return (
+    <div className="mt-2 rounded-xl border border-border-subtle/50 overflow-hidden">
+      <button
+        onClick={() => setExpanded((prev) => !prev)}
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-[0.65rem] font-medium text-text-muted hover:text-text-secondary transition-colors"
+      >
+        <svg
+          className={`w-3 h-3 transition-transform ${expanded ? "rotate-90" : ""}`}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path d="M9 18l6-6-6-6" />
+        </svg>
+        {isLive ? (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-pulse" />
+            Thinking… ({events.length} steps)
+          </span>
+        ) : (
+          <span>Pipeline trace ({events.length} steps)</span>
+        )}
+      </button>
+
+      {expanded && (
+        <div
+          ref={scrollRef}
+          className="max-h-48 overflow-y-auto px-3 pb-2 space-y-0.5 border-t border-border-subtle/30"
+        >
+          {events.map((evt, i) => {
+            const icon = TRACE_ICONS[evt.type] ?? "·";
+            const colorClass = AGENT_COLORS[evt.color ?? "white"] ?? "text-zinc-300";
+
+            return (
+              <div
+                key={i}
+                className="flex items-start gap-2 text-[0.65rem] leading-relaxed font-mono"
+              >
+                <span className="shrink-0 w-4 text-center">{icon}</span>
+                <span className={`shrink-0 font-semibold ${colorClass}`}>
+                  [{evt.agent ?? "System"}]
+                </span>
+                <span className="text-text-muted break-all">{evt.message}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Page Component ──────────────────────────────────────
 
 export default function AskBrainPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [liveTrace, setLiveTrace] = useState<TraceEvent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<(() => void) | null>(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive or trace updates
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, liveTrace]);
 
   // Auto-focus input on mount
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const query = input.trim();
-    if (!query || loading) return;
-
-    const userMsg: Message = {
-      role: "user",
-      content: query,
-      timestamp: new Date(),
+  // Clean up abort on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.();
     };
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
-    setLoading(true);
+  }, []);
 
-    try {
-      const data = await askBrain(query);
-      const assistantMsg: Message = {
-        role: "assistant",
-        content: data.response,
-        timestamp: new Date(data.timestamp),
-        agent: data.agent,
-        domain: data.domain,
-        confidence: data.confidence,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-    } catch (err) {
-      const errorMsg: Message = {
-        role: "assistant",
-        content: `❌ ${err instanceof Error ? err.message : "Failed to reach the engine."}`,
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const query = input.trim();
+      if (!query || loading) return;
+
+      const userMsg: Message = {
+        role: "user",
+        content: query,
         timestamp: new Date(),
       };
-      setMessages((prev) => [...prev, errorMsg]);
-    } finally {
-      setLoading(false);
-      inputRef.current?.focus();
-    }
-  }
+      setMessages((prev) => [...prev, userMsg]);
+      setInput("");
+      setLoading(true);
+      setLiveTrace([]);
+
+      const abort = askBrainStream(query, {
+        onTrace: (event) => {
+          setLiveTrace((prev) => [...prev, event]);
+        },
+        onDone: (event) => {
+          setLiveTrace((prev) => {
+            // Build the final message with the full trace attached
+            // The "done" event carries agent/domain/confidence at the top level
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doneEvt = event as any;
+            const assistantMsg: Message = {
+              role: "assistant",
+              content: event.response ?? "",
+              timestamp: new Date(event.timestamp),
+              agent: doneEvt.agent as string | undefined,
+              domain: doneEvt.domain as string | null,
+              confidence: doneEvt.confidence as number | null,
+              trace: prev,
+            };
+            setMessages((msgs) => [...msgs, assistantMsg]);
+            return [];
+          });
+          setLoading(false);
+          abortRef.current = null;
+          inputRef.current?.focus();
+        },
+        onError: (errorMessage) => {
+          setLiveTrace((prev) => {
+            const errorMsg: Message = {
+              role: "assistant",
+              content: `❌ ${errorMessage}`,
+              timestamp: new Date(),
+              trace: prev.length > 0 ? prev : undefined,
+            };
+            setMessages((msgs) => [...msgs, errorMsg]);
+            return [];
+          });
+          setLoading(false);
+          abortRef.current = null;
+          inputRef.current?.focus();
+        },
+      });
+
+      abortRef.current = abort;
+    },
+    [input, loading]
+  );
 
   return (
     <div className="flex flex-col h-full max-h-screen">
@@ -86,7 +236,7 @@ export default function AskBrainPage() {
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-8 py-6 space-y-5"
       >
-        {messages.length === 0 && (
+        {messages.length === 0 && !loading && (
           <div className="flex flex-col items-center justify-center h-full text-center opacity-60">
             <span className="text-5xl mb-4">🧠</span>
             <p className="text-text-secondary text-sm max-w-md">
@@ -130,6 +280,16 @@ export default function AskBrainPage() {
                 </span>
               )}
               <pre className="whitespace-pre-wrap font-sans">{msg.content}</pre>
+
+              {/* Persisted trace log (collapsed by default for past messages) */}
+              {msg.role === "assistant" && msg.trace && msg.trace.length > 0 && (
+                <ThinkingPanel
+                  events={msg.trace}
+                  isLive={false}
+                  defaultExpanded={false}
+                />
+              )}
+
               <span className="block mt-2 text-[0.65rem] text-text-muted">
                 {msg.timestamp.toLocaleTimeString(undefined, {
                   hour: "2-digit",
@@ -140,9 +300,10 @@ export default function AskBrainPage() {
           </div>
         ))}
 
+        {/* Live thinking panel while streaming */}
         {loading && (
           <div className="flex justify-start">
-            <div className="glass-card px-5 py-3.5 text-sm text-text-secondary">
+            <div className="glass-card px-5 py-3.5 text-sm text-text-secondary max-w-2xl w-full">
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-pulse" />
                 <span
@@ -155,6 +316,11 @@ export default function AskBrainPage() {
                 />
                 <span className="ml-2">Routing query…</span>
               </span>
+              <ThinkingPanel
+                events={liveTrace}
+                isLive={true}
+                defaultExpanded={true}
+              />
             </div>
           </div>
         )}

@@ -2,10 +2,16 @@
 agents.py — Agent status and interaction routes.
 Bridges the Next.js frontend to the existing LangGraph agents.
 """
+import json
+import queue
+import threading
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+from core.trace import trace_bus
 
 router = APIRouter()
 
@@ -140,3 +146,101 @@ async def ask_brain(request: AskRequest):
             status_code=500,
             detail=f"Agent execution failed: {str(e)}",
         )
+
+
+# ── SSE Streaming Endpoint ───────────────────────────────────
+
+def _run_pipeline(query: str, event_queue: queue.Queue):
+    """
+    Runs route_content() synchronously in a background thread.
+    Pushes the final result (or error) into the queue as a special event.
+    Trace events are fanned out via the global trace_bus subscription
+    set up by the SSE generator.
+    """
+    try:
+        from agents.router.api import route_content
+
+        result = route_content(query)
+
+        routed_domain = result.get("domain", "general")
+        agent_name = "career" if routed_domain == "career" else "librarian" # TODO: Generalize 
+
+        now = datetime.now(timezone.utc).isoformat()
+        for agent in AGENT_REGISTRY:
+            if agent["name"] == "content_router":
+                agent["last_run"] = now
+            if agent["name"] == agent_name:
+                agent["last_run"] = now
+
+        event_queue.put({
+            "type": "done",
+            "response": result.get("response", ""),
+            "agent": agent_name,
+            "domain": routed_domain,
+            "confidence": result.get("confidence"),
+            "reasoning": result.get("reasoning"),
+            "timestamp": now,
+        })
+    except Exception as e:
+        event_queue.put({
+            "type": "error",
+            "message": f"Agent execution failed: {str(e)}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+
+@router.post("/ask/stream")
+async def ask_brain_stream(request: AskRequest, req: Request):
+    """
+    SSE streaming endpoint. Streams real-time trace events from the
+    agent pipeline, then emits a final 'done' event with the response.
+
+    Uses a thread-safe queue: trace_bus pushes events, the SSE generator
+    yields them as `data:` lines.
+    """
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+
+    event_queue: queue.Queue = queue.Queue()
+
+    # Subscribe to the global trace bus — push events into our queue
+    unsubscribe = trace_bus.subscribe(lambda evt: event_queue.put(evt))
+
+    # Kick off the pipeline in a background thread
+    thread = threading.Thread(
+        target=_run_pipeline,
+        args=(request.query, event_queue),
+        daemon=True,
+    )
+    thread.start()
+
+    async def event_generator():
+        try:
+            while True:
+                # Check if client disconnected
+                if await req.is_disconnected():
+                    break
+
+                try:
+                    event = event_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+                event_data = json.dumps(event, ensure_ascii=False)
+                yield f"data: {event_data}\n\n"
+
+                # Terminal events — stop streaming after these
+                if event.get("type") in ("done", "error"):
+                    break
+        finally:
+            unsubscribe()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
