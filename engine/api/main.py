@@ -10,7 +10,7 @@ from api.routers import agents, vault, hitl
 app = FastAPI(
     title="Nexus Engine API",
     description="HTTP bridge for the Nexus Agentic Engine Control Panel",
-    version="0.1.0",
+    version="2.0.0",
 )
 
 # CORS — allow the Next.js dev server
