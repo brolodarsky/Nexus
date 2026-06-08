@@ -19,6 +19,9 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     response: str
     agent: str
+    domain: str | None = None
+    confidence: float | None = None
+    reasoning: str | None = None
     timestamp: str
 
 
@@ -64,7 +67,7 @@ AGENT_REGISTRY = [
     {
         "name": "content_router",
         "display_name": "Content Router",
-        "status": "not_built",
+        "status": "idle",
         "last_run": None,
         "error_count": 0,
         "description": "Universal content classification & agent dispatch.",
@@ -99,27 +102,38 @@ async def get_agent_status():
 @router.post("/ask", response_model=AskResponse)
 async def ask_brain(request: AskRequest):
     """
-    Sends a natural-language query to the Librarian agent and returns
-    its response. This is the primary conversational endpoint.
+    Routes a natural-language query through the Content Router agent,
+    which classifies the domain and dispatches to the appropriate agent
+    (Career, Librarian, etc.).
     """
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     try:
-        from agents.librarian.api import ask_librarian
+        from agents.router.api import route_content
 
-        response_text = ask_librarian(request.query)
+        result = route_content(request.query)
 
-        # Update the Librarian's last_run timestamp in the registry
+        # Determine which downstream agent actually handled the query
+        # TODO: Make dynamic to integrate all agents
+        routed_domain = result.get("domain", "general")
+        agent_name = "career" if routed_domain == "career" else "librarian"
+
+        # Update timestamps in the registry
+        now = datetime.now(timezone.utc).isoformat()
         for agent in AGENT_REGISTRY:
-            if agent["name"] == "librarian":
-                agent["last_run"] = datetime.now(timezone.utc).isoformat()
-                break
+            if agent["name"] == "content_router":
+                agent["last_run"] = now
+            if agent["name"] == agent_name:
+                agent["last_run"] = now
 
         return AskResponse(
-            response=response_text,
-            agent="librarian",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            response=result.get("response", ""),
+            agent=agent_name,
+            domain=routed_domain,
+            confidence=result.get("confidence"),
+            reasoning=result.get("reasoning"),
+            timestamp=now,
         )
     except Exception as e:
         raise HTTPException(

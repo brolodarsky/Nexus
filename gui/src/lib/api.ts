@@ -25,6 +25,9 @@ export interface AgentStatus {
 export interface AskResponse {
   response: string;
   agent: string;
+  domain: string | null;
+  confidence: number | null;
+  reasoning: string | null;
   timestamp: string;
 }
 

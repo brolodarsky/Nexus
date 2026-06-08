@@ -7,6 +7,9 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  agent?: string;
+  domain?: string | null;
+  confidence?: number | null;
 }
 
 export default function AskBrainPage() {
@@ -48,6 +51,9 @@ export default function AskBrainPage() {
         role: "assistant",
         content: data.response,
         timestamp: new Date(data.timestamp),
+        agent: data.agent,
+        domain: data.domain,
+        confidence: data.confidence,
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
@@ -71,7 +77,7 @@ export default function AskBrainPage() {
           <span className="gradient-text">Ask Brain</span>
         </h1>
         <p className="text-text-secondary mt-1 text-sm">
-          Query the Librarian agent — your cross-domain vault search service.
+          Queries route through the Content Router to the right domain agent.
         </p>
       </header>
 
@@ -84,8 +90,7 @@ export default function AskBrainPage() {
           <div className="flex flex-col items-center justify-center h-full text-center opacity-60">
             <span className="text-5xl mb-4">🧠</span>
             <p className="text-text-secondary text-sm max-w-md">
-              Ask anything about your vault. The Librarian will navigate the
-              Zettelkasten hierarchy, read notes, and synthesize an answer.
+              Hi Bill! How can I help you today?
             </p>
             <div className="flex flex-wrap gap-2 mt-6 justify-center">
               {[
@@ -111,12 +116,19 @@ export default function AskBrainPage() {
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-2xl rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${
-                msg.role === "user"
-                  ? "bg-accent-cyan/10 border border-accent-cyan/20 text-text-primary"
-                  : "glass-card text-text-primary"
-              }`}
+              className={`max-w-2xl rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${msg.role === "user"
+                ? "bg-accent-cyan/10 border border-accent-cyan/20 text-text-primary"
+                : "glass-card text-text-primary"
+                }`}
             >
+              {msg.role === "assistant" && msg.agent && (
+                <span className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-0.5 rounded-full text-[0.65rem] font-medium bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan">
+                  <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan" />
+                  {msg.agent === "career" ? "Career Agent" : "Librarian"}
+                  {msg.domain && <span className="text-text-muted">• {msg.domain}</span>}
+                  {msg.confidence != null && <span className="text-text-muted">• {Math.round(msg.confidence * 100)}%</span>}
+                </span>
+              )}
               <pre className="whitespace-pre-wrap font-sans">{msg.content}</pre>
               <span className="block mt-2 text-[0.65rem] text-text-muted">
                 {msg.timestamp.toLocaleTimeString(undefined, {
@@ -141,7 +153,7 @@ export default function AskBrainPage() {
                   className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-pulse"
                   style={{ animationDelay: "0.4s" }}
                 />
-                <span className="ml-2">Librarian is searching the vault…</span>
+                <span className="ml-2">Routing query…</span>
               </span>
             </div>
           </div>
