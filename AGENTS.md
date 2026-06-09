@@ -26,7 +26,7 @@ When modifying or extending the Nexus Engine, you MUST respect and preserve the 
 ## Rules
 
 1. Never delete user content without explicit confirmation.
-2. Always use the .venv — resolve Python tools from .venv/Scripts/, not system PATH. Never install dependencies globally. Always use .venv\Scripts\pip.exe for installations. If a new requirement is added, immediately trigger the maintain_project_docs skill.
+2. Always use the .venv — resolve Python tools from .venv/Scripts/, not system PATH. Never install dependencies globally. Always use `uv pip install` for installations. If a new requirement is added, immediately trigger the maintain_project_docs skill.
 3. Commit messages must follow Conventional Commits — see conventional_commits skill. 
 4. Git & Changelog Policy. Use this table to determine whether a change requires a git commit and/or a changeset entry:
 

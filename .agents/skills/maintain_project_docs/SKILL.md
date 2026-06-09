@@ -42,12 +42,12 @@ For scripts, update the relevant section in `README.md` under `## Scripts`. Each
 
 Do not rewrite sections unrelated to the changed script.
 
-## Trigger 2: After any `pip install` or `pip uninstall`
+## Trigger 2: After any `uv pip install` or `uv pip uninstall`
 
 **ALWAYS regenerate `requirements.txt` immediately after installing or removing a Python package.**
 
 Run this from the repo root:
 ```powershell
-.venv\Scripts\pip.exe freeze > requirements.txt
+uv pip freeze > requirements.txt
 ```
 Then commit `requirements.txt` along with whatever other changes prompted the install.

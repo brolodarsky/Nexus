@@ -162,9 +162,9 @@ Nexus/
 First time on a new machine:
 
 ```powershell
-python -m venv .venv
+uv venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 > The `.venv/` folder is excluded from Git. `requirements.txt` is the source of truth for dependencies.
