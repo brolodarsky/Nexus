@@ -139,6 +139,8 @@ import json
 
 @tool
 def list_recent_emails(count: int = 5) -> str:
+    """List recent emails from the mailbox."""
+    try:
         mail = _connect()
         status, data = mail.uid("search", None, "ALL")
         if status != "OK":
