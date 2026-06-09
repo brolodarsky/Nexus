@@ -9,7 +9,6 @@
 
 $PROJECT_ROOT = $PSScriptRoot
 $VENV_PYTHON  = Join-Path $PROJECT_ROOT ".venv\Scripts\python.exe"
-$ENGINE_DIR   = Join-Path $PROJECT_ROOT "engine"
 $GUI_DIR      = Join-Path $PROJECT_ROOT "gui"
 
 Write-Host ""
@@ -21,8 +20,8 @@ Write-Host ""
 # ── Start FastAPI backend ────────────────────────────────────
 Write-Host "  [1/2] Starting FastAPI backend on port 8000..." -ForegroundColor Yellow
 $backend = Start-Process -FilePath $VENV_PYTHON `
-    -ArgumentList "-m", "uvicorn", "api.main:app", "--reload", "--port", "8000" `
-    -WorkingDirectory $ENGINE_DIR `
+    -ArgumentList "-m", "uvicorn", "nexus.api.main:app", "--reload", "--port", "8000" `
+    -WorkingDirectory $PROJECT_ROOT `
     -WindowStyle Hidden `
     -PassThru
 

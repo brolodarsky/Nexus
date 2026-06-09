@@ -6,7 +6,7 @@ Rather than a static archive or a generic note template, Nexus acts as a cogniti
 
 ## Key Technical Pillars
 
-*   **Agentic Search Engine (`engine/`):** A custom LangGraph-based ReAct agent ("The Librarian") that dynamically navigates the local filesystem to locate, read, and cross-reference documents—delivering grounded answers with precise source citations without requiring pre-indexing or external vector databases. Specialized evaluation agents automatically run test suites to benchmark performance, with additional domain-specific agents planned.
+*   **Agentic Engine (`src/nexus/`):** A custom LangGraph-based ReAct agent ("The Librarian") that dynamically navigates the local filesystem to locate, read, and cross-reference documents—delivering grounded answers with precise source citations without requiring pre-indexing or external vector databases. Specialized evaluation agents automatically run test suites to benchmark performance, with additional domain-specific agents planned.
 *   **Context-Aware Workflows (`.agents/workflows/`):** Multi-step agent instructions (exposed as slash commands) that automate complex tasks like extracting skills from job descriptions, parsing medical records, and synthesizing dense source material into atomic notes.
 *   **Enforced Agent Skills (`.agents/skills/`):** Mandatory system behaviors acting as background constraints ("laws of physics") that intercept agent actions to guarantee data integrity, formatting rules, and contextual safety guidelines.
 *   **Deterministic Automation Layer (`tools/`):** Python and Node.js integrations for phone chat screen-scraping (ADB), secure OAuth2 email retrieval, edge-TTS audio podcast generation, and automated PDF portfolio rendering.
@@ -128,7 +128,7 @@ Nexus/
 │   └── Table of Contents.md   # Master index — source of truth for structure
 ├── AGENTS.md                   # AI agent constitution
 ├── CHANGELOG.md                # Running log of notable changes
-├── engine/                      # Agentic search & coordinator engine
+├── src/nexus/                      # Agentic search & coordinator engine
 │   ├── main.py                  # Universal coordinator & mission control
 │   ├── agents/                  # Domain-specific agents
 │   │   ├── email/               # Email Agent (compiled subgraph for IMAP fetch/search)
@@ -148,8 +148,6 @@ Nexus/
 │   └── tools/                   # Shared engine utilities
 │       ├── email_tool.py        # Core email fetching logic
 │       └── vault_tools.py       # Vault navigation tools
-├── tools/                      # Automation tools
-│   └── resume_engine/          # Premium PDF rendering system
 ├── start.ps1                   # Launches backend + frontend Control Panel
 ├── requirements.txt            # Pinned Python dependencies
 └── .gitignore
@@ -231,17 +229,17 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `sync_vault.py` | Automatically commits the nested Vault repository (The Nested Heart). | `python tools/sync_vault.py` |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
 | `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python tools/ingest_phone.py --screens 50` |
-| `engine/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `python engine/main.py` |
-| `engine/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m engine.evals.runner` |
-| `engine/agents/router/evals/runner.py` | Deterministic evaluation of the Content Router agent logic. | `python engine/agents/router/evals/runner.py` |
-| `engine/agents/career/evals/runner.py` | LLM-as-a-judge evaluation of the Career Agent and HITL compliance. | `python engine/agents/career/evals/runner.py` |
-| `engine/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service. | `python engine/main.py <query>` |
-| `engine/agents/email/agent.py` | Email Agent subgraph (LangGraph). Handles IMAP connections to fetch and search emails. | `N/A (Called by Router)` |
-| `engine/agents/router/agent.py` | Content Router Agent. LangGraph classifier that fetches context via tools and routes incoming content to domain agents. | `python engine/agents/router/agent.py` |
-| `engine/agents/career/agent.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python engine/agents/career/agent.py` |
-| `engine/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`, `get_vault_structure`). Supports targeted subtree search and frontmatter tag filtering. | N/A |
-| `engine/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
-| `engine/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve (write to disk), reject. | Via GUI or API |
+| `src/nexus/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `nexus` |
+| `src/nexus/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m nexus.evals.runner` |
+| `src/nexus/agents/router/evals/runner.py` | Deterministic evaluation of the Content Router agent logic. | `python src/nexus/agents/router/evals/runner.py` |
+| `src/nexus/agents/career/evals/runner.py` | LLM-as-a-judge evaluation of the Career Agent and HITL compliance. | `python src/nexus/agents/career/evals/runner.py` |
+| `src/nexus/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service. | `nexus <query>` |
+| `src/nexus/agents/email/agent.py` | Email Agent subgraph (LangGraph). Handles IMAP connections to fetch and search emails. | `N/A (Called by Router)` |
+| `src/nexus/agents/router/agent.py` | Content Router Agent. LangGraph classifier that fetches context via tools and routes incoming content to domain agents. | `python src/nexus/agents/router/agent.py` |
+| `src/nexus/agents/career/agent.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python src/nexus/agents/career/agent.py` |
+| `src/nexus/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`, `get_vault_structure`). Supports targeted subtree search and frontmatter tag filtering. | N/A |
+| `src/nexus/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
+| `src/nexus/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve (write to disk), reject. | Via GUI or API |
 | `resume_engine/` | PDF and DOCX rendering with page fill metrics. Outputs fill %, verdict, and room remaining after every render. | `node tools/resume_engine/render.js` |
 | `start.ps1` | Launches the full Nexus Control Panel (FastAPI + Next.js). | `.\start.ps1` |
 
@@ -266,7 +264,7 @@ Nexus relies on several specific architectural patterns to maintain a clean boun
 
 ### 1. Engine + Vault Separation
 The repository is split into two layers:
-- The **Engine** (`tools/`, `engine/`, `.agents/`, root docs) is the public portfolio—tracked, readable, and version-controlled.
+- The **Engine** (`tools/`, `src/nexus/`, `.agents/`, root docs) is the public portfolio—tracked, readable, and version-controlled.
 - The **Vault** (`Vault/`) is the private content layer—mostly gitignored, synced locally via Syncthing.
 
 ### 2. Git-Crypt Defense-in-Depth

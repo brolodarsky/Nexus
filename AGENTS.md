@@ -5,11 +5,11 @@
 ## Developer Agent Guidelines
 
 ### Meta-Boundary: Developer Agent vs. Nexus Engine
-This constitution guides **you**, the external developer/coding agent (e.g., Antigravity, Cursor) working in this repository. It is distinct from the **Nexus Agentic Engine** (located in `engine/` and `tools/`), which is the local-first application being developed.
+This constitution guides **you**, the external developer/coding agent (e.g., Antigravity, Cursor) working in this repository. It is distinct from the **Nexus Agentic Engine** (located in `src/nexus/` and `tools/`), which is the local-first application being developed.
 
 ### Authorized Actions
 1. **Vault Context Access:** You are authorized and encouraged to read notes inside `Vault/` (e.g., career, goals, projects, learning) to align your implementations, research, and suggestions with the user's specific context, preferences, and personal style.
-2. **Tool Execution:** You are authorized to run scripts in `tools/` and run Python or Node.js commands in `engine/` using the project's virtual environment (`.venv/`) to automate vault actions, sync vault data, or run test suites during your tasks.
+2. **Tool Execution:** You are authorized to run scripts in `tools/` and run Python or Node.js commands in `src/nexus/` using the project's virtual environment (`.venv/`) to automate vault actions, sync vault data, or run test suites during your tasks.
 
 ---
 
