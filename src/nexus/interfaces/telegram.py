@@ -7,7 +7,6 @@ import sys
 import logging
 import urllib.parse
 import tempfile
-from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
@@ -15,11 +14,10 @@ from telegram.error import BadRequest
 from nexus.agents.router.api import route_content
 from nexus.core.audio import transcribe_audio
 
-# Load environment variables
-load_dotenv()
+from src.nexus.core.config import settings
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-ALLOWED_USER_IDS_STR = os.getenv("ALLOWED_USER_IDS", "")
+TELEGRAM_BOT_TOKEN = settings.telegram_bot_token
+ALLOWED_USER_IDS_STR = settings.allowed_user_ids
 ALLOWED_USER_IDS = [int(x.strip()) for x in ALLOWED_USER_IDS_STR.split(",") if x.strip()]
 
 logging.basicConfig(

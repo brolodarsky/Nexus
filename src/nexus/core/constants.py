@@ -1,15 +1,12 @@
-import os
 from pathlib import Path
-from dotenv import load_dotenv
-
-load_dotenv()
+from src.nexus.core.config import settings
 
 # Paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 VAULT_PATH = PROJECT_ROOT / "Vault"
 
 # AI Config
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = settings.openai_api_key
 AI_MODEL = "gpt-5.4-mini"
 
 # Shared Config

@@ -14,6 +14,7 @@ from langchain_core.tools import tool
 # Add engine root to sys.path for internal imports
 
 from nexus.core.google_auth import get_google_credentials
+from src.nexus.core.config import settings
 
 # Full IMAP permissions scope for Google Accounts
 SCOPES = ['https://mail.google.com/']
@@ -37,9 +38,9 @@ def _strip_html(html: str) -> str:
 
 # ── IMAP helpers ──────────────────────────────────────────────────────────────
 def _connect() -> imaplib.IMAP4_SSL:
-    server = os.environ.get("IMAP_SERVER", "imap.gmail.com")
-    port = int(os.environ.get("IMAP_PORT", 993))
-    address = os.environ.get("EMAIL_ADDRESS")
+    server = settings.imap_server
+    port = settings.imap_port
+    address = settings.email_address
 
     if not address:
         raise ValueError("EMAIL_ADDRESS environment variable must be set.")
@@ -53,8 +54,8 @@ def _connect() -> imaplib.IMAP4_SSL:
     except Exception as exc:
         raise ConnectionError(f"Google OAuth2 authentication step rejected: {exc}")
 
-    # Use the "Jobs" folder as requested
-    folder = os.environ.get("IMAP_FOLDER", "Jobs")
+    # Use the configured IMAP folder
+    folder = settings.imap_folder
     mail.select(f'"{folder}"')
     return mail
 
