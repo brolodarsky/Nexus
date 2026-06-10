@@ -7,19 +7,25 @@
 ### Meta-Boundary: Developer Agent vs. Nexus Engine
 This constitution guides **you**, the external developer/coding agent (e.g., Antigravity, Cursor) working in this repository. It is distinct from the **Nexus Agentic Engine** (located in `src/nexus/` and `tools/`), which is the local-first application being developed.
 
+For the internal logic, architecture, and principles governing the Nexus Engine agents themselves, refer to `src/nexus/core/ENGINE_CONSTITUTION.md`.
+
 ### Authorized Actions
 1. **Vault Context Access:** You are authorized and encouraged to read notes inside `Vault/` (e.g., career, goals, projects, learning) to align your implementations, research, and suggestions with the user's specific context, preferences, and personal style.
 2. **Tool Execution:** You are authorized to run scripts in `tools/` and run Python or Node.js commands in `src/nexus/` using the project's virtual environment (`.venv/`) to automate vault actions, sync vault data, or run test suites during your tasks.
 
 ---
 
-## Core Architectural Principles of Nexus
-When modifying or extending the Nexus Engine, you MUST respect and preserve the following design paradigms:
+## Engine Coding Standards (Standing Guidelines)
+When writing code for Nexus (`src/nexus/` or `gui/`), you MUST adhere to the following standards:
 
 1. **Agentic File System (AFS):** Notes, links, and folder taxonomy represent the primary state and memory. Prioritize deterministic local file-system navigation and traversing structured documents over chunk-based database RAG.
 2. **Folder-Mapped Swarm:** Domain-specific agents are restricted to their corresponding top-level directories in `Vault/` via prefix validation. They are peer-blind by default.
 3. **Deterministic Pre-flight Hydration & Librarian Escalation:** Sibling agents receive their local directory lists injected directly before running. Any cross-domain lookups must be escalated to the Librarian subgraph; domain agents never query peer folders directly.
 4. **HITL Transaction Queue:** Writes and real-world actions use a two-phase commit. Agents draft proposed modifications to a centralized SQLite queue; changes are written only after human approval.
+5. **Strict File Structure:** Agents must be extracted into modular format. For example, `api.py` (public boundary), `graph.py` (orchestration), `tools.py` (domain tools), etc.
+6. **Shared Tools:** When a tool for a common task is available in `src/nexus/shared_tools/`, use it instead of implementing your own new version inside an agent (e.g., use `vault_reader.py` for file system I/O).
+7. **Absolute Imports:** All internal imports must be absolute imports relative to the package root. Do not use `sys.path` manipulation hacks.
+8. **Validation & Logging (Pydantic & Loguru):** Avoid raw `os.getenv` or `print()` statements in engine code. Use centralized configurations via Pydantic (`src/nexus/core/config.py`) and structured logging via Loguru (`src/nexus/core/logger.py`) where available.
 
 ---
 
