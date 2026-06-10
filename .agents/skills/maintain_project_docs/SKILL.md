@@ -1,6 +1,6 @@
 ---
 name: maintain_project_docs
-description: Keep README.md, AGENTS.md, CHANGELOG.md, and requirements.txt in sync whenever the project changes. Always use this skill after adding, removing, or modifying any tool, skill, or workflow; after any pip install/uninstall; or after any structural change to the Engine (e.g., new TOC sections, AGENTS.md updates). Individual note additions/moves/links do NOT warrant this skill.
+description: Keep README.md, AGENTS.md, and CHANGELOG.md in sync whenever the project changes. Always use this skill after adding, removing, or modifying any tool, skill, or workflow; or after any structural change to the Engine (e.g., new TOC sections, AGENTS.md updates). Individual note additions/moves/links do NOT warrant this skill.
 ---
 
 # Maintain Project Docs
@@ -42,12 +42,6 @@ For scripts, update the relevant section in `README.md` under `## Scripts`. Each
 
 Do not rewrite sections unrelated to the changed script.
 
-## Trigger 2: After any `uv pip install` or `uv pip uninstall`
+## Dependency Management Notice
 
-**ALWAYS regenerate `requirements.txt` immediately after installing or removing a Python package.**
-
-Run this from the repo root:
-```powershell
-uv pip freeze > requirements.txt
-```
-Then commit `requirements.txt` along with whatever other changes prompted the install.
+This project uses `pyproject.toml` and `uv.lock` for dependency management. When installing new packages, always use `uv add <package>` instead of `uv pip install`. The `uv.lock` file is automatically generated and serves as the reproducible source of truth. Do NOT create or maintain a `requirements.txt` file.
