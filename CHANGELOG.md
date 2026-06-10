@@ -3,6 +3,33 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.5.0] - 2026-06-09
+
+### Added
+- Real-time agent trace streaming from the Python engine to the Next.js GUI via Server-Sent Events (SSE).
+- `POST /api/agents/ask/stream` endpoint in FastAPI that yields live trace events.
+- `TraceEventBus` pub/sub system in `engine/core/trace.py` that broadcasts `AgentTracer` events.
+- Collapsible "Thinking Panel" in the Ask Brain GUI that displays live agent tool calls, routing decisions, and LLM reasoning steps with colors and icons.
+- Persisted trace logs for past messages in the chat history.
+
+### Changed
+- Wire GUI Ask Brain page to the Content Router agent instead of calling the Librarian directly. The /api/agents/ask endpoint now routes through classify → domain dispatch, and the frontend displays which agent handled each query with domain and confidence metadata.
+- Migrated python environment management from `pip` and `python -m venv` to Astral's `uv` for improved speed and determinism.
+- Updated `AGENTS.md`, `README.md`, and `maintain_project_docs` skill to enforce `uv pip` usage.
+- Restructured `engine/` directory into a standard `src/nexus/` Python package layout.
+- Replaced `requirements.txt` with `pyproject.toml` (using `uv` and `hatchling` backend).
+- Updated all internal imports to absolute imports under the `nexus.*` namespace.
+- Replaced the standalone `python engine/main.py` command with a managed `nexus` CLI executable.
+- Updated `start.ps1` to use absolute imports (`nexus.api.main:app`) and project-root working directory.
+
+### Fixed
+- Fixed `IndentationError` in `engine/agents/email/tools.py` due to missing `try` block for `list_recent_emails`.
+- Fixed Content Router LLM hallucination where it aggressively triggered `fetch_emails` for local notes by tightening the `fetch_emails` tool docstring and router prompt.
+
+### Removed
+- Deleted `requirements.txt` in favor of PEP-621 `pyproject.toml` management.
+- Removed legacy `sys.path.insert()` and `sys.path.append()` hacks used for standalone script execution.
+
 ## [2.4.0] - 2026-06-04
 
 ### Changed

@@ -60,10 +60,10 @@ brain-key.key
 .podcast_history.json
 
 # Local query run logs
-engine/logs/
+src/nexus/logs/
 
 # HITL transaction database (runtime state)
-engine/hitl.db
+src/nexus/hitl.db
 
 __pycache__/
 *.pyc

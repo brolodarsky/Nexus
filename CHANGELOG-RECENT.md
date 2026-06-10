@@ -3,6 +3,33 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.5.0] - 2026-06-09
+
+### Added
+- Real-time agent trace streaming from the Python engine to the Next.js GUI via Server-Sent Events (SSE).
+- `POST /api/agents/ask/stream` endpoint in FastAPI that yields live trace events.
+- `TraceEventBus` pub/sub system in `engine/core/trace.py` that broadcasts `AgentTracer` events.
+- Collapsible "Thinking Panel" in the Ask Brain GUI that displays live agent tool calls, routing decisions, and LLM reasoning steps with colors and icons.
+- Persisted trace logs for past messages in the chat history.
+
+### Changed
+- Wire GUI Ask Brain page to the Content Router agent instead of calling the Librarian directly. The /api/agents/ask endpoint now routes through classify → domain dispatch, and the frontend displays which agent handled each query with domain and confidence metadata.
+- Migrated python environment management from `pip` and `python -m venv` to Astral's `uv` for improved speed and determinism.
+- Updated `AGENTS.md`, `README.md`, and `maintain_project_docs` skill to enforce `uv pip` usage.
+- Restructured `engine/` directory into a standard `src/nexus/` Python package layout.
+- Replaced `requirements.txt` with `pyproject.toml` (using `uv` and `hatchling` backend).
+- Updated all internal imports to absolute imports under the `nexus.*` namespace.
+- Replaced the standalone `python engine/main.py` command with a managed `nexus` CLI executable.
+- Updated `start.ps1` to use absolute imports (`nexus.api.main:app`) and project-root working directory.
+
+### Fixed
+- Fixed `IndentationError` in `engine/agents/email/tools.py` due to missing `try` block for `list_recent_emails`.
+- Fixed Content Router LLM hallucination where it aggressively triggered `fetch_emails` for local notes by tightening the `fetch_emails` tool docstring and router prompt.
+
+### Removed
+- Deleted `requirements.txt` in favor of PEP-621 `pyproject.toml` management.
+- Removed legacy `sys.path.insert()` and `sys.path.append()` hacks used for standalone script execution.
+
 ## [2.4.0] - 2026-06-04
 
 ### Changed
@@ -51,20 +78,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Career Agent HITL compliance: pass rate improved from 33% (1/3) to 100% (3/3), avg score from 5.0 to 8.0.
 - Career Agent failing to call `propose_write` for cross-domain files (e.g., `Current Learning.md`) because it couldn't see them in its domain listing.
 - Fixed a `UnicodeEncodeError` on Windows consoles by forcing `sys.stdout` to UTF-8 in `engine/main.py`.
-
-## [2.2.0] - 2026-05-28
-
-### Added
-- **Changeset Release Compilation System (Agent Context Optimization - Phase 1):**
-  - Created `.changeset/` staging directory with `.gitkeep` for storing fragmented change notes.
-  - Implemented `tools/release.py` Python compiler script to parse changeset fragments, determine semantic version bumps, update `CHANGELOG.md` and keep a rolling 3-release window in `CHANGELOG-RECENT.md`, and clean up staging.
-  - Created `CHANGELOG-RECENT.md` as a low-token active context file for developer agents.
-
-### Changed
-- **Changelog Policies & Skills:**
-  - Updated `maintain_project_docs` skill (`.agents/skills/maintain_project_docs/SKILL.md`) to instruct agents to write to `.changeset/` instead of directly modifying `CHANGELOG.md`.
-  - Updated `AGENTS.md` Git & Changelog Policy rules to mandate changesets for engine changes.
-  - Checked off Phase 1 tasks in the `Project - Agent Context Optimization & Changeset Automation.md` project log.
-  - **Conversation Logging Optimization:**
-  - Updated `log_llm_conversation` skill instructions to prepend entries at the top of `Log - LLM Conversations.md` instead of appending them at the bottom.
-  - Re-ordered `Log - LLM Conversations.md` to place newer entries first, enabling future agents to verify duplicates by reading only the first 20 lines of the file.
