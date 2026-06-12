@@ -1,5 +1,11 @@
+import os
+from pathlib import Path
 from typing import Optional
 from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
+env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 class EngineSettings(BaseSettings):
     nexus_user_name: str = "User"
@@ -25,7 +31,9 @@ class EngineSettings(BaseSettings):
     langchain_api_key: Optional[str] = None
 
     class Config:
-        env_file = ".env"
+        import os
+        from pathlib import Path
+        env_file = str(Path(__file__).resolve().parent.parent.parent.parent / ".env")
         extra = "ignore"
 
 settings = EngineSettings()
