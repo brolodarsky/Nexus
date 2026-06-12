@@ -14,10 +14,12 @@ from langchain_core.tools import tool
 # Add engine root to sys.path for internal imports
 
 from nexus.core.google_auth import get_google_credentials
-from src.nexus.core.config import settings
+from nexus.core.config import settings
+from nexus.core.constants import PROJECT_ROOT
 
 # Full IMAP permissions scope for Google Accounts
 SCOPES = ['https://mail.google.com/']
+SECRETS_DIR = str(PROJECT_ROOT / ".secrets")
 
 # ── HTML → plain text stripper ────────────────────────────────────────────────
 class _HTMLStripper(HTMLParser):

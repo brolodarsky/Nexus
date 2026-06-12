@@ -19,9 +19,7 @@ from nexus.agents.email.tools import fetch_email_by_uid, list_recent_emails
 # Load environment variables
 load_dotenv()
 
-# ── Credential Paths ──────────────────────────────────────────────────────────
-TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
-SECRETS_DIR = os.path.join(TOOLS_DIR, ".secrets")
+
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def main():
@@ -44,7 +42,7 @@ def main():
 
     # ── List mode ──────────────────────────────────────────────────────────
     if args.list_recent:
-        emails = list_recent_emails(args.list_recent, SECRETS_DIR)
+        emails = list_recent_emails(args.list_recent)
         if not emails:
             print("No emails found or connection failed.", file=sys.stderr)
             sys.exit(1)
@@ -60,7 +58,7 @@ def main():
     if not args.uid:
         parser.print_help()
         sys.exit(1)
-    content = fetch_email_by_uid(args.uid, SECRETS_DIR)
+    content = fetch_email_by_uid(args.uid)
     if content:
         if args.output:
             os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
