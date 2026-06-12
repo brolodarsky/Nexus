@@ -132,6 +132,7 @@ export default function AskBrainPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [liveTrace, setLiveTrace] = useState<TraceEvent[]>([]);
+  const liveTraceRef = useRef<TraceEvent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<(() => void) | null>(null);
@@ -170,44 +171,47 @@ export default function AskBrainPage() {
       setInput("");
       setLoading(true);
       setLiveTrace([]);
+      liveTraceRef.current = [];
 
       const abort = askBrainStream(query, {
         onTrace: (event) => {
-          setLiveTrace((prev) => [...prev, event]);
+          setLiveTrace((prev) => {
+            const newTrace = [...prev, event];
+            liveTraceRef.current = newTrace;
+            return newTrace;
+          });
         },
         onDone: (event) => {
-          setLiveTrace((prev) => {
-            // Build the final message with the full trace attached
-            // The "done" event carries agent/domain/confidence at the top level
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const doneEvt = event as any;
-            const assistantMsg: Message = {
-              role: "assistant",
-              content: event.response ?? "",
-              timestamp: new Date(event.timestamp),
-              agent: doneEvt.agent as string | undefined,
-              domain: doneEvt.domain as string | null,
-              confidence: doneEvt.confidence as number | null,
-              trace: prev,
-            };
-            setMessages((msgs) => [...msgs, assistantMsg]);
-            return [];
-          });
+          // Build the final message with the full trace attached
+          // The "done" event carries agent/domain/confidence at the top level
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const doneEvt = event as any;
+          const assistantMsg: Message = {
+            role: "assistant",
+            content: event.response ?? "",
+            timestamp: new Date(event.timestamp),
+            agent: doneEvt.agent as string | undefined,
+            domain: doneEvt.domain as string | null,
+            confidence: doneEvt.confidence as number | null,
+            trace: liveTraceRef.current,
+          };
+          setMessages((msgs) => [...msgs, assistantMsg]);
+          setLiveTrace([]);
+          liveTraceRef.current = [];
           setLoading(false);
           abortRef.current = null;
           inputRef.current?.focus();
         },
         onError: (errorMessage) => {
-          setLiveTrace((prev) => {
-            const errorMsg: Message = {
-              role: "assistant",
-              content: `❌ ${errorMessage}`,
-              timestamp: new Date(),
-              trace: prev.length > 0 ? prev : undefined,
-            };
-            setMessages((msgs) => [...msgs, errorMsg]);
-            return [];
-          });
+          const errorMsg: Message = {
+            role: "assistant",
+            content: `❌ ${errorMessage}`,
+            timestamp: new Date(),
+            trace: liveTraceRef.current.length > 0 ? liveTraceRef.current : undefined,
+          };
+          setMessages((msgs) => [...msgs, errorMsg]);
+          setLiveTrace([]);
+          liveTraceRef.current = [];
           setLoading(false);
           abortRef.current = null;
           inputRef.current?.focus();
