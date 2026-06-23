@@ -3,6 +3,31 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.0] - 2026-06-22
+
+### Added
+- Created `src/nexus/core/config.py` using Pydantic `BaseSettings` to serve as the centralized source of truth for environment variables.
+- Added dynamic injection of `{datetime}` and `User` to `src/nexus/core/engine_constitution.py`.
+- Installed `pydantic-settings` via `uv` and updated `requirements.txt`.
+
+### Changed
+- Refactored `src/nexus/core/constants.py`, `src/nexus/interfaces/telegram.py`, and `src/nexus/agents/email/tools.py` to replace scattered `os.getenv` calls with strongly-typed `settings` from `config.py`.
+- Moved the `.secrets` directory from `tools/.secrets` to the project root `.secrets` to align with the new `src/nexus` engine architecture and industry standards for credential management.
+- Updated `.gitignore` and `src/nexus/agents/email/tools.py` to reflect the new root `.secrets` location.
+- Refactored `AGENTS.md` to act strictly as the Builder rulebook, removing internal engine architecture principles.
+- Added Standing Guidelines to `AGENTS.md` to enforce strict file structures and centralized logging/validation for all future engine agents.
+- Migrated default package management workflow from `uv pip install` & `requirements.txt` to `uv add` and `uv.lock`.
+- Updated `AGENTS.md` and `maintain_project_docs` skill to formally deprecate `requirements.txt` in favor of `pyproject.toml`.
+
+### Fixed
+- Fixed `OPENAI_API_KEY` missing error when starting Next.js/FastAPI via `start.ps1` by explicitly injecting `.env` into `os.environ` within `src/nexus/core/config.py`.
+- Fixed execution failure in `tools/read_email.py` by removing legacy `sys.path.append` hacks and updating to the `nexus.*` import namespace.
+- Fixed double chat response bug in Nexus GUI AskBrainPage caused by React Strict Mode double-invoking state updaters
+
+### Removed
+- Removed static `ENGINE_CONSTITUTION.md` and replaced it with a dynamic Python module.
+- Deleted legacy `requirements.txt`.
+
 ## [2.5.0] - 2026-06-09
 
 ### Added
@@ -43,38 +68,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Removed
 - Deleted legacy monolithic `engine/tools/vault_tools.py` and `engine/tools/` directory.
-
-## [2.3.0] - 2026-06-01
-
-### Added
-- Created the **Email Agent** compiled LangGraph subgraph under `engine/agents/email/` to fetch and search IMAP emails.
-- Added `search_emails` tool to `engine/agents/email/tools.py`.
-- Established the Email Agent Golden Dataset evaluation suite in `engine/agents/email/evals/`.
-- Added 5 new evaluation cases to the Career Agent dataset in `engine/agents/career/evals/dataset.json`.
-- Created decentralized `evals` framework for the Content Router and Career Agent.
-- Added `dataset.json` and `runner.py` to `engine/agents/router/evals/` and `engine/agents/career/evals/`.
-- Configured LangSmith tracing inside `.env`.
-- Added high-resolution PNG and Windows multi-resolution ICO icon assets for the sync-vault shortcut button inside the GUI's public directory.
-- Installed `pillow` Python package in the project environment for image manipulation.
-- `get_master_resume()` tool for the Career Agent — reads `Resume - Master.md` for resume tailoring workflows.
-- Resume Tailoring Protocol in the Career Agent system prompt — agent reads master resume, crafts tailored version, and proposes via HITL.
-- `run_career_agent_with_trace()` API — returns tool call metadata alongside agent response for eval observability.
-- Known Cross-Domain File Paths section in the Career Agent prompt — provides exact vault paths for files outside the career domain (Current Learning, To Do List).
-
-### Changed
-- Migrated `engine/tools/email_tool.py` to `engine/agents/email/tools.py`.
-- Refactored **Content Router** (`engine/agents/router/agent.py`) into a ReAct agent to support `fetch_emails` tool calling prior to classification.
-- Updated `tools/read_email.py` to import from the new agent tools module.
-- Hardened Career Agent HITL compliance via mandatory trigger rules in the system prompt (interview status changes, learning completions, skill acquisitions, job applications).
-- Upgraded eval runner grader to use actual tool call traces instead of inferring HITL compliance from response prose.
-- Renamed "Vault Explorer" to "Brain Explorer" in the GUI Sidebar navigation and Vault page component.
-- Unified Nexus entry points (`engine/main.py` and `engine/interfaces/telegram.py`) to use the Content Router (`route_content`) instead of the Librarian directly.
-- Updated the Content Router's fallback logic to escalate general knowledge queries to the Librarian Agent rather than returning a placeholder.
-- Added `filters` support to the Router to propagate CLI tags/domains to the Librarian subgraph.
-- Updated `README.md` Repository Structure to include `capture_content.md`.
-- Added `release.py` to the Deterministic Tools table in `README.md`.
-
-### Fixed
-- Career Agent HITL compliance: pass rate improved from 33% (1/3) to 100% (3/3), avg score from 5.0 to 8.0.
-- Career Agent failing to call `propose_write` for cross-domain files (e.g., `Current Learning.md`) because it couldn't see them in its domain listing.
-- Fixed a `UnicodeEncodeError` on Windows consoles by forcing `sys.stdout` to UTF-8 in `engine/main.py`.

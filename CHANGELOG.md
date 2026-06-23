@@ -3,6 +3,31 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.0] - 2026-06-22
+
+### Added
+- Created `src/nexus/core/config.py` using Pydantic `BaseSettings` to serve as the centralized source of truth for environment variables.
+- Added dynamic injection of `{datetime}` and `User` to `src/nexus/core/engine_constitution.py`.
+- Installed `pydantic-settings` via `uv` and updated `requirements.txt`.
+
+### Changed
+- Refactored `src/nexus/core/constants.py`, `src/nexus/interfaces/telegram.py`, and `src/nexus/agents/email/tools.py` to replace scattered `os.getenv` calls with strongly-typed `settings` from `config.py`.
+- Moved the `.secrets` directory from `tools/.secrets` to the project root `.secrets` to align with the new `src/nexus` engine architecture and industry standards for credential management.
+- Updated `.gitignore` and `src/nexus/agents/email/tools.py` to reflect the new root `.secrets` location.
+- Refactored `AGENTS.md` to act strictly as the Builder rulebook, removing internal engine architecture principles.
+- Added Standing Guidelines to `AGENTS.md` to enforce strict file structures and centralized logging/validation for all future engine agents.
+- Migrated default package management workflow from `uv pip install` & `requirements.txt` to `uv add` and `uv.lock`.
+- Updated `AGENTS.md` and `maintain_project_docs` skill to formally deprecate `requirements.txt` in favor of `pyproject.toml`.
+
+### Fixed
+- Fixed `OPENAI_API_KEY` missing error when starting Next.js/FastAPI via `start.ps1` by explicitly injecting `.env` into `os.environ` within `src/nexus/core/config.py`.
+- Fixed execution failure in `tools/read_email.py` by removing legacy `sys.path.append` hacks and updating to the `nexus.*` import namespace.
+- Fixed double chat response bug in Nexus GUI AskBrainPage caused by React Strict Mode double-invoking state updaters
+
+### Removed
+- Removed static `ENGINE_CONSTITUTION.md` and replaced it with a dynamic Python module.
+- Deleted legacy `requirements.txt`.
+
 ## [2.5.0] - 2026-06-09
 
 ### Added

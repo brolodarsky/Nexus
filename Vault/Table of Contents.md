@@ -140,6 +140,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **📁 Resumes**
 	- **[[Resume - Master|Resume - Master - Markdown]]:** The source-of-truth CV.
 		- **[[Resume - Master.pdf]]:** Exported PDF output.
+		- **[[Resume - Master (Extended)]]**
 - **📁 Cover Letters**
 	- **[[Cover Letter - Agentic AI Focus]]**
 	- **[[Cover Letter - Java Dev Focus]]**
