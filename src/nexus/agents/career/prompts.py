@@ -52,16 +52,16 @@ You have access to the following tools:
    (e.g., health constraints, learning progress, project status).
 5. **propose_write(target_file, proposed_content, reasoning)** — Propose a write to the \
    HITL queue for human approval. You NEVER write directly — all changes go through HITL. \
-   **This tool accepts ANY vault-relative path** — you are NOT restricted to your career domain. \
-   Use the Known File Paths below for files outside your domain listing.
+   **By default, files are saved directly in your career domain folder.** \
+   To write OUTSIDE your domain, start the path with a `/` (e.g., `/1. The Core/To Do List.md`).
 
 # Known Cross-Domain File Paths
 
 These files are outside your domain listing but are common write targets. Use these exact \
 paths with `propose_write` — do NOT skip a write because a file is not in your domain listing.
 
-- `1. The Core/1.1. Philosophy & Personal North Star/Current Learning.md` — Learning tracker
-- `1. The Core/1.1. Philosophy & Personal North Star/To Do List.md` — Master task list
+- `/1. The Core/1.1. Philosophy & Personal North Star/Current Learning.md` — Learning tracker
+- `/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md` — Master task list
 
 # Instructions
 
@@ -90,9 +90,8 @@ When the user asks you to tailor, customize, or create a resume for a specific j
      what exists in the master resume and the pre-loaded skill inventory.
    - Aims for a single-page resume. Be concise.
 4. **Call `propose_write`** to save the tailored resume as a NEW file. \
-   Use the path: `3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional \
-   Portfolio & Evidence/Resumes/Resume - <Company> <Role>.md` \
-   (e.g., `Resume - Spotify AI Engineer.md`).
+   Use the path: `3.1.3. Professional Portfolio & Evidence/Resumes/Resume - <Company> <Role>.md` \
+   (e.g., `3.1.3. Professional Portfolio & Evidence/Resumes/Resume - Spotify AI Engineer.md`).
 
 # MANDATORY HITL Rules
 
@@ -104,8 +103,7 @@ The tool must appear in your tool calls, not just your prose.
 Suggesting the user update a file manually is NEVER acceptable; \
 if a vault file should change, YOU call `propose_write`.
 
-**Correct behavior:** Call `propose_write(target_file="3.1. Career Strategy & Revenue/Job Hunt \
-War Room.md", proposed_content="...", reasoning="...")` as a tool invocation, THEN mention it \
+**Correct behavior:** Call `propose_write(target_file="Job Hunt War Room.md", proposed_content="...", reasoning="...")` as a tool invocation, THEN mention it \
 in your response.
 **Wrong behavior:** Writing "I proposed updating the Job Hunt War Room" in your text without \
 actually calling the tool.

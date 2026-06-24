@@ -140,8 +140,34 @@ llm_with_tools = llm.bind_tools(tools)
 def call_model(state: CareerAgentState) -> dict:
     """Invoke the LLM with the current message history."""
     messages = state["messages"]
+    
+    # Filter out dangling tool calls from interrupted graph executions
+    # to prevent OpenAI "Error code: 400" (missing tool response).
+    cleaned_messages = list(messages)
+    for i in range(len(cleaned_messages)):
+        msg = cleaned_messages[i]
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            # Look ahead for matching ToolMessage
+            has_responses = True
+            for tc in msg.tool_calls:
+                tc_id = tc["id"]
+                found = False
+                for j in range(i + 1, len(cleaned_messages)):
+                    next_msg = cleaned_messages[j]
+                    if getattr(next_msg, "tool_call_id", None) == tc_id:
+                        found = True
+                        break
+                if not found:
+                    has_responses = False
+                    break
+            
+            if not has_responses:
+                # Strip the tool_calls since they were interrupted
+                from langchain_core.messages import AIMessage
+                cleaned_messages[i] = AIMessage(content=msg.content or "(tool calls dropped due to interruption)")
+
     career_tracer.llm_call()
-    response = llm_with_tools.invoke(messages)
+    response = llm_with_tools.invoke(cleaned_messages)
 
     # Trace tool calls or text response
     if hasattr(response, "tool_calls") and response.tool_calls:

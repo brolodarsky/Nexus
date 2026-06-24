@@ -17,7 +17,9 @@ MASTER_RESUME_PATH = RESUMES_PATH / "Resume - Master.md"
 
 # ── Shared Infrastructure ────────────────────────────────────────────────────
 ask_librarian = ask_librarian_escalation
-propose_write = get_propose_write_tool("career_agent")
+
+relative_career_path = str(CAREER_DOMAIN_PATH.relative_to(VAULT_PATH)).replace('\\', '/')
+propose_write = get_propose_write_tool("career_agent", domain_path=relative_career_path)
 
 
 # ── Domain-Scoped Tools ──────────────────────────────────────────────────────
