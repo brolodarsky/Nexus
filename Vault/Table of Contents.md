@@ -278,6 +278,7 @@ _The Content Log & Reference_
 - **[Project MEM Billing](<file:///C:\Users\Willi\Documents\Projects\MEMBilling>):** Billing Automation. Scripts for LCSW medical billing efficiency.
 - **[[Project - Personal Portfolio Website]]**
 - **[[Project - Vault Renderer Engine]]:** Markdown-to-HTML rendering engine for premium Vault browsing.
+- **📁 [[Project - Nexus Health Startup]]:** Core planning and execution for the private, local-first AI health assistant.
 - **[Nexus Github](https://github.com/brolodarsky/Nexus)**
 
 ### 6.1.2. Agentic R&D
@@ -292,6 +293,7 @@ _The Content Log & Reference_
 	7. **[[Project - Agent Context Optimization & Changeset Automation]]**
 	8. **[[Project - Nexus Demo]]**
 	9. **[[Project - StockBot]]**
+	10. **[[Project - Health Agent]]**
 	- **[[Workshop - MCP Additions]]**
 	- **📁 Archive**
 - **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for eCommerce Silislick.com family business.

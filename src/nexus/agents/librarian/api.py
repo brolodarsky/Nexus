@@ -113,13 +113,13 @@ def log_query_run(query: str, final_state=None, error=None):
         sys.stderr.write(f"Failed to write query log: {e}\n")
 
 
-def ask_librarian(query: str, filters: dict = None) -> str:
+def ask_librarian(query: str, filters: dict = None, thread_id: str = "librarian_primary") -> str:
     """
     Entry point for the vault reader agent. Returns a string response.
     """
     librarian_tracer.agent_start(f"Query: {query[:80]}")
     try:
-        final_state = execute_vault_query(query)
+        final_state = execute_vault_query(query, thread_id=thread_id)
         last_message = final_state["messages"][-1]
         librarian_tracer.agent_end()
         return last_message.content

@@ -7,6 +7,9 @@ import sys
 from typing import TypedDict, Annotated, Sequence
 import operator
 from pathlib import Path
+import sqlite3
+
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END, START
@@ -63,7 +66,12 @@ workflow.add_edge(START, "agent")
 workflow.add_conditional_edges("agent", tools_condition)
 workflow.add_edge("tools", "agent")
 
-app = workflow.compile()
+# Set up co-located SQLite memory for the agent's checkpointer
+db_path = Path(__file__).parent / "memory.sqlite"
+conn = sqlite3.connect(db_path, check_same_thread=False)
+memory = SqliteSaver(conn)
+
+app = workflow.compile(checkpointer=memory)
 
 def _build_system_prompt() -> str:
     """

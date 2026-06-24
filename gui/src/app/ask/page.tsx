@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { askBrainStream } from "@/lib/api";
+import { askBrainStream, getChatHistory } from "@/lib/api";
 import type { TraceEvent } from "@/lib/api";
 
 // ── Types ────────────────────────────────────────────────────
@@ -143,6 +143,25 @@ export default function AskBrainPage() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, liveTrace]);
+
+  // Fetch initial chat history
+  useEffect(() => {
+    getChatHistory("default")
+      .then((history) => {
+        setMessages(
+          history.map((entry) => ({
+            role: entry.role,
+            content: entry.content,
+            agent: entry.agent,
+            domain: entry.domain,
+            confidence: entry.confidence,
+            trace: entry.trace,
+            timestamp: new Date(entry.timestamp),
+          }))
+        );
+      })
+      .catch((err) => console.error("Failed to load chat history:", err));
+  }, []);
 
   // Auto-focus input on mount
   useEffect(() => {

@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from typing import Optional
 
 from nexus.core.trace import trace_bus
+from nexus.core.chats_db import get_active_agent, set_active_agent, log_message, get_chat_history
 
 router = APIRouter()
 
@@ -104,6 +106,11 @@ async def get_agent_status():
     """Returns the status of all registered agents."""
     return AGENT_REGISTRY
 
+@router.get("/ask/history")
+async def ask_brain_history(session_id: str = "default"):
+    """Returns the chat history for a given session."""
+    return get_chat_history(session_id=session_id)
+
 
 @router.post("/ask", response_model=AskResponse)
 async def ask_brain(request: AskRequest):
@@ -116,14 +123,42 @@ async def ask_brain(request: AskRequest):
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     try:
-        from nexus.agents.router.api import route_content
-
-        result = route_content(request.query)
+        session_id = "default"
+        log_message(role="user", content=request.query, session_id=session_id)
+        
+        active_agent = get_active_agent(session_id)
+        if active_agent == "career":
+            from nexus.agents.career.api import run_career_agent
+            response = run_career_agent(content=request.query)
+            result = {"domain": "career", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
+        elif active_agent == "librarian":
+            from nexus.agents.librarian.api import ask_librarian
+            response = ask_librarian(query=request.query)
+            result = {"domain": "general", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
+        else:
+            from nexus.agents.router.api import route_content
+            result = route_content(request.query)
 
         # Determine which downstream agent actually handled the query
-        # TODO: Make dynamic to integrate all agents
         routed_domain = result.get("domain", "general")
         agent_name = "career" if routed_domain == "career" else "librarian"
+        
+        response_text = result.get("response", "")
+        if "[HANDOFF]" in response_text:
+            set_active_agent(None, session_id)
+            response_text = response_text.replace("[HANDOFF]", "").strip()
+        else:
+            set_active_agent(agent_name, session_id)
+
+        log_message(
+            role="assistant",
+            content=response_text,
+            agent=agent_name,
+            domain=routed_domain,
+            confidence=result.get("confidence"),
+            trace=[],
+            session_id=session_id
+        )
 
         # Update timestamps in the registry
         now = datetime.now(timezone.utc).isoformat()
@@ -134,7 +169,7 @@ async def ask_brain(request: AskRequest):
                 agent["last_run"] = now
 
         return AskResponse(
-            response=result.get("response", ""),
+            response=response_text,
             agent=agent_name,
             domain=routed_domain,
             confidence=result.get("confidence"),
@@ -152,18 +187,42 @@ async def ask_brain(request: AskRequest):
 
 def _run_pipeline(query: str, event_queue: queue.Queue):
     """
-    Runs route_content() synchronously in a background thread.
+    Runs route_content() or active agent synchronously in a background thread.
     Pushes the final result (or error) into the queue as a special event.
     Trace events are fanned out via the global trace_bus subscription
     set up by the SSE generator.
     """
-    try:
-        from nexus.agents.router.api import route_content
+    session_id = "default"
+    log_message(role="user", content=query, session_id=session_id)
+    
+    trace_events = []
+    def _on_trace(evt):
+        trace_events.append(evt)
+    unsub = trace_bus.subscribe(_on_trace)
 
-        result = route_content(query)
+    try:
+        active_agent = get_active_agent(session_id)
+        if active_agent == "career":
+            from nexus.agents.career.api import run_career_agent
+            response = run_career_agent(content=query)
+            result = {"domain": "career", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
+        elif active_agent == "librarian":
+            from nexus.agents.librarian.api import ask_librarian
+            response = ask_librarian(query=query)
+            result = {"domain": "general", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
+        else:
+            from nexus.agents.router.api import route_content
+            result = route_content(query)
 
         routed_domain = result.get("domain", "general")
         agent_name = "career" if routed_domain == "career" else "librarian" # TODO: Generalize 
+        
+        response_text = result.get("response", "")
+        if "[HANDOFF]" in response_text:
+            set_active_agent(None, session_id)
+            response_text = response_text.replace("[HANDOFF]", "").strip()
+        else:
+            set_active_agent(agent_name, session_id)
 
         now = datetime.now(timezone.utc).isoformat()
         for agent in AGENT_REGISTRY:
@@ -171,10 +230,20 @@ def _run_pipeline(query: str, event_queue: queue.Queue):
                 agent["last_run"] = now
             if agent["name"] == agent_name:
                 agent["last_run"] = now
+                
+        log_message(
+            role="assistant",
+            content=response_text,
+            agent=agent_name,
+            domain=routed_domain,
+            confidence=result.get("confidence"),
+            trace=trace_events,
+            session_id=session_id
+        )
 
         event_queue.put({
             "type": "done",
-            "response": result.get("response", ""),
+            "response": response_text,
             "agent": agent_name,
             "domain": routed_domain,
             "confidence": result.get("confidence"),
@@ -187,6 +256,8 @@ def _run_pipeline(query: str, event_queue: queue.Queue):
             "message": f"Agent execution failed: {str(e)}",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
+    finally:
+        unsub()
 
 
 @router.post("/ask/stream")

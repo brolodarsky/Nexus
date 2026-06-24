@@ -31,6 +31,16 @@ export interface AskResponse {
   timestamp: string;
 }
 
+export interface ChatHistoryEntry {
+  role: "user" | "assistant";
+  content: string;
+  agent?: string;
+  domain?: string | null;
+  confidence?: number | null;
+  trace?: any[];
+  timestamp: string;
+}
+
 export interface VaultStructureResponse {
   tree: string;
   path: string | null;
@@ -84,6 +94,10 @@ export async function askBrain(query: string): Promise<AskResponse> {
     method: "POST",
     body: JSON.stringify({ query }),
   });
+}
+
+export async function getChatHistory(sessionId: string = "default"): Promise<ChatHistoryEntry[]> {
+  return apiFetch<ChatHistoryEntry[]>(`/api/agents/ask/history?session_id=${encodeURIComponent(sessionId)}`);
 }
 
 // ── SSE Streaming Types & Client ──────────────────────────────

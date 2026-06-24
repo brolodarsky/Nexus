@@ -5,7 +5,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from nexus.agents.career.graph import career_graph, career_tracer, build_career_system_prompt
 
-def run_career_agent(content: str, summary: str = "") -> str:
+def run_career_agent(content: str, summary: str = "", thread_id: str = "career_primary") -> str:
     """
     Entry point for the Career Agent.
 
@@ -16,11 +16,11 @@ def run_career_agent(content: str, summary: str = "") -> str:
     Returns:
         The agent's final response string.
     """
-    result = run_career_agent_with_trace(content, summary)
+    result = run_career_agent_with_trace(content, summary, thread_id)
     return result["response"]
 
 
-def run_career_agent_with_trace(content: str, summary: str = "") -> dict:
+def run_career_agent_with_trace(content: str, summary: str = "", thread_id: str = "career_primary") -> dict:
     """
     Entry point with full trace. Returns response + tool call metadata.
 
@@ -44,8 +44,10 @@ def run_career_agent_with_trace(content: str, summary: str = "") -> dict:
         HumanMessage(content=user_msg),
     ]
 
+    config = {"configurable": {"thread_id": thread_id}}
+
     try:
-        final_state = career_graph.invoke({"messages": messages})
+        final_state = career_graph.invoke({"messages": messages}, config=config)
 
         tool_calls = []
         for msg in final_state["messages"]:
