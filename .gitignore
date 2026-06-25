@@ -62,8 +62,14 @@ brain-key.key
 # Local query run logs
 src/nexus/logs/
 
-# HITL transaction database (runtime state)
+# HITL transaction database and runtime state
 src/nexus/hitl.db
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Global logs
+logs/
 
 __pycache__/
 *.pyc
