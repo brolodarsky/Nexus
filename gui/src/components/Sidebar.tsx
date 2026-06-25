@@ -14,7 +14,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Mission Control", href: "/", icon: "⚡" },
   { label: "Ask Brain", href: "/ask", icon: "💬" },
   { label: "Brain Explorer", href: "/vault", icon: "🗂️" },
-  { label: "HITL Queue", href: "/hitl", icon: "🔒", disabled: true },
+  { label: "HITL Queue", href: "/hitl", icon: "🔒" },
   { label: "Audit Log", href: "/audit", icon: "📜", disabled: true },
 ];
 
@@ -49,11 +49,10 @@ export default function Sidebar() {
             <Link
               key={item.href}
               href={item.disabled ? "#" : item.href}
-              className={`sidebar-link ${isActive ? "sidebar-link-active" : ""} ${
-                item.disabled
+              className={`sidebar-link ${isActive ? "sidebar-link-active" : ""} ${item.disabled
                   ? "opacity-40 cursor-not-allowed pointer-events-none"
                   : ""
-              }`}
+                }`}
               aria-disabled={item.disabled}
               tabIndex={item.disabled ? -1 : undefined}
             >
