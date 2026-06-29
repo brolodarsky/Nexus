@@ -67,6 +67,9 @@ src/nexus/hitl.db
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
 
 # Global logs
 logs/
