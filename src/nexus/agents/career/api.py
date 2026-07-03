@@ -3,7 +3,7 @@ api.py — Public entry points for the Career Agent.
 """
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from nexus.agents.career.graph import career_graph, career_tracer, build_career_system_prompt
+from nexus.agents.career.graph import career_graph, career_tracer
 
 def run_career_agent(content: str, summary: str = "", thread_id: str = "career_primary") -> str:
     """
@@ -32,15 +32,13 @@ def run_career_agent_with_trace(content: str, summary: str = "", thread_id: str 
         dict with keys: response (str), tool_calls (list of {name, args} dicts)
     """
     career_tracer.agent_start(f"DPFH hydration + query")
-    system_prompt = build_career_system_prompt()
-    career_tracer.info("System prompt hydrated with live Vault data")
+    career_tracer.info("Query received")
 
     user_msg = content
     if summary:
         user_msg = f"[Router Summary: {summary}]\n\n{content}"
 
     messages = [
-        SystemMessage(content=system_prompt),
         HumanMessage(content=user_msg),
     ]
 

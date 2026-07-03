@@ -28,6 +28,7 @@ from langchain_openai import ChatOpenAI
 from nexus.core.constants import AI_MODEL, VAULT_PATH, IGNORE_DIRS
 from nexus.core.trace import AgentTracer, _truncate, RESULT_TRUNCATE_LEN
 from nexus.agents.career.prompts import CAREER_SYSTEM_PROMPT
+from nexus.shared_tools.summarizer import summarize_conversation
 
 # ── Tracer ───────────────────────────────────────────────────────────────────
 career_tracer = AgentTracer("CareerAgent", color="cyan")
@@ -57,6 +58,7 @@ DPFH_FILES = {
 class CareerAgentState(TypedDict):
     """State that flows through the career agent graph."""
     messages: Annotated[Sequence[BaseMessage], operator.add]
+    summary: str
 
 
 # ── DPFH: Deterministic Pre-flight Hydration ─────────────────────────────────
@@ -141,6 +143,14 @@ def call_model(state: CareerAgentState) -> dict:
     """Invoke the LLM with the current message history."""
     messages = state["messages"]
     
+    # Build ephemeral system prompt
+    system_prompt_content = build_career_system_prompt()
+    if state.get("summary"):
+        system_prompt_content += f"\n\n--- Conversation Summary ---\n{state['summary']}"
+        
+    ephemeral_sys_msg = SystemMessage(content=system_prompt_content)
+
+    
     # Filter out dangling tool calls from interrupted graph executions
     # to prevent OpenAI "Error code: 400" (missing tool response).
     cleaned_messages = list(messages)
@@ -166,8 +176,11 @@ def call_model(state: CareerAgentState) -> dict:
                 from langchain_core.messages import AIMessage
                 cleaned_messages[i] = AIMessage(content=msg.content or "(tool calls dropped due to interruption)")
 
+    # Prepend the ephemeral system prompt for this LLM invocation only
+    messages_for_llm = [ephemeral_sys_msg] + cleaned_messages
+
     career_tracer.llm_call()
-    response = llm_with_tools.invoke(cleaned_messages)
+    response = llm_with_tools.invoke(messages_for_llm)
 
     # Trace tool calls or text response
     if hasattr(response, "tool_calls") and response.tool_calls:
@@ -190,16 +203,37 @@ def traced_tool_node(state: CareerAgentState) -> dict:
     return result
 
 
+def summarizer_node(state: CareerAgentState) -> dict:
+    """Compresses conversation history if it exceeds the limit."""
+    # We use the fast model for summarization
+    fast_llm = ChatOpenAI(model=AI_MODEL, temperature=0.0)
+    archive_path = CAREER_DOMAIN_PATH / "Logs" / "Conversation Archive.md"
+    
+    career_tracer.info("Checking if summarization is needed...")
+    updates = summarize_conversation(
+        state=state,
+        llm=fast_llm,
+        archive_path=archive_path,
+        max_messages=30,
+        keep_messages=10
+    )
+    if updates:
+        career_tracer.info("Conversation compressed and archived.")
+    return updates
+
+
 # ── Graph Assembly ───────────────────────────────────────────────────────────
 
 workflow = StateGraph(CareerAgentState)
 
 workflow.add_node("agent", call_model)
 workflow.add_node("tools", traced_tool_node)
+workflow.add_node("summarize", summarizer_node)
 
 workflow.add_edge(START, "agent")
-workflow.add_conditional_edges("agent", tools_condition)
+workflow.add_conditional_edges("agent", tools_condition, {"tools": "tools", "__end__": "summarize"})
 workflow.add_edge("tools", "agent")
+workflow.add_edge("summarize", END)
 
 # Set up co-located SQLite memory for the agent's checkpointer
 db_path = Path(__file__).parent / "memory.sqlite"
