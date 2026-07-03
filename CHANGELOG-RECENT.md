@@ -3,6 +3,28 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.7.0] - 2026-07-03
+
+### Added
+- Created `src/nexus/core/chats_db.py` to manage unified frontend chat history and sticky routing state.
+- Integrated LangGraph `SqliteSaver` checkpointer for working memory in `career` and `librarian` agents.
+- Created `src/nexus/shared_tools/summarizer.py` with `summarize_conversation` for pruning and summarizing short-term recall.
+- Added `summarizer_node` to `src/nexus/agents/career/graph.py` to compress working memory on the fly.
+
+### Changed
+- Updated `src/nexus/api/routers/agents.py` to persist chat history and implement sticky routing for active agents.
+- Updated Next.js frontend (`AskBrainPage`) to fetch chat history on mount.
+- Refactored Career Agent (`api.py` and `graph.py`) to build the system prompt ephemerally inside `call_model`, preventing duplication bugs in the checkpointer state.
+- Refactored `.gitignore` to explicitly ignore `*.db`, `*.db-shm`, and `*.db-wal` files and untracked existing tracked db files (`logs/chats.db` and `src/nexus/agents/career/memory.sqlite`).
+- Refactored `read_note` logic across domain agents. Moved bounded path resolution and fuzzy-searching natively into `vault_reader.read_note_content`.
+- Extracted LangChain tool wrapper into `shared.py`'s `get_read_note_tool` factory function.
+- Updated `AGENTS.md` Rule 6 to explicitly clarify architectural boundaries between pure Python data access layers (like `vault_reader.py`) and agentic `@tool` wrappers.
+
+### Fixed
+- Fixed an issue where the Career Agent would crash with an OpenAI `invalid_request_error` (400) due to dangling tool calls in the LangGraph state checkpoint after interruptions.
+- Hardened the `propose_write` tool by resolving paths dynamically based on domain scopes and gracefully de-duplicating path nesting, preventing the creation of redundant directories outside of the Vault (such as in `PROJECT_ROOT`).
+- Updated the career agent prompt to use this new simplified pathing behavior.
+
 ## [2.6.0] - 2026-06-22
 
 ### Added
@@ -54,17 +76,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Removed
 - Deleted `requirements.txt` in favor of PEP-621 `pyproject.toml` management.
 - Removed legacy `sys.path.insert()` and `sys.path.append()` hacks used for standalone script execution.
-
-## [2.4.0] - 2026-06-04
-
-### Changed
-- Add real-time console tracing to all agents (Router, Career, Librarian, Email) via new `core/trace.py` AgentTracer. Replace interactive 1/2/3 menu in `main.py` with a persistent chat REPL that never clears the console.
-- Refactored entire agent swarm architecture (Router, Email, Career, Librarian) into modular `api.py`, `graph.py`, `tools.py` structure.
-- Globalized pure Python vault filesystem I/O operations into `engine/shared_tools/vault_reader.py`.
-- Extracted shared cross-agent @tool wrappers (e.g. `ask_librarian_escalation`, `propose_write`) into `engine/shared_tools/shared.py`.
-- Updated all API routes and CLI tools to consume agents strictly via their public `api.py` boundaries.
-- Refactor career agent to move tools from `agent.py` to a dedicated `tools.py` file, matching other agents' structure and improving separation of concerns.
-- Updated `generate_obsidian_note` and `project_work` skills to enforce the new canonical project template structure (Overview, Current State, Architecture, Standing Guidelines, Build Log, Roadmap).
-
-### Removed
-- Deleted legacy monolithic `engine/tools/vault_tools.py` and `engine/tools/` directory.

@@ -93,17 +93,41 @@ def _parse_frontmatter_tags(content: str) -> list:
     return []
 
 
-def read_note_content(note_path: str) -> str:
-    """Reads the contents of a specific note or file in the Vault."""
+def read_note_content(note_path: str, domain_path: Optional[str] = None) -> str:
+    """Reads the contents of a specific note or file in the Vault.
+    
+    Args:
+        note_path: The file name or relative path.
+        domain_path: Optional path relative to Vault to restrict search and resolution.
+    """
+    search_root = (VAULT_PATH / domain_path) if domain_path else VAULT_PATH
+    
     if os.path.isabs(note_path):
         target_path = Path(note_path)
     else:
-        target_path = VAULT_PATH / note_path
+        # If domain_path is provided, try relative to domain first
+        target_path = search_root / note_path
+        if not target_path.exists() and not target_path.with_suffix('.md').exists() and domain_path:
+            # Fall back to relative to VAULT_PATH in case agent gave vault-relative path
+            vault_target = VAULT_PATH / note_path
+            if vault_target.exists() or vault_target.with_suffix('.md').exists():
+                target_path = vault_target
+
         if not target_path.exists():
             if not target_path.name.endswith('.md'):
                 target_path = target_path.with_suffix('.md')
             
     if target_path.exists() and target_path.is_file():
+        # Boundary check if domain_path is provided
+        if domain_path:
+            try:
+                resolved_target = target_path.resolve()
+                resolved_domain = search_root.resolve()
+                if not resolved_target.is_relative_to(resolved_domain):
+                    return f"Error: Cannot read {note_path}. Restricted to the {domain_path} domain."
+            except Exception:
+                pass
+                
         try:
             with open(target_path, 'r', encoding='utf-8') as f:
                 try:
@@ -119,7 +143,7 @@ def read_note_content(note_path: str) -> str:
         base_name += '.md'
         
     found_paths = []
-    for root, dirs, files in os.walk(VAULT_PATH):
+    for root, dirs, files in os.walk(search_root):
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
             
         for file in files:
@@ -127,7 +151,8 @@ def read_note_content(note_path: str) -> str:
                 found_paths.append(Path(root) / file)
                 
     if not found_paths:
-        return f"File not found: {note_path}. Try using search to find the correct path."
+        scope = f" in {domain_path}" if domain_path else ""
+        return f"File not found{scope}: {note_path}. Try using search to find the correct path."
     elif len(found_paths) == 1:
         try:
             with open(found_paths[0], 'r', encoding='utf-8') as f:
@@ -137,7 +162,8 @@ def read_note_content(note_path: str) -> str:
             return f"Error reading file {found_paths[0]}: {str(e)}"
     else:
         rel_paths = [str(p.relative_to(VAULT_PATH)) for p in found_paths]
-        return f"Multiple files found for {note_path}. Please be more specific. Matches:\n" + "\n".join(rel_paths)
+        scope = f" in {domain_path}" if domain_path else ""
+        return f"Multiple files found for {note_path}{scope}. Please be more specific. Matches:\n" + "\n".join(rel_paths)
 
 
 def search_within(keyword: str, root_path: Optional[str] = None, tags: Optional[List[str]] = None) -> str:

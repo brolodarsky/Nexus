@@ -238,6 +238,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `src/nexus/agents/router/agent.py` | Content Router Agent. LangGraph classifier that fetches context via tools and routes incoming content to domain agents. | `python src/nexus/agents/router/agent.py` |
 | `src/nexus/agents/career/agent.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python src/nexus/agents/career/agent.py` |
 | `src/nexus/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`, `get_vault_structure`). Supports targeted subtree search and frontmatter tag filtering. | N/A |
+| `src/nexus/shared_tools/summarizer.py` | Shared LangGraph node function for compressing conversation history into Short-Term Recall and Deep Recall archives. | N/A (library module) |
 | `src/nexus/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
 | `src/nexus/core/chats_db.py` | SQLite-backed persistent UI chat history and sticky session state. | N/A (library module) |
 | `src/nexus/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve (write to disk), reject. | Via GUI or API |

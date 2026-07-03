@@ -4,11 +4,12 @@ Provides functions to read notes, search the career domain, check the master res
 ask the librarian for cross-domain queries, and propose writes to the HITL queue.
 """
 from pathlib import Path
+import os
 from langchain_core.tools import tool
 
-from nexus.core.constants import VAULT_PATH
+from nexus.core.constants import VAULT_PATH, IGNORE_DIRS
 from nexus.shared_tools.vault_reader import read_note_content, search_within
-from nexus.shared_tools.shared import ask_librarian_escalation, get_propose_write_tool
+from nexus.shared_tools.shared import ask_librarian_escalation, get_propose_write_tool, get_read_note_tool
 
 # ── Constants ────────────────────────────────────────────────────────────────
 CAREER_DOMAIN_PATH = VAULT_PATH / "3. Operations & Wealth" / "3.1. Career Strategy & Revenue"
@@ -24,22 +25,7 @@ propose_write = get_propose_write_tool("career_agent", domain_path=relative_care
 
 # ── Domain-Scoped Tools ──────────────────────────────────────────────────────
 
-@tool
-def read_note(note_path: str) -> str:
-    """Read a specific note from the career domain. Provide the relative path from the Vault root."""
-    target = VAULT_PATH / note_path
-    if not target.exists() and not target.suffix:
-        target = target.with_suffix(".md")
-        
-    try:
-        resolved_target = target.resolve()
-        resolved_career = CAREER_DOMAIN_PATH.resolve()
-        if not resolved_target.is_relative_to(resolved_career):
-            return f"Error: Cannot read {note_path}. Career Agent is restricted to the Career Strategy domain."
-    except Exception:
-        pass
-
-    return read_note_content(note_path)
+read_note = get_read_note_tool("Career Agent", domain_path=relative_career_path)
 
 
 @tool

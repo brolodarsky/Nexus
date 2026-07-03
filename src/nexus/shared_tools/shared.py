@@ -86,3 +86,27 @@ def get_propose_write_tool(agent_name: str, domain_path: str = None):
         return f"✅ Write proposed to HITL queue (Transaction #{tx_id}). Awaiting human approval."
         
     return propose_write
+
+def get_read_note_tool(agent_name: str, domain_path: str = None):
+    """
+    Factory function to create a read_note tool scoped to a specific agent's domain.
+    
+    Args:
+        agent_name: The name of the agent reading the note (e.g. "Career Agent").
+        domain_path: The Vault-relative path to the agent's primary domain folder. If None, gives global access.
+    """
+    from nexus.shared_tools.vault_reader import read_note_content
+    
+    @tool
+    def read_note(note_path: str) -> str:
+        """Read a specific note. You can provide the file name or relative path."""
+        # The vault_reader handles the robust domain boundary check and fuzzy finding natively
+        result = read_note_content(note_path, domain_path=domain_path)
+        
+        # Inject the agent's name into the boundary error message if it hit one
+        if result.startswith("Error: Cannot read") and "Restricted to" in result:
+            result = result.replace("Restricted to", f"{agent_name} is restricted to")
+            
+        return result
+            
+    return read_note
