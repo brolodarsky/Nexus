@@ -37,3 +37,27 @@ Ensure other files that reference this project are also kept up to date:
 - If a new project note is created, register it under the Active Projects section of Vault/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md.
 - If a project is completed, archived, or no longer needed, run the archive_project protocol to update To Do List.md, Table of Contents.md, and move the project file to its section-specific archive directory.
 - Update any MOCs (Map of Content) or higher-level project notes that link to or track the current project.
+
+## 5. Nexus Engine: Parent + Child Project Scope Doc Hierarchy
+
+This section applies **automatically** whenever work touches `src/nexus/`, `tools/`, `gui/`, or `.agents/`.
+
+### Folder
+All Nexus project scope docs live in:
+`Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Nexus Agentic Engine/`
+
+### Structure
+- **Parent (master scope):** `Project - Nexus Agentic Engine.md` — governs the entire engine (architecture, cross-cutting roadmap, overall Current State).
+- **Children (agent-level scope):** `Project - <AgentName>.md` — one doc per domain agent (Career, Librarian, Health, Email, etc.). New child docs will be added as new agents are built; always `list_dir` on the folder above to discover them.
+
+### Mandatory Protocol
+
+**Before starting work:**
+1. `list_dir` the project scope folder to confirm which child doc(s) are relevant (and to catch newly created ones).
+2. Read the relevant child doc(s) and skim the parent's `Overview`, `Current State`, and `Architecture` sections. These are your ground truth — they override your assumptions.
+
+**After completing work:**
+1. Update the **child doc** for the affected agent(s): move completed tasks from `Roadmap` → `Build Log`, update `Current State`, and record any architectural decisions.
+2. Update the **parent doc** if the change affects the overall engine architecture, cross-agent dependencies, or the master roadmap.
+3. If a new agent is being introduced for the first time, create its child doc following the canonical `Project - *.md` format (Overview, Current State, Architecture, Standing Guidelines, Build Log, Roadmap, Resources) and register it in `To Do List.md`.
+

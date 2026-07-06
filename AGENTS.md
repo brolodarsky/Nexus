@@ -9,6 +9,17 @@ This constitution guides **you**, the external developer/coding agent (e.g., Ant
 
 For the internal logic, architecture, and principles governing the Nexus Engine agents themselves, refer to `src/nexus/core/ENGINE_CONSTITUTION.md`.
 
+### Project Scope Docs: Ultimate Authority
+All Nexus engine work is governed by a **two-level project scope hierarchy** stored in `Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Nexus Agentic Engine/`:
+
+- **Parent (master scope):** `Project - Nexus Agentic Engine.md` — top-level architecture, roadmap, and vision for the entire engine. This is the **ultimate authority** for all engine work. Read it before starting any non-trivial engine task.
+- **Children (agent-level scope):** `Project - <AgentName>.md` (e.g., `Project - Career Agent.md`, `Project - Librarian Agent.md`, `Project - Health Agent.md`, `Project - Email Agent.md`). Each child doc governs a specific domain agent. New child docs will emerge as new agents are built — always check this folder for new entries.
+
+**Standing obligations for every Nexus engine task:**
+1. **Read first:** Before starting, open the relevant child doc (and the parent if the task is cross-cutting). Use them as the ground truth for Current State, Architecture, and Roadmap.
+2. **Update after:** After completing meaningful work, update the relevant child doc (and the parent if architecture or scope has shifted) via the `project_work` skill.
+3. **Conflict resolution:** If AGENTS.md or ENGINE_CONSTITUTION.md conflicts with a project scope doc on implementation details, the **project scope doc wins** for that agent's domain. If it conflicts on engine-wide architectural standards, raise the discrepancy before proceeding.
+
 ### Authorized Actions
 1. **Vault Context Access:** You are authorized and encouraged to read notes inside `Vault/` (e.g., career, goals, projects, learning) to align your implementations, research, and suggestions with the user's specific context, preferences, and personal style.
 2. **Tool Execution:** You are authorized to run scripts in `tools/` and run Python or Node.js commands in `src/nexus/` using the project's virtual environment (`.venv/`) to automate vault actions, sync vault data, or run test suites during your tasks.
