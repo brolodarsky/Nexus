@@ -3,6 +3,7 @@ chats_db.py — Unified UI chat persistence and Sticky Session state.
 """
 import sqlite3
 import json
+import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -16,17 +17,20 @@ def _get_conn():
 
 def init_db():
     with _get_conn() as conn:
+        
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
+            CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
+                title TEXT,
                 active_agent TEXT,
+                created_at TEXT,
                 last_updated TEXT
             )
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT,
+                conversation_id TEXT,
                 role TEXT,
                 content TEXT,
                 agent TEXT,
@@ -34,48 +38,82 @@ def init_db():
                 confidence REAL,
                 trace TEXT,
                 timestamp TEXT,
-                FOREIGN KEY(session_id) REFERENCES sessions(id)
+                FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             )
         """)
-        # Create default session if not exists
-        conn.execute(
-            "INSERT OR IGNORE INTO sessions (id, active_agent, last_updated) VALUES (?, ?, ?)",
-            ("default", None, datetime.now(timezone.utc).isoformat())
-        )
 
 init_db()
 
-def get_active_agent(session_id: str = "default") -> str | None:
+def create_conversation(title: str = "New Chat") -> str:
+    conv_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
     with _get_conn() as conn:
-        row = conn.execute("SELECT active_agent FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        conn.execute(
+            "INSERT INTO conversations (id, title, active_agent, created_at, last_updated) VALUES (?, ?, ?, ?, ?)",
+            (conv_id, title, None, now, now)
+        )
+        conn.commit()
+    return conv_id
+
+def get_conversations() -> list[dict]:
+    with _get_conn() as conn:
+        rows = conn.execute("SELECT * FROM conversations ORDER BY last_updated DESC").fetchall()
+        return [dict(r) for r in rows]
+
+def get_conversation(conversation_id: str) -> dict | None:
+    with _get_conn() as conn:
+        row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+        return dict(row) if row else None
+
+def delete_conversation(conversation_id: str):
+    with _get_conn() as conn:
+        conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+        conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        conn.commit()
+
+def update_conversation_title(conversation_id: str, title: str):
+    with _get_conn() as conn:
+        conn.execute("UPDATE conversations SET title = ? WHERE id = ?", (title, conversation_id))
+        conn.commit()
+
+def get_active_agent(conversation_id: str) -> str | None:
+    with _get_conn() as conn:
+        row = conn.execute("SELECT active_agent FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
         return row["active_agent"] if row else None
 
-def set_active_agent(agent: str | None, session_id: str = "default"):
+def set_active_agent(agent: str | None, conversation_id: str):
     with _get_conn() as conn:
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
-            "UPDATE sessions SET active_agent = ?, last_updated = ? WHERE id = ?",
-            (agent, now, session_id)
+            "UPDATE conversations SET active_agent = ?, last_updated = ? WHERE id = ?",
+            (agent, now, conversation_id)
         )
+        conn.commit()
 
-def log_message(role: str, content: str, agent: str = None, domain: str = None, confidence: float = None, trace: list = None, session_id: str = "default"):
+def log_message(role: str, content: str, agent: str = None, domain: str = None, confidence: float = None, trace: list = None, conversation_id: str = None):
+    if not conversation_id:
+        return
+    
     with _get_conn() as conn:
         now = datetime.now(timezone.utc).isoformat()
         trace_json = json.dumps(trace) if trace else None
         conn.execute("""
-            INSERT INTO messages (session_id, role, content, agent, domain, confidence, trace, timestamp)
+            INSERT INTO messages (conversation_id, role, content, agent, domain, confidence, trace, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (session_id, role, content, agent, domain, confidence, trace_json, now))
+        """, (conversation_id, role, content, agent, domain, confidence, trace_json, now))
+        
+        conn.execute("UPDATE conversations SET last_updated = ? WHERE id = ?", (now, conversation_id))
+        conn.commit()
 
-def get_chat_history(session_id: str = "default", limit: int = 50) -> list[dict]:
+def get_chat_history(conversation_id: str, limit: int = 50) -> list[dict]:
     with _get_conn() as conn:
         rows = conn.execute("""
             SELECT role, content, agent, domain, confidence, trace, timestamp 
             FROM messages 
-            WHERE session_id = ? 
+            WHERE conversation_id = ? 
             ORDER BY id ASC
             LIMIT ?
-        """, (session_id, limit)).fetchall()
+        """, (conversation_id, limit)).fetchall()
         
         history = []
         for r in rows:

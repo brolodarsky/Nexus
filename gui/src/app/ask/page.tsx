@@ -1,8 +1,16 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { askBrainStream, getChatHistory } from "@/lib/api";
-import type { TraceEvent } from "@/lib/api";
+import { 
+  askBrainStream, 
+  getChatHistory, 
+  getConversations, 
+  createConversation, 
+  deleteConversation, 
+  resetConversationRouting,
+  type Conversation,
+  type TraceEvent 
+} from "@/lib/api";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -125,28 +133,37 @@ function ThinkingPanel({
   );
 }
 
-// ── Main Page Component ──────────────────────────────────────
-
 export default function AskBrainPage() {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [liveTrace, setLiveTrace] = useState<TraceEvent[]>([]);
+  
   const liveTraceRef = useRef<TraceEvent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<(() => void) | null>(null);
 
-  // Auto-scroll to bottom when new messages arrive or trace updates
+  // Fetch conversations on mount
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, liveTrace]);
+    getConversations().then((convos) => {
+      setConversations(convos);
+      if (convos.length > 0) {
+        setActiveConvId(convos[0].id);
+      }
+    });
+  }, []);
 
-  // Fetch initial chat history
+  // Fetch messages when active conversation changes
   useEffect(() => {
-    getChatHistory("default")
+    if (!activeConvId) {
+      setMessages([]);
+      return;
+    }
+    setLoading(true);
+    getChatHistory(activeConvId)
       .then((history) => {
         setMessages(
           history.map((entry) => ({
@@ -160,13 +177,21 @@ export default function AskBrainPage() {
           }))
         );
       })
-      .catch((err) => console.error("Failed to load chat history:", err));
-  }, []);
+      .catch((err) => console.error("Failed to load chat history:", err))
+      .finally(() => setLoading(false));
+  }, [activeConvId]);
 
-  // Auto-focus input on mount
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, liveTrace]);
+
+  // Auto-focus input
   useEffect(() => {
     inputRef.current?.focus();
-  }, []);
+  }, [activeConvId]);
 
   // Clean up abort on unmount
   useEffect(() => {
@@ -175,11 +200,44 @@ export default function AskBrainPage() {
     };
   }, []);
 
+  const handleNewChat = async () => {
+    setActiveConvId(null);
+    setMessages([]);
+    inputRef.current?.focus();
+  };
+
+  const handleDeleteChat = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await deleteConversation(id);
+    const updated = conversations.filter((c) => c.id !== id);
+    setConversations(updated);
+    if (activeConvId === id) {
+      setActiveConvId(updated.length > 0 ? updated[0].id : null);
+    }
+  };
+
+  const handleResetRouting = async () => {
+    if (!activeConvId) return;
+    await resetConversationRouting(activeConvId);
+    setConversations(prev => prev.map(c => c.id === activeConvId ? { ...c, active_agent: null } : c));
+  };
+
   const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
+    async (e: React.FormEvent) => {
       e.preventDefault();
       const query = input.trim();
       if (!query || loading) return;
+
+      let targetConvId = activeConvId;
+      if (!targetConvId) {
+        // Create new conversation on first message
+        const title = query.slice(0, 30) + (query.length > 30 ? "..." : "");
+        const res = await createConversation(title);
+        targetConvId = res.conversation_id;
+        setActiveConvId(targetConvId);
+        // Refresh conversations list to show the new one
+        getConversations().then(setConversations);
+      }
 
       const userMsg: Message = {
         role: "user",
@@ -192,7 +250,7 @@ export default function AskBrainPage() {
       setLiveTrace([]);
       liveTraceRef.current = [];
 
-      const abort = askBrainStream(query, {
+      const abort = askBrainStream(query, targetConvId, {
         onTrace: (event) => {
           setLiveTrace((prev) => {
             const newTrace = [...prev, event];
@@ -220,6 +278,7 @@ export default function AskBrainPage() {
           setLoading(false);
           abortRef.current = null;
           inputRef.current?.focus();
+          getConversations().then(setConversations); // refresh to update active agent status
         },
         onError: (errorMessage) => {
           const errorMsg: Message = {
@@ -239,23 +298,76 @@ export default function AskBrainPage() {
 
       abortRef.current = abort;
     },
-    [input, loading]
+    [input, loading, activeConvId]
   );
 
-  return (
-    <div className="flex flex-col h-full max-h-screen">
-      {/* ── Header ────────────────────────────────────────── */}
-      <header className="px-8 py-6 border-b border-border-subtle shrink-0">
-        <h1 className="text-2xl font-bold tracking-tight">
-          <span className="gradient-text">Ask Brain</span>
-        </h1>
-        <p className="text-text-secondary mt-1 text-sm">
-          Queries route through the Content Router to the right domain agent.
-        </p>
-      </header>
+  const activeConv = conversations.find(c => c.id === activeConvId);
 
-      {/* ── Message Thread ────────────────────────────────── */}
-      <div
+  return (
+    <div className="flex h-full max-h-screen">
+      {/* ── Sidebar ────────────────────────────────────────── */}
+      <div className="w-64 border-r border-border-subtle bg-bg-secondary flex flex-col shrink-0">
+        <div className="p-4 border-b border-border-subtle">
+          <button 
+            onClick={handleNewChat}
+            className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors text-sm font-medium"
+          >
+            <span className="text-lg">+</span> New Chat
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {conversations.map((conv) => (
+            <div
+              key={conv.id}
+              onClick={() => setActiveConvId(conv.id)}
+              className={`group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-sm transition-colors ${
+                activeConvId === conv.id ? "bg-bg-tertiary text-text-primary" : "text-text-secondary hover:bg-bg-tertiary/50"
+              }`}
+            >
+              <div className="flex flex-col overflow-hidden">
+                <span className="truncate font-medium">{conv.title}</span>
+                <span className="text-[0.65rem] text-text-muted mt-0.5">
+                  {conv.active_agent ? `🔒 ${conv.active_agent}` : "🔀 Auto-Routing"}
+                </span>
+              </div>
+              <button 
+                onClick={(e) => handleDeleteChat(conv.id, e)}
+                className="opacity-0 group-hover:opacity-100 p-1 text-text-muted hover:text-red-400 transition-opacity"
+                title="Delete Chat"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Main Chat Area ────────────────────────────────────────── */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* ── Header ────────────────────────────────────────── */}
+        <header className="px-8 py-4 border-b border-border-subtle shrink-0 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">
+              <span className="gradient-text">{activeConv?.title || "Ask Brain"}</span>
+            </h1>
+            <p className="text-text-secondary mt-0.5 text-xs">
+              {activeConv?.active_agent 
+                ? `Locked into ${activeConv.active_agent} domain.` 
+                : "Queries route through the Content Router to the right domain agent."}
+            </p>
+          </div>
+          {activeConv?.active_agent && (
+            <button
+              onClick={handleResetRouting}
+              className="text-xs px-3 py-1.5 rounded-lg bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+            >
+              Reset Routing
+            </button>
+          )}
+        </header>
+
+        {/* ── Message Thread ────────────────────────────────── */}
+        <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-8 py-6 space-y-5"
       >
@@ -386,6 +498,7 @@ export default function AskBrainPage() {
           </button>
         </div>
       </form>
+      </div>
     </div>
   );
 }

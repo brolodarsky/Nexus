@@ -41,6 +41,14 @@ export interface ChatHistoryEntry {
   timestamp: string;
 }
 
+export interface Conversation {
+  id: string;
+  title: string;
+  active_agent: string | null;
+  created_at: string;
+  last_updated: string;
+}
+
 export interface VaultStructureResponse {
   tree: string;
   path: string | null;
@@ -89,15 +97,45 @@ export async function getAgentStatus(): Promise<AgentStatus[]> {
   return apiFetch<AgentStatus[]>("/api/agents/status");
 }
 
-export async function askBrain(query: string): Promise<AskResponse> {
+export async function askBrain(query: string, conversationId: string): Promise<AskResponse> {
   return apiFetch<AskResponse>("/api/agents/ask", {
     method: "POST",
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, conversation_id: conversationId }),
   });
 }
 
-export async function getChatHistory(sessionId: string = "default"): Promise<ChatHistoryEntry[]> {
-  return apiFetch<ChatHistoryEntry[]>(`/api/agents/ask/history?session_id=${encodeURIComponent(sessionId)}`);
+export async function getChatHistory(conversationId: string): Promise<ChatHistoryEntry[]> {
+  return apiFetch<ChatHistoryEntry[]>(`/api/agents/ask/history?conversation_id=${encodeURIComponent(conversationId)}`);
+}
+
+export async function getConversations(): Promise<Conversation[]> {
+  return apiFetch<Conversation[]>("/api/agents/ask/conversations");
+}
+
+export async function createConversation(title: string = "New Chat"): Promise<{ conversation_id: string }> {
+  return apiFetch<{ conversation_id: string }>("/api/agents/ask/conversations", {
+    method: "POST",
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function deleteConversation(conversationId: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/api/agents/ask/conversations/${conversationId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function updateConversationTitle(conversationId: string, title: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/api/agents/ask/conversations/${conversationId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function resetConversationRouting(conversationId: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/api/agents/ask/conversations/${conversationId}/reset`, {
+    method: "POST",
+  });
 }
 
 // ── SSE Streaming Types & Client ──────────────────────────────
@@ -136,6 +174,7 @@ export interface TraceEvent {
  */
 export function askBrainStream(
   query: string,
+  conversationId: string,
   callbacks: {
     onTrace: (event: TraceEvent) => void;
     onDone: (event: TraceEvent) => void;
@@ -149,7 +188,7 @@ export function askBrainStream(
       const res = await fetch(`${API_BASE}/api/agents/ask/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, conversation_id: conversationId }),
         signal: controller.signal,
       });
 

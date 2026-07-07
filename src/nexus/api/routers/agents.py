@@ -13,7 +13,11 @@ from pydantic import BaseModel
 from typing import Optional
 
 from nexus.core.trace import trace_bus
-from nexus.core.chats_db import get_active_agent, set_active_agent, log_message, get_chat_history
+from nexus.core.chats_db import (
+    get_active_agent, set_active_agent, log_message, get_chat_history,
+    create_conversation, get_conversations, get_conversation, 
+    delete_conversation, update_conversation_title
+)
 
 router = APIRouter()
 
@@ -22,6 +26,7 @@ router = APIRouter()
 
 class AskRequest(BaseModel):
     query: str
+    conversation_id: str
 
 
 class AskResponse(BaseModel):
@@ -59,7 +64,7 @@ AGENT_REGISTRY = [
     {
         "name": "career",
         "display_name": "Career Agent",
-        "status": "not_built",
+        "status": "idle",
         "last_run": None,
         "error_count": 0,
         "description": "Job tracking, resume updates, and career strategy.",
@@ -106,10 +111,40 @@ async def get_agent_status():
     """Returns the status of all registered agents."""
     return AGENT_REGISTRY
 
+@router.get("/ask/conversations")
+async def list_conversations():
+    return get_conversations()
+
+class CreateConversationRequest(BaseModel):
+    title: str = "New Chat"
+
+@router.post("/ask/conversations")
+async def create_new_conversation(req: CreateConversationRequest):
+    conv_id = create_conversation(req.title)
+    return {"conversation_id": conv_id}
+
+@router.delete("/ask/conversations/{conversation_id}")
+async def remove_conversation(conversation_id: str):
+    delete_conversation(conversation_id)
+    return {"status": "deleted"}
+
+class UpdateTitleRequest(BaseModel):
+    title: str
+
+@router.patch("/ask/conversations/{conversation_id}")
+async def update_conversation(conversation_id: str, req: UpdateTitleRequest):
+    update_conversation_title(conversation_id, req.title)
+    return {"status": "updated"}
+
+@router.post("/ask/conversations/{conversation_id}/reset")
+async def reset_conversation_routing(conversation_id: str):
+    set_active_agent(None, conversation_id)
+    return {"status": "reset"}
+
 @router.get("/ask/history")
-async def ask_brain_history(session_id: str = "default"):
-    """Returns the chat history for a given session."""
-    return get_chat_history(session_id=session_id)
+async def ask_brain_history(conversation_id: str):
+    """Returns the chat history for a given conversation."""
+    return get_chat_history(conversation_id=conversation_id)
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -123,10 +158,10 @@ async def ask_brain(request: AskRequest):
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     try:
-        session_id = "default"
-        log_message(role="user", content=request.query, session_id=session_id)
+        conversation_id = request.conversation_id
+        log_message(role="user", content=request.query, conversation_id=conversation_id)
         
-        active_agent = get_active_agent(session_id)
+        active_agent = get_active_agent(conversation_id)
         if active_agent == "career":
             from nexus.agents.career.api import run_career_agent
             response = run_career_agent(content=request.query)
@@ -145,10 +180,10 @@ async def ask_brain(request: AskRequest):
         
         response_text = result.get("response", "")
         if "[HANDOFF]" in response_text:
-            set_active_agent(None, session_id)
+            set_active_agent(None, conversation_id)
             response_text = response_text.replace("[HANDOFF]", "").strip()
         else:
-            set_active_agent(agent_name, session_id)
+            set_active_agent(agent_name, conversation_id)
 
         log_message(
             role="assistant",
@@ -157,7 +192,7 @@ async def ask_brain(request: AskRequest):
             domain=routed_domain,
             confidence=result.get("confidence"),
             trace=[],
-            session_id=session_id
+            conversation_id=conversation_id
         )
 
         # Update timestamps in the registry
@@ -185,15 +220,14 @@ async def ask_brain(request: AskRequest):
 
 # ── SSE Streaming Endpoint ───────────────────────────────────
 
-def _run_pipeline(query: str, event_queue: queue.Queue):
+def _run_pipeline(query: str, conversation_id: str, event_queue: queue.Queue):
     """
     Runs route_content() or active agent synchronously in a background thread.
     Pushes the final result (or error) into the queue as a special event.
     Trace events are fanned out via the global trace_bus subscription
     set up by the SSE generator.
     """
-    session_id = "default"
-    log_message(role="user", content=query, session_id=session_id)
+    log_message(role="user", content=query, conversation_id=conversation_id)
     
     trace_events = []
     def _on_trace(evt):
@@ -201,7 +235,7 @@ def _run_pipeline(query: str, event_queue: queue.Queue):
     unsub = trace_bus.subscribe(_on_trace)
 
     try:
-        active_agent = get_active_agent(session_id)
+        active_agent = get_active_agent(conversation_id)
         if active_agent == "career":
             from nexus.agents.career.api import run_career_agent
             response = run_career_agent(content=query)
@@ -219,10 +253,10 @@ def _run_pipeline(query: str, event_queue: queue.Queue):
         
         response_text = result.get("response", "")
         if "[HANDOFF]" in response_text:
-            set_active_agent(None, session_id)
+            set_active_agent(None, conversation_id)
             response_text = response_text.replace("[HANDOFF]", "").strip()
         else:
-            set_active_agent(agent_name, session_id)
+            set_active_agent(agent_name, conversation_id)
 
         now = datetime.now(timezone.utc).isoformat()
         for agent in AGENT_REGISTRY:
@@ -238,7 +272,7 @@ def _run_pipeline(query: str, event_queue: queue.Queue):
             domain=routed_domain,
             confidence=result.get("confidence"),
             trace=trace_events,
-            session_id=session_id
+            conversation_id=conversation_id
         )
 
         event_queue.put({
@@ -272,18 +306,18 @@ async def ask_brain_stream(request: AskRequest, req: Request):
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    event_queue: queue.Queue = queue.Queue()
+    event_queue = queue.Queue()
 
     # Subscribe to the global trace bus — push events into our queue
     unsubscribe = trace_bus.subscribe(lambda evt: event_queue.put(evt))
 
     # Kick off the pipeline in a background thread
-    thread = threading.Thread(
-        target=_run_pipeline,
-        args=(request.query, event_queue),
-        daemon=True,
+    pipeline_thread = threading.Thread(
+        target=_run_pipeline, 
+        args=(request.query, request.conversation_id, event_queue), 
+        daemon=True
     )
-    thread.start()
+    pipeline_thread.start()
 
     async def event_generator():
         try:

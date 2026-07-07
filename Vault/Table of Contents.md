@@ -130,7 +130,6 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 ### 3.1.2. Interview Prep & Technical Depth
 - **[[Interview Prep Hub]]**
 - **[[Interview Question Bank]]:** Pre-written application responses and narratives.
-- **[[Project - Lockheed Martin Interview]]:** Game plan and specific prep for the Lockheed Martin role.
 - **[[My Skills]]:** Master inventory of competencies.
 - **[[Summary - How To Stand Out To Employers Regardless of Experience]]:** Fordham Foundry panel on startup job hunting, networking, and creative outreach.
 
