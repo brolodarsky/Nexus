@@ -91,6 +91,8 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 	- **[[Protocol - Reduce Phone Use]]**
 	- **[[Protocol - Dating Grounding & Dopamine Management]]**
 	- **[[Protocol - Preemptive Rejection & The Transparency Illusion]]**
+	- **[[Protocol - Social Stamina and Behavioral Reinvention]]**
+	- **[[Profile & Maintenance - OCD Post-War Dynamics]]**
 	- **[[Cognitive Engineering Log]]**
 	- **[[Life Chronology]]**
 - **Meditation & Mindfulness:** Rituals for grounding and focus.
@@ -98,6 +100,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **📁 [Articles](obsidian://search?vault=Vault&query=path%3A"2.%20Health/2.3.%20Psych/Articles"):** Research and reference material for psychological health.
 - **📁 [Archive](obsidian://search?vault=Vault&query=path%3A"2.%20Health/2.3.%20Psych/Archive")**
 - **ACT**
+	- **[[Concept - ACT Hexaflex]]**
 
 
 ## 2.4. Nutrition
@@ -145,6 +148,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 	- **[[Cover Letter - Java Dev Focus]]**
 - **[[Doc - Fordham University eDiploma.pdf]]**
 - **[[Doc - Fordham University Transcript.pdf]]**
+- **[[Doc - High School Transcript.pdf]]**
 
 ### 3.1.4. Networking & Professional CRM
 - **[[Professional CRM]]:** Contacts, recruiters, mentors, and warm intro tracking.
@@ -203,6 +207,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **[[Car Info]]:** Persistent vehicle specifications and details.
 - **[[Maintenance Log]]:** Service history and recurring tasks for the Pilot.
 - **[[List - Pilot Remaining Maintenance]]** - Short list of car To-Do's.
+- **[[Protocol - 2005 Honda Pilot Longevity Blueprint]]**
 - **Projects**
 	- **[[Project - Pilot SRS Codes]]:** Troubleshooting and repair plan for airbag system codes.
 	- **[[Project - Pilot Maintenance Tracker]]:** Project outline for building an automated car maintenance tracker.
@@ -221,7 +226,8 @@ _Dedicated space for exploration, relationships, and pure interest._ Connection 
 - **Gift Ideas:** Running list of potential gifts for friends and family.
 - **Social Club:** Event planning and community building.
 - **[[Activities List]]**: Hobbies, sports, or experiences I want to try.
-- **Adventure Log:** Places to visit.    
+- **Adventure Log:** Places to visit.
+	- **[[List - Hiking Near Fort Lee]]**
 
 
 ## 4.2. Romance & Partnership
@@ -234,9 +240,10 @@ _Dedicated space for exploration, relationships, and pure interest._ Connection 
 ## 4.3. Culture & Inspiration
 - **[[Education Wish List]]:** Topics for voluntary study.
 - **Media Vault:** Analysis of media, film, literature.
-- **Music** - TBD
+- **Music**
+	- **[[List - NYC Venues for Deep Tech, Minimal & Romanian-Style Microhouse]]**
 - **Reading List:** Want to read & finished.
-- **[[Movie List]]:** Want to watch & favorites.
+- **[[Media Watch List]]:** Want to watch & favorites.
 - **Writing** - TBD
 
 
@@ -478,6 +485,7 @@ The dominant language for AI/ML and Agentic Workflows.
 - **Large Language Models (LLMs):** Pre-training vs. Instruction Fine-Tuning vs. RLHF.
 - **Diffusion Models:** Image and video generation (Stable Diffusion, Midjourney, Sora).
 - **Multi-Modal Models:** Vision-Language Models (VLMs) like GPT-4o, Claude 3.5 Sonnet.
+	- **[[Concept - Vision vs Language Models]]**
 - 📁 **Sources**
 
 

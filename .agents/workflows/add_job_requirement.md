@@ -11,7 +11,7 @@ description: Extracts skills from a job description (URL, PDF, or raw text) and 
 2. Format the Entry:
    - Format the extracted information into a markdown section:
      ```markdown
-     ## [[Role Name] - [Company]] <- ADD INTERNAL WIKILINK TO JOB POSTING FILE AS HEADER
+     ## [[YYYY-MM-DD - Company - Role Name]] <- ADD INTERNAL WIKILINK TO JOB POSTING FILE AS HEADER
      - **Source:** [Link or File Reference]
      - **Date Added:** [Current Date]
      - **Desired Background and Skills:**
