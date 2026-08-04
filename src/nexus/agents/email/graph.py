@@ -4,8 +4,8 @@ Uses LangGraph to orchestrate a tool-calling loop that queries the IMAP mailbox.
 """
 import os
 import sys
-from typing import TypedDict, Annotated, Sequence
-import operator
+from typing import TypedDict, Annotated, Sequence, Optional
+from langgraph.graph.message import add_messages
 
 # Add engine root to sys.path for internal imports
 
@@ -14,7 +14,7 @@ from langgraph.graph import StateGraph, END, START
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_openai import ChatOpenAI
 
-from nexus.core.constants import AI_MODEL
+from nexus.core.constants import AI_MODEL_LOW
 from nexus.core.trace import AgentTracer, _truncate, RESULT_TRUNCATE_LEN
 from nexus.agents.email.tools import fetch_email_by_uid, list_recent_emails, search_emails
 from nexus.agents.email.prompts import EMAIL_SYSTEM_PROMPT
@@ -23,12 +23,12 @@ from nexus.agents.email.prompts import EMAIL_SYSTEM_PROMPT
 email_tracer = AgentTracer("EmailAgent", color="magenta")
 
 class AgentState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], operator.add]
+    messages: Annotated[Sequence[BaseMessage], add_messages]
 
 tools = [fetch_email_by_uid, list_recent_emails, search_emails]
 tool_node = ToolNode(tools)
 
-llm = ChatOpenAI(model=AI_MODEL, temperature=0.0)
+llm = ChatOpenAI(model=AI_MODEL_LOW, temperature=0.0)
 llm_with_tools = llm.bind_tools(tools)
 
 def call_model(state: AgentState):

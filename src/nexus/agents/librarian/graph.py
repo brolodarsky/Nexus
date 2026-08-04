@@ -4,8 +4,8 @@ Uses LangGraph to orchestrate a tool-calling loop that navigates the local Vault
 """
 import os
 import sys
-from typing import TypedDict, Annotated, Sequence
-import operator
+from typing import TypedDict, Annotated, Sequence, Optional, List, Dict
+from langgraph.graph.message import add_messages
 from pathlib import Path
 import sqlite3
 
@@ -16,7 +16,7 @@ from langgraph.graph import StateGraph, END, START
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_openai import ChatOpenAI
 
-from nexus.core.constants import AI_MODEL
+from nexus.core.constants import AI_MODEL_LOW
 from nexus.core.trace import AgentTracer, _truncate, RESULT_TRUNCATE_LEN
 from nexus.agents.librarian.tools import read_toc, read_note, search_vault, get_vault_structure
 from nexus.agents.librarian.tools import get_vault_structure as _get_vault_structure_fn
@@ -26,12 +26,12 @@ from nexus.agents.librarian.prompts import SYSTEM_PROMPT
 librarian_tracer = AgentTracer("Librarian", color="green")
 
 class AgentState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], operator.add]
+    messages: Annotated[Sequence[BaseMessage], add_messages]
 
 tools = [read_toc, read_note, search_vault, get_vault_structure]
 tool_node = ToolNode(tools)
 
-llm = ChatOpenAI(model=AI_MODEL, temperature=0.0)
+llm = ChatOpenAI(model=AI_MODEL_LOW, temperature=0.0)
 llm_with_tools = llm.bind_tools(tools)
 
 def call_model(state: AgentState):

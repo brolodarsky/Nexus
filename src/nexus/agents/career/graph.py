@@ -13,7 +13,7 @@ Also implements Librarian Escalation:
 import os
 import sys
 from typing import TypedDict, Annotated, Sequence, Optional
-import operator
+from langgraph.graph.message import add_messages
 from pathlib import Path
 import sqlite3
 
@@ -25,7 +25,7 @@ from langgraph.graph import StateGraph, END, START
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_openai import ChatOpenAI
 
-from nexus.core.constants import AI_MODEL, VAULT_PATH, IGNORE_DIRS
+from nexus.core.constants import AI_MODEL_MEDIUM, AI_MODEL_LOW, VAULT_PATH, IGNORE_DIRS
 from nexus.core.trace import AgentTracer, _truncate, RESULT_TRUNCATE_LEN
 from nexus.agents.career.prompts import CAREER_SYSTEM_PROMPT
 from nexus.shared_tools.summarizer import summarize_conversation
@@ -57,7 +57,7 @@ DPFH_FILES = {
 
 class CareerAgentState(TypedDict):
     """State that flows through the career agent graph."""
-    messages: Annotated[Sequence[BaseMessage], operator.add]
+    messages: Annotated[Sequence[BaseMessage], add_messages]
     summary: str
 
 
@@ -133,7 +133,7 @@ def build_career_system_prompt() -> str:
 tools = [read_note, get_master_resume, search_career_domain, ask_librarian, propose_write]
 tool_node = ToolNode(tools)
 
-llm = ChatOpenAI(model=AI_MODEL, temperature=0.0)
+llm = ChatOpenAI(model=AI_MODEL_MEDIUM, temperature=0.0)
 llm_with_tools = llm.bind_tools(tools)
 
 
@@ -206,7 +206,7 @@ def traced_tool_node(state: CareerAgentState) -> dict:
 def summarizer_node(state: CareerAgentState) -> dict:
     """Compresses conversation history if it exceeds the limit."""
     # We use the fast model for summarization
-    fast_llm = ChatOpenAI(model=AI_MODEL, temperature=0.0)
+    fast_llm = ChatOpenAI(model=AI_MODEL_LOW, temperature=0.0)
     archive_path = CAREER_DOMAIN_PATH / "Logs" / "Conversation Archive.md"
     
     career_tracer.info("Checking if summarization is needed...")

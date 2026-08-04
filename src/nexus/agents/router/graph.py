@@ -11,7 +11,7 @@ import os
 import sys
 import time
 from typing import TypedDict, Annotated, Sequence, Literal, Optional
-import operator
+from langgraph.graph.message import add_messages
 
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -20,7 +20,7 @@ from langgraph.prebuilt import ToolNode
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 
-from nexus.core.constants import AI_MODEL
+from nexus.core.constants import AI_MODEL_LOW
 from nexus.core.trace import AgentTracer
 from nexus.agents.router.prompts import ROUTER_SYSTEM_PROMPT
 
@@ -32,7 +32,7 @@ router_tracer = AgentTracer("Router", color="yellow")
 
 class RouterState(TypedDict):
     """State that flows through the routing graph."""
-    messages: Annotated[Sequence[BaseMessage], operator.add]
+    messages: Annotated[Sequence[BaseMessage], add_messages]
     raw_content: str                     # The original content to classify
     filters: Optional[dict]              # Optional filters (domain, tag, type) passed from CLI
     domain: Optional[str]                # Classified domain: career | health | general
@@ -48,7 +48,7 @@ from nexus.agents.router.tools import fetch_emails
 tools = [fetch_emails]
 tool_node = ToolNode(tools)
 
-llm = ChatOpenAI(model=AI_MODEL, temperature=0.0)
+llm = ChatOpenAI(model=AI_MODEL_LOW, temperature=0.0)
 llm_with_tools = llm.bind_tools(tools)
 
 
