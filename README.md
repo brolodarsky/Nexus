@@ -172,7 +172,7 @@ To use the universal chat scraper, you must have ADB (Android Debug Bridge) inst
 1. **Install ADB**: On Windows, you can use Winget: `winget install Google.PlatformTools --accept-source-agreements`. Ensure the installation directory is in your system `PATH`.
 2. **Enable USB Debugging**: On your Android phone, go to Settings → Developer Options → Enable "USB Debugging".
 3. **Connect**: Connect via USB (or wireless ADB) and tap "Allow" on the phone's authorization dialog.
-4. **Run**: Open the chat you want to save on your phone's screen and run `python tools/ingest_phone.py --screens <N>`.
+4. **Run**: Open the chat you want to save on your phone's screen and run `python src/nexus/shared_tools/ingest_phone.py --screens <N>`.
 
 ---
 
@@ -182,7 +182,8 @@ This repository distinguishes between three types of "cognitive" capabilities th
 
 1. **Skills (`.agents/skills/`)**: **Mandatory Behaviors (The Laws of Physics)**. These are the fundamental rules that an AI Agent *must* follow whenever a specific trigger occurs (e.g., how to format YAML for *any* note, or when to update the changelog). They run automatically in the background.
 2. **Workflows (`.agents/workflows/`)**: **Active Procedures (The Recipes)**. These are explicit, multi-step slash commands (e.g., `/create_new_note` vs `/capture_content`) that the user calls to achieve complex outcomes. **Workflows rely on Skills.** (For example, both the `/create_new_note` and `/capture_content` workflows invoke the exact same underlying `generate_obsidian_note` skill when they need to save a file).
-3. **Tools (`tools/`)**: **Deterministic Capabilities**. These are Python scripts for repetitive, heavy-lifting tasks (like MP3 generation or folder maintenance) that are triggered manually via terminal.
+3. **Engine Runtime Tools (`src/nexus/shared_tools/`)**: **Deterministic Capabilities**. These are Python scripts for domain-specific automation (like MP3 generation or IMAP email parsing) used by the agents.
+4. **Meta Scripts (`scripts/`)**: **Repository Maintenance**. Dev/CI tools used for folder validation, releases, and backups.
 
 ### Agent Skills (Mandatory Behaviors)
 
@@ -217,18 +218,23 @@ This repository distinguishes between three types of "cognitive" capabilities th
 
 | Tool | Purpose | Usage |
 |---|---|---|
-| `youtube_transcript.py` | Downloads YouTube transcripts to text files. | `python tools/youtube_transcript.py <url>` |
-| `read_webpage.py` | Extracts clean markdown content from single webpages via trafilatura. | `python tools/read_webpage.py <url> [-o output.md]` |
-| `read_email.py` | Fetches a single email by IMAP UID and returns clean markdown. Supports Google OAuth2. | `python tools/read_email.py <uid> [-o output.md]` / `python tools/read_email.py --list-recent 10` |
-| `release.py` | Compiles `.changeset/*.md` fragments into the changelog and bumps version. | `python tools/release.py` |
-| `generate_podcast.py` | Converts a specific markdown note to MP3 via edge-tts. | `python tools/generate_podcast.py <path> [--force]` |
-| `create_folders.py` | Idempotently creates the folder structure from TOC. | `python tools/create_folders.py` |
-| `check_folders.py` | Validates Vault structure against TOC (dry-run). | `python tools/check_folders.py` |
-| `add_gitkeeps.py` | Adds `.gitkeep` to all empty folders for Git tracking. | `python tools/add_gitkeeps.py` |
-| `backup_vault.py` | Creates a timestamped local backup of the `Vault/`. | `python tools/backup_vault.py` |
-| `sync_vault.py` | Automatically commits the nested Vault repository (The Nested Heart). | `python tools/sync_vault.py` |
-| `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python tools/medical_xml_parser.py <path> <output_dir>` |
-| `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python tools/ingest_phone.py --screens 50` |
+| `youtube_transcript.py` | Downloads YouTube transcripts to text files. | `python src/nexus/shared_tools/youtube_transcript.py <url>` |
+| `read_webpage.py` | Extracts clean markdown content from single webpages via trafilatura. | `python src/nexus/shared_tools/read_webpage.py <url> [-o output.md]` |
+| `read_email.py` | Fetches a single email by IMAP UID and returns clean markdown. Supports Google OAuth2. | `python src/nexus/shared_tools/read_email.py <uid> [-o output.md]` / `python src/nexus/shared_tools/read_email.py --list-recent 10` |
+| `generate_podcast.py` | Converts a specific markdown note to MP3 via edge-tts. | `python src/nexus/shared_tools/generate_podcast.py <path> [--force]` |
+| `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python src/nexus/shared_tools/medical_xml_parser.py <path> <output_dir>` |
+| `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python src/nexus/shared_tools/ingest_phone.py --screens 50` |
+
+### Meta Scripts (`scripts/`)
+
+| Script | Purpose | Usage |
+|---|---|---|
+| `release.py` | Compiles `.changeset/*.md` fragments into the changelog and bumps version. | `python scripts/release.py` |
+| `create_folders.py` | Idempotently creates the folder structure from TOC. | `python scripts/create_folders.py` |
+| `check_folders.py` | Validates Vault structure against TOC (dry-run). | `python scripts/check_folders.py` |
+| `add_gitkeeps.py` | Adds `.gitkeep` to all empty folders for Git tracking. | `python scripts/add_gitkeeps.py` |
+| `backup_vault.py` | Creates a timestamped local backup of the `Vault/`. | `python scripts/backup_vault.py` |
+| `sync_vault.py` | Automatically commits the nested Vault repository (The Nested Heart). | `python scripts/sync_vault.py` |
 | `src/nexus/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `nexus` |
 | `src/nexus/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m nexus.evals.runner` |
 | `src/nexus/agents/router/evals/runner.py` | Deterministic evaluation of the Content Router agent logic. | `python src/nexus/agents/router/evals/runner.py` |
@@ -242,7 +248,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `src/nexus/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
 | `src/nexus/core/chats_db.py` | SQLite-backed persistent UI chat history and sticky session state. | N/A (library module) |
 | `src/nexus/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve (write to disk), reject. | Via GUI or API |
-| `resume_engine/` | PDF and DOCX rendering with page fill metrics. Outputs fill %, verdict, and room remaining after every render. | `node tools/resume_engine/render.js` |
+| `resume_engine/` | PDF and DOCX rendering with page fill metrics. Outputs fill %, verdict, and room remaining after every render. | `node src/nexus/shared_tools/resume_engine/render.js` |
 | `start.ps1` | Launches the full Nexus Control Panel (FastAPI + Next.js). | `.\start.ps1` |
 
 ### PowerShell Integration
@@ -266,7 +272,7 @@ Nexus relies on several specific architectural patterns to maintain a clean boun
 
 ### 1. Engine + Vault Separation
 The repository is split into two layers:
-- The **Engine** (`tools/`, `src/nexus/`, `.agents/`, root docs) is the public portfolio—tracked, readable, and version-controlled.
+- The **Engine** (`scripts/`, `src/nexus/`, `.agents/`, root docs) is the public portfolio—tracked, readable, and version-controlled.
 - The **Vault** (`Vault/`) is the private content layer—mostly gitignored, synced locally via Syncthing.
 
 ### 2. Git-Crypt Defense-in-Depth
@@ -280,7 +286,7 @@ While all vault content is intentionally gitignored so it never enters the repos
 - For example, large MP3 files generated by the podcast tools are gitignored and sync via Syncthing only, avoiding repo bloat while maintaining mobile access.
 
 ### 4. Agentic Config Mirror
-I maintain a mirror of the root `tools/` directory inside `Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/Agentic Config/`. This is an Obsidian-native development workflow that lets me tinker with scripts directly inside my Obsidian vault, using its linking and preview features, without breaking the production code at the repository root. Changes are manually promoted once tested.
+I maintain a mirror of the `src/nexus/shared_tools/` directory inside `Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/Agentic Config/`. This is an Obsidian-native development workflow that lets me tinker with scripts directly inside my Obsidian vault, using its linking and preview features, without breaking the production code at the repository root. Changes are manually promoted once tested.
 
 ---
 
@@ -293,12 +299,12 @@ If you want to use this as a starting point for your own system:
 4. **Keep the Engine** and continue building out new deterministic tools or agentic workflows.
 
 > [!tip] The "Nested Heart" (Optional Private Versioning)
-> Because the `Vault/` folder is explicitly gitignored in this main repository, your personal notes will not have version history by default. If you want to version-control your private thoughts without risking exposing them in your public engine fork, you can initialize a *second, nested* Git repository directly inside the `Vault/` directory (`cd Vault; git init`) and push it to a separate private remote. This repository includes a `tools/sync_vault.py` script designed to help you commit to this nested private repo automatically without causing Git context-confusion.
+> Because the `Vault/` folder is explicitly gitignored in this main repository, your personal notes will not have version history by default. If you want to version-control your private thoughts without risking exposing them in your public engine fork, you can initialize a *second, nested* Git repository directly inside the `Vault/` directory (`cd Vault; git init`) and push it to a separate private remote. This repository includes a `scripts/sync_vault.py` script designed to help you commit to this nested private repo automatically without causing Git context-confusion.
 
 ---
 
 ## Vault Maintenance
-Whenever the `Table of Contents.md` STRUCTURE is modified, run `tools/create_folders.py` to ensure the folder structure matches the plan.
+Whenever the `Table of Contents.md` STRUCTURE is modified, run `scripts/create_folders.py` to ensure the folder structure matches the plan.
 
 - Handle `.gitkeep` files: add to empty folders, remove from populated ones.
 - Orphaned folders (no matching TOC entry) should be reported, never deleted automatically.

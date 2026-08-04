@@ -15,7 +15,7 @@ description: Keep README.md, AGENTS.md, and CHANGELOG.md in sync whenever the pr
 
 **CRITICAL RULES FOR DOCUMENTATION INTEGRITY:**
 1. **AGENTS.md Maintenance:** `AGENTS.md` serves as your developer agent constitution. Do NOT compile skills, workflows, or tools into it. Keep it strictly focused on the core developer guidelines, rules, and core engine architectural principles.
-2. **README.md Manual Updates:** Whenever you add, remove, or significantly change a script in `tools/` or a workflow/skill in `.agents/`, you MUST ensure that `README.md` is updated manually to accurately reflect the changes (e.g. updating the script/tool/workflow lists).
+2. **README.md Manual Updates:** Whenever you add, remove, or significantly change a script in `src/nexus/shared_tools/` or `scripts/`, or a workflow/skill in `.agents/`, you MUST ensure that `README.md` is updated manually to accurately reflect the changes (e.g. updating the script/tool/workflow lists).
 
 **CRITICAL RULES FOR CHANGELOG (CHANGESETS):**
 1. **Never edit `CHANGELOG.md` or `CHANGELOG-RECENT.md` directly** during tasks.
@@ -30,9 +30,9 @@ Example of a changeset file (`.changeset/add-email-tool-12345.md`):
 type: patch
 ---
 ### Added
-- Integrated IMAP email client library under `tools/read_email.py`.
+- Integrated IMAP email client library under `src/nexus/shared_tools/read_email.py`.
 ### Changed
-- Refactored `tools/.secrets/` ignore rules in `.gitignore`.
+- Refactored `.secrets/` ignore rules in `.gitignore`.
 ```
 
 For scripts, update the relevant section in `README.md` under `## Scripts`. Each script entry should include:

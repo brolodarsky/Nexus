@@ -10,8 +10,8 @@ description: Parse and ingest raw medical records (PDF, XML, Images) into the Va
 
 ## Execute Automated XML Ingestion if needed.
 
-1. Use `python tools/medical_xml_parser.py <path_to_xml> <output_directory>`
-   - Example: To ingest into Mom's logs: `tools/medical_xml_parser.py Vault/HealthData_SENSITIVE.xml "Vault/2. Health/2.5. Mom's Health Tracking/Mom_Lab_Work"`
+1. Use `python src/nexus/shared_tools/medical_xml_parser.py <path_to_xml> <output_directory>`
+   - Example: To ingest into Mom's logs: `src/nexus/shared_tools/medical_xml_parser.py Vault/HealthData_SENSITIVE.xml "Vault/2. Health/2.5. Mom's Health Tracking/Mom_Lab_Work"`
 2. Verify that the markdown was generated successfully.
 
 ## Post-Processing

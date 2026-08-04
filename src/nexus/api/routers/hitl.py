@@ -64,8 +64,8 @@ async def approve_tx(tx_id: int):
     # Optional: trigger sync_vault.py or commit script
     # This might run in background, but for now we just try to call it if it exists.
     # Sync script isn't strictly required for the test to pass, but good practice.
-    # We will assume tools/sync_vault.py exists and can be run.
-    # subprocess.run(["python", "tools/sync_vault.py"])
+    # We will assume scripts/sync_vault.py exists and can be run.
+    # subprocess.run(["python", "scripts/sync_vault.py"])
 
     return {"status": "success", "message": "Transaction approved and applied"}
 

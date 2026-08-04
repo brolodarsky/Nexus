@@ -22,7 +22,7 @@ def get_current_version():
     return match.group(1)
 
 def parse_changeset_file(filepath):
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
         
     # Extract YAML frontmatter

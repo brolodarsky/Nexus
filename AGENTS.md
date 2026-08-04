@@ -22,7 +22,7 @@ All Nexus engine work is governed by a **two-level project scope hierarchy** sto
 
 ### Authorized Actions
 1. **Vault Context Access:** You are authorized and encouraged to read notes inside `Vault/` (e.g., career, goals, projects, learning) to align your implementations, research, and suggestions with the user's specific context, preferences, and personal style.
-2. **Tool Execution:** You are authorized to run scripts in `tools/` and run Python or Node.js commands in `src/nexus/` using the project's virtual environment (`.venv/`) to automate vault actions, sync vault data, or run test suites during your tasks.
+2. **Tool Execution:** You are authorized to run engine runtime scripts in `src/nexus/shared_tools/` (e.g., email fetching, podcast generation) and repository maintenance scripts in `scripts/` (e.g., releases, backups) using the project's virtual environment (`.venv/`) to automate vault actions, sync vault data, or run test suites during your tasks.
 
 ---
 
@@ -60,6 +60,7 @@ When writing code for Nexus (`src/nexus/` or `gui/`), you MUST adhere to the fol
 
 - Key principles: Git is solely for the Engine (tools, skills, workflows, project docs) and Vault structure (new sections — not individual notes). Individual notes/thoughts are encrypted and backed up locally — avoid micro-commits.
 - Changeset rule: When a changeset is required, write a small description to a new file in `.changeset/<unique-name>.md` with frontmatter `type: major|minor|patch` (see the `maintain_project_docs` skill). Never edit `CHANGELOG.md` or `CHANGELOG-RECENT.md` directly.
+- Release Workflow: When the user asks to "do a release" or "release changesets", you MUST execute the `/release` workflow logic: execute `.venv/Scripts/python.exe scripts/release.py`, commit the result with `docs(changelog): compile vX.Y.Z release from changesets`, and `git push`.
 5. The TOC is the single source of truth for Vault folder structure and the high-level concept of this entire project, but Physical Folder Structure on Disk takes precedence when resolving duplicate/split directory discrepancies to avoid breaking existing paths. Do not clutter the TOC with individual granular notes (e.g. single medical visits, individual articles, daily logs). Those should be linked and organized inside specialized "Hub" or "Map of Content" (MOC) notes (e.g., Health Summary, Auto Knowledge Base).
 6. All notes must have YAML frontmatter with aliases, tags, and type fields.
 7. Audio files are gitignored — they sync via Syncthing, not Git.

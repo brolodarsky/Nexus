@@ -5,7 +5,7 @@ description: Extracts skills from a job description (URL, PDF, or raw text) and 
 # Steps
 
 1. Extract Information:
-   - Read the provided source. If the source is a URL, use `tools/read_webpage.py` to extract the clean job description.
+   - Read the provided source. If the source is a URL, use `src/nexus/shared_tools/read_webpage.py` to extract the clean job description.
    - Extract the following fields: Role Name, Company, Core Requirements, Preferred Background, and any compensation/bonus information.
 
 2. Format the Entry:
