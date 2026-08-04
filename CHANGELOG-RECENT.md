@@ -3,6 +3,24 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.8.0] - 2026-08-04
+
+### Added
+- Multi-Conversation Chat Architecture: The Ask Brain UI now supports multiple parallel conversation threads decoupled from eternal agent memory.
+- Added CRUD API endpoints for conversations under `/api/agents/ask/conversations`.
+- `AGENTS.md`: New `Project Scope Docs: Ultimate Authority` section establishing the parent/child project scope hierarchy as the ground truth for all Nexus engine work, with read-before and update-after obligations and conflict resolution rules.
+- `project_work` skill: New §5 `Nexus Engine: Parent + Child Project Scope Doc Hierarchy` detailing the exact folder path, doc structure, and mandatory before/after protocol for reading and updating scope docs on every engine task.
+
+### Changed
+- Refactored `chats_db.py` to use a `conversations` table instead of a single `sessions` table.
+- Career Agent now receives Domain Boundary instructions and emits `[HANDOFF]` to release sticky routing locks.
+- Frontend AskBrainPage updated with a two-pane layout featuring a conversation sidebar and "Reset Routing" control.
+- Updated model constants in `src/nexus/core/constants.py` by renaming `AI_MODEL` to `AI_MODEL_LOW` and including `AI_MODEL_MEDIUM` and `AI_MODEL_HIGH`. Updated the Career Agent (`src/nexus/agents/career/graph.py`) to use `AI_MODEL_MEDIUM` for main LLM operations and `AI_MODEL_LOW` for conversation summarization, and updated all other model references across router, librarian, email agent, and eval runners to `AI_MODEL_LOW`.
+- Updated `/add_job_requirement` workflow to use chronological YYYY-MM-DD naming convention for saved job listings to better track industry trends over time.
+
+### Fixed
+- Fixed bug where `RemoveMessage` objects from `summarize_conversation` were incorrectly appended to agent states instead of deleting old messages, causing an OpenAI `BadRequestError` (stringified as `Got unknown type`). Replaced `operator.add` with LangGraph's `add_messages` across career, router, librarian, and email agents.
+
 ## [2.7.0] - 2026-07-03
 
 ### Added
@@ -49,30 +67,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Removed
 - Removed static `ENGINE_CONSTITUTION.md` and replaced it with a dynamic Python module.
 - Deleted legacy `requirements.txt`.
-
-## [2.5.0] - 2026-06-09
-
-### Added
-- Real-time agent trace streaming from the Python engine to the Next.js GUI via Server-Sent Events (SSE).
-- `POST /api/agents/ask/stream` endpoint in FastAPI that yields live trace events.
-- `TraceEventBus` pub/sub system in `engine/core/trace.py` that broadcasts `AgentTracer` events.
-- Collapsible "Thinking Panel" in the Ask Brain GUI that displays live agent tool calls, routing decisions, and LLM reasoning steps with colors and icons.
-- Persisted trace logs for past messages in the chat history.
-
-### Changed
-- Wire GUI Ask Brain page to the Content Router agent instead of calling the Librarian directly. The /api/agents/ask endpoint now routes through classify → domain dispatch, and the frontend displays which agent handled each query with domain and confidence metadata.
-- Migrated python environment management from `pip` and `python -m venv` to Astral's `uv` for improved speed and determinism.
-- Updated `AGENTS.md`, `README.md`, and `maintain_project_docs` skill to enforce `uv pip` usage.
-- Restructured `engine/` directory into a standard `src/nexus/` Python package layout.
-- Replaced `requirements.txt` with `pyproject.toml` (using `uv` and `hatchling` backend).
-- Updated all internal imports to absolute imports under the `nexus.*` namespace.
-- Replaced the standalone `python engine/main.py` command with a managed `nexus` CLI executable.
-- Updated `start.ps1` to use absolute imports (`nexus.api.main:app`) and project-root working directory.
-
-### Fixed
-- Fixed `IndentationError` in `engine/agents/email/tools.py` due to missing `try` block for `list_recent_emails`.
-- Fixed Content Router LLM hallucination where it aggressively triggered `fetch_emails` for local notes by tightening the `fetch_emails` tool docstring and router prompt.
-
-### Removed
-- Deleted `requirements.txt` in favor of PEP-621 `pyproject.toml` management.
-- Removed legacy `sys.path.insert()` and `sys.path.append()` hacks used for standalone script execution.
