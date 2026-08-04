@@ -7,7 +7,7 @@ VAULT_PATH = PROJECT_ROOT / "Vault"
 
 # AI Config
 OPENAI_API_KEY = settings.openai_api_key
-AI_MODEL = "gpt-5.4-mini"
+AI_MODEL_LOW = "gpt-5.4-mini"
 AI_MODEL_MEDIUM = "gpt-5.6-terra"
 AI_MODEL_STRONG = "gpt-5.6-sol"
 

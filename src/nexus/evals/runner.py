@@ -11,7 +11,7 @@ from typing import List, Dict, Any
 from nexus.agents.librarian.api import execute_vault_query
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from nexus.core.constants import AI_MODEL
+from nexus.core.constants import AI_MODEL_LOW
 
 # Configuration
 DATASET_PATH = Path(__file__).parent / "dataset.json"
@@ -42,7 +42,7 @@ Return a JSON object with:
 
 class EvalRunner:
     def __init__(self):
-        self.grader_llm = ChatOpenAI(model=AI_MODEL, temperature=0.0)
+        self.grader_llm = ChatOpenAI(model=AI_MODEL_LOW, temperature=0.0)
         
     def load_dataset(self) -> List[Dict]:
         with open(DATASET_PATH, 'r', encoding='utf-8') as f:
