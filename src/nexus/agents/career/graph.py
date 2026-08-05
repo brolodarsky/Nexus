@@ -133,7 +133,7 @@ def build_career_system_prompt() -> str:
 tools = [read_note, get_master_resume, search_career_domain, ask_librarian, propose_write]
 tool_node = ToolNode(tools)
 
-llm = ChatOpenAI(model=AI_MODEL_MEDIUM, temperature=0.0)
+llm = ChatOpenAI(model=AI_MODEL_MEDIUM, temperature=0.0, reasoning_effort="none")  # <-- Force reasoning off to allow tools
 llm_with_tools = llm.bind_tools(tools)
 
 
