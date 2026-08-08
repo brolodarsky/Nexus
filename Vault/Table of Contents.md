@@ -101,6 +101,8 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **📁 [Archive](obsidian://search?vault=Vault&query=path%3A"2.%20Health/2.3.%20Psych/Archive")**
 - **ACT**
 	- **[[Concept - ACT Hexaflex]]**
+- **CBT / ERP / I-CBT**
+	- **[[Concept - I-CBT vs ERP]]**
 
 
 ## 2.4. Nutrition
