@@ -57,7 +57,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 # 2. Health
 [Link - Health - Google Drive](https://drive.google.com/drive/u/0/folders/1h_0QTrXWrNzyXtcDiM8bbolaMKAYU8PG)
 ## 2.1. Fitness
-- **[[Exercise Schedule & Planning]]:** Weekly PPL split, exercise alternatives, and personal records.
+- **[[Exercise Schedule & Planning]]:** Weekly program, exercise alternatives, and personal records.
 - **[Weight Loss Tracker](https://docs.google.com/spreadsheets/d/1YSXEWa5T5EXI_4_tVPZ3-wdpv8eyu3dDTaM9VPHxe0M/edit?usp=sharing)**
 - **Cardiovascular Base:** Running/Cycling logs and endurance strategies.
 	- **[[Plan - One-Year Cardio Endurance]]**
@@ -306,6 +306,8 @@ _The Content Log & Reference_
 	- **📁 Archive**
 - **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for eCommerce Silislick.com family business.
 - **Resources:**
+	- **Anthropic**
+		- **[Claude Console](https://platform.claude.com/dashboard)**
 	- **[Codex Docs](https://developers.openai.com/codex/app)**
 	- **[Google Cloud Console](https://console.cloud.google.com/)**
 	- **[LangSmith](https://smith.langchain.com/o/d59feb9e-e33c-4313-8135-b7bfa2796c37)**

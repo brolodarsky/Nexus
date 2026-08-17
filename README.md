@@ -224,6 +224,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `generate_podcast.py` | Converts a specific markdown note to MP3 via edge-tts. | `python src/nexus/shared_tools/generate_podcast.py <path> [--force]` |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python src/nexus/shared_tools/medical_xml_parser.py <path> <output_dir>` |
 | `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python src/nexus/shared_tools/ingest_phone.py --screens 50` |
+| `export_conversation.py` | Universal JSON/JSONL chat transcript parser and formatter (supports JSON arrays, JSONL streams, ChatGPT exports, stdin piping, and local Antigravity transcripts). | `python src/nexus/shared_tools/export_conversation.py <file_or_id> [-o out.md] [-v]` |
 
 ### Meta Scripts (`scripts/`)
 
