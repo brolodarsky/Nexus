@@ -13,7 +13,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 ## 1.1. Philosophy & Personal North Star
 - **[[Goals]]**
 - **[[To Do List]]**
-- **[[Protocol - Daily Operational Rhythm]]:** Unified daily core working schedule.
+- **[[Protocol - Daily Schedule]]:** Unified daily core working schedule.
 - **[[Current Learning]]:** Active focus and active subjects.
 - **Principles & Ethics:** Core values, decision-making frameworks.
 - **The 10-Year Horizon:** Strategic goals for the longer term.
@@ -308,8 +308,10 @@ _The Content Log & Reference_
 - **Resources:**
 	- **Anthropic**
 		- **[Claude Console](https://platform.claude.com/dashboard)**
+	- **[Cloudflare Dashboard](https://dash.cloudflare.com/)**
 	- **[Codex Docs](https://developers.openai.com/codex/app)**
 	- **[Google Cloud Console](https://console.cloud.google.com/)**
+	- **[Google Workspace Admin](https://admin.google.com/u/2/ac/home?hl=en)**
 	- **[LangSmith](https://smith.langchain.com/o/d59feb9e-e33c-4313-8135-b7bfa2796c37)**
 	- **[OpenAI API](https://developers.openai.com/)**
 		- **[Documentation](https://developers.openai.com/api/docs)**
