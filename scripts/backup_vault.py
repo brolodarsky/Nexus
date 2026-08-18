@@ -2,16 +2,23 @@ import os
 import shutil
 import datetime
 import argparse
+import sys
 from pathlib import Path
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # This script creates a timestamped backup of your Vault and Tools to an external drive.
-# Usage: python tools/backup_vault.py --dest "D:/MyBackups"
+# Usage: python scripts/backup_vault.py --dest "D:/MyBackups"
 
 def backup(destination_root):
     # Root repo directory (one level up from where this script lives)
     repo_dir = Path(__file__).parent.parent
     vault_dir = repo_dir / "Vault"
-    tools_dir = repo_dir / "tools"
     
     # Create timestamped folder
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -24,15 +31,19 @@ def backup(destination_root):
         backup_path.mkdir(parents=True, exist_ok=True)
         
         # Copy Vault
-        print(f"📦 Copying Vault...")
-        shutil.copytree(vault_dir, backup_path / "Vault", dirs_exist_ok=True)
+        if vault_dir.exists():
+            print(f"📦 Copying Vault...")
+            shutil.copytree(vault_dir, backup_path / "Vault", dirs_exist_ok=True)
         
-        # Copy tools
-        print(f"🛠️  Copying tools...")
-        shutil.copytree(tools_dir, backup_path / "tools", dirs_exist_ok=True)
+        # Copy code & script folders
+        for folder in ["src", "scripts", "gui"]:
+            target_dir = repo_dir / folder
+            if target_dir.exists():
+                print(f"🛠️  Copying {folder}...")
+                shutil.copytree(target_dir, backup_path / folder, dirs_exist_ok=True)
         
         # Copy config files
-        config_files = [".gitignore", "AGENTS.md", "requirements.txt", "README.md"]
+        config_files = [".gitignore", "AGENTS.md", "pyproject.toml", "uv.lock", "README.md"]
         for f in config_files:
             if (repo_dir / f).exists():
                 shutil.copy2(repo_dir / f, backup_path / f)

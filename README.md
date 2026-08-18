@@ -234,8 +234,8 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | `create_folders.py` | Idempotently creates the folder structure from TOC. | `python scripts/create_folders.py` |
 | `check_folders.py` | Validates Vault structure against TOC (dry-run). | `python scripts/check_folders.py` |
 | `add_gitkeeps.py` | Adds `.gitkeep` to all empty folders for Git tracking. | `python scripts/add_gitkeeps.py` |
-| `backup_vault.py` | Creates a timestamped local backup of the `Vault/`. | `python scripts/backup_vault.py` |
-| `sync_vault.py` | Automatically commits the nested Vault repository (The Nested Heart). | `python scripts/sync_vault.py` |
+| `backup_vault.py` | Creates a timestamped local backup of the `Vault/` and code directories. | `python scripts/backup_vault.py` |
+| `sync_vault.py` | Automatically commits and pushes the nested Vault repository (The Nested Heart). | `python scripts/sync_vault.py` |
 | `src/nexus/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `nexus` |
 | `src/nexus/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m nexus.evals.runner` |
 | `src/nexus/agents/router/evals/runner.py` | Deterministic evaluation of the Content Router agent logic. | `python src/nexus/agents/router/evals/runner.py` |
