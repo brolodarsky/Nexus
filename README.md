@@ -231,9 +231,6 @@ This repository distinguishes between three types of "cognitive" capabilities th
 | Script | Purpose | Usage |
 |---|---|---|
 | `release.py` | Compiles `.changeset/*.md` fragments into the changelog and bumps version. | `python scripts/release.py` |
-| `create_folders.py` | Idempotently creates the folder structure from TOC. | `python scripts/create_folders.py` |
-| `check_folders.py` | Validates Vault structure against TOC (dry-run). | `python scripts/check_folders.py` |
-| `add_gitkeeps.py` | Adds `.gitkeep` to all empty folders for Git tracking. | `python scripts/add_gitkeeps.py` |
 | `sync_vault.py` | Automatically commits and pushes the nested Vault repository (The Nested Heart). | `python scripts/sync_vault.py` |
 | `src/nexus/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `nexus` |
 | `src/nexus/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m nexus.evals.runner` |
@@ -304,9 +301,10 @@ If you want to use this as a starting point for your own system:
 ---
 
 ## Vault Maintenance
-Whenever the `Table of Contents.md` STRUCTURE is modified, run `scripts/create_folders.py` to ensure the folder structure matches the plan.
+Whenever the `Table of Contents.md` structure or folder taxonomy is modified:
 
-- Handle `.gitkeep` files: add to empty folders, remove from populated ones.
+- Keep folder structure synchronized with Table of Contents H1/H2 sections.
+- Handle `.gitkeep` files: ensure empty folders contain `.gitkeep` for Git tracking.
 - Orphaned folders (no matching TOC entry) should be reported, never deleted automatically.
 
 ---
