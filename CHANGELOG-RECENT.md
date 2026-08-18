@@ -3,6 +3,35 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.9.0] - 2026-08-18
+
+### Added
+- Created `src/nexus/shared_tools/export_conversation.py` as a universal JSON/JSONL chat transcript parser and formatter (supporting generic JSON message lists, JSONL streams, ChatGPT exports, stdin piping, and local Antigravity transcripts).
+- Added CLI capabilities for direct Markdown export (`-o`), Obsidian Inbox ingestion with YAML frontmatter (`-v` / `--vault-inbox`), thinking blocks accordion (`-t`), and stdout output (`--stdout`).
+- Added local conversation transcript discovery helpers (`--list`, `--latest`, UUID prefix matching).
+- Documented tool in `README.md` and `Project - Nexus Agentic Engine.md`.
+- Created `scripts/` directory to separate meta/maintenance scripts from engine runtime tools.
+- New `/release` slash command workflow added in `.agents/workflows/release.md`.
+- `release.py` now explicitly handles text encoding `errors='replace'` to avoid crashing on non-UTF-8 changeset fragments.
+- Created `src/nexus/shared_tools/` as the new home for all deterministic Python integration scripts (e.g. `read_email.py`, `generate_podcast.py`, `ingest_phone.py`).
+
+### Changed
+- Moved meta scripts `release.py`, `backup_vault.py`, `check_folders.py`, `create_folders.py`, `sync_vault.py`, and `add_gitkeeps.py` from `tools/` to the new `scripts/` directory.
+- Updated `AGENTS.md` and `README.md` to reflect the new `scripts/` directory and `/release` workflow integration.
+- Moved all engine runtime tools from the root `tools/` directory into `src/nexus/shared_tools/`.
+- Deleted the root `tools/` directory to enforce a strict boundary between repository maintenance scripts (`scripts/`) and engine components (`src/nexus/`).
+- Updated `AGENTS.md` and `README.md` to reflect the new architecture.
+- Updated slash command workflows (`/add_job_requirement`, `/capture_content`, `/distill_learning`, `/ingest_medical_record`, `/render_resume`) to point to the new `src/nexus/shared_tools/` paths.
+- `scripts/sync_vault.py`: Automatically runs `git push` after committing changes (and pushes pre-existing unpushed commits if working tree is clean). Added cross-platform UTF-8 stream handling.
+- `README.md`: Updated maintenance scripts table and sections.
+
+### Removed
+- Cleaned up obsolete temporary BLOB inspection scripts (`scripts/inspect_antigravity_db.py`, `scripts/extract_antigravity_preview.py`).
+- `scripts/backup_vault.py`: Removed obsolete backup script in favor of direct external backup tools.
+- `scripts/create_folders.py`: Removed obsolete initial folder scaffolding script.
+- `scripts/check_folders.py`: Removed obsolete dry-run folder checker script.
+- `scripts/add_gitkeeps.py`: Removed manual gitkeep script in favor of agentic gitkeep rules.
+
 ## [2.8.0] - 2026-08-04
 
 ### Added
@@ -42,28 +71,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Fixed an issue where the Career Agent would crash with an OpenAI `invalid_request_error` (400) due to dangling tool calls in the LangGraph state checkpoint after interruptions.
 - Hardened the `propose_write` tool by resolving paths dynamically based on domain scopes and gracefully de-duplicating path nesting, preventing the creation of redundant directories outside of the Vault (such as in `PROJECT_ROOT`).
 - Updated the career agent prompt to use this new simplified pathing behavior.
-
-## [2.6.0] - 2026-06-22
-
-### Added
-- Created `src/nexus/core/config.py` using Pydantic `BaseSettings` to serve as the centralized source of truth for environment variables.
-- Added dynamic injection of `{datetime}` and `User` to `src/nexus/core/engine_constitution.py`.
-- Installed `pydantic-settings` via `uv` and updated `requirements.txt`.
-
-### Changed
-- Refactored `src/nexus/core/constants.py`, `src/nexus/interfaces/telegram.py`, and `src/nexus/agents/email/tools.py` to replace scattered `os.getenv` calls with strongly-typed `settings` from `config.py`.
-- Moved the `.secrets` directory from `tools/.secrets` to the project root `.secrets` to align with the new `src/nexus` engine architecture and industry standards for credential management.
-- Updated `.gitignore` and `src/nexus/agents/email/tools.py` to reflect the new root `.secrets` location.
-- Refactored `AGENTS.md` to act strictly as the Builder rulebook, removing internal engine architecture principles.
-- Added Standing Guidelines to `AGENTS.md` to enforce strict file structures and centralized logging/validation for all future engine agents.
-- Migrated default package management workflow from `uv pip install` & `requirements.txt` to `uv add` and `uv.lock`.
-- Updated `AGENTS.md` and `maintain_project_docs` skill to formally deprecate `requirements.txt` in favor of `pyproject.toml`.
-
-### Fixed
-- Fixed `OPENAI_API_KEY` missing error when starting Next.js/FastAPI via `start.ps1` by explicitly injecting `.env` into `os.environ` within `src/nexus/core/config.py`.
-- Fixed execution failure in `tools/read_email.py` by removing legacy `sys.path.append` hacks and updating to the `nexus.*` import namespace.
-- Fixed double chat response bug in Nexus GUI AskBrainPage caused by React Strict Mode double-invoking state updaters
-
-### Removed
-- Removed static `ENGINE_CONSTITUTION.md` and replaced it with a dynamic Python module.
-- Deleted legacy `requirements.txt`.
