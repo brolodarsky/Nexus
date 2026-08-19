@@ -31,10 +31,8 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 ## 1.2. Personal Knowledge Management (PKM)
 - **Brain Meta:** How I tag, link, and maintain this system.
 - **Projects**
-	- **[[Project - Nexus Non-Engine Functionality Upgrades]]:** Prioritized roadmap for system improvements.
-		- 1. **[[Workshop - Dashboard Option 1 Gameplan]]**
-			- **[[Project - Section 6.2 Library Condensation]]**
 	- **[[#6.1.2. Agentic R&D|Project - Nexus Agentic Engine]]:** Multi-agent LangGraph orchestration for vault intelligence.
+	- **[[Project - Section 6.2 Library Condensation]]:** Restructuring technical library for AI Engineer focus.
 - **[[Template - New Note or Thought]]**
 - **[[Template - Capture]]** Used for capturing raw content (YouTube transcripts, podcasts, articles, etc.)
 - **[[Protocol - Brain Maintenance]]**
@@ -311,6 +309,7 @@ _The Content Log & Reference_
 	- **[Cloudflare Dashboard](https://dash.cloudflare.com/)**
 	- **[Codex Docs](https://developers.openai.com/codex/app)**
 	- **[Google Cloud Console](https://console.cloud.google.com/)**
+	- **[Google Dev Forums](https://discuss.google.dev/categories)**
 	- **[Google Workspace Admin](https://admin.google.com/u/2/ac/home?hl=en)**
 	- **[LangSmith](https://smith.langchain.com/o/d59feb9e-e33c-4313-8135-b7bfa2796c37)**
 	- **[OpenAI API](https://developers.openai.com/)**

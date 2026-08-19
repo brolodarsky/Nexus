@@ -213,6 +213,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 - `/plan_activity`: Cross-references Activities List, Date Ideas, and People Data notes to generate a structured markdown itinerary.
 - `/ask_brain`: Agentic vault search. Uses a LangGraph ReAct agent to dynamically navigate the local filesystem and returns a grounded answer with source citations. Use when you need facts from your notes without reading files manually. No indexing required.
 - `/render_resume`: Renders markdown documents (resumes, cover letters) into premium PDF and DOCX. Outputs page fill metrics (fill %, verdict, room remaining) so agents can add/trim content to optimize page utilization.
+- `/weekly_review`: Generates a weekly review memory from git history and vault diffs, and prompts the user to set explicit P0 goals for the upcoming week.
 
 ### Deterministic Tools (Scripts)
 
