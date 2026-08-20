@@ -37,7 +37,7 @@ MARGIN_BOTTOM = Inches(0.25)
 MARGIN_LEFT = Inches(0.5)
 MARGIN_RIGHT = Inches(0.5)
 
-DEFAULT_SOURCE = Path(__file__).resolve().parent.parent.parent / "Vault" / "3. Operations & Wealth" / "3.1. Career Strategy & Revenue" / "3.1.3. Professional Portfolio & Evidence" / "Resumes" / "Resume - Master.md"
+DEFAULT_SOURCE = Path(__file__).resolve().parents[4] / "Vault" / "3. Operations & Wealth" / "3.1. Career Strategy & Revenue" / "3.1.3. Professional Portfolio & Evidence" / "Resumes" / "Resume - Master.md"
 
 
 # ---------------------------------------------------------------------------

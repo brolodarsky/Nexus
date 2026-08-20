@@ -11,16 +11,16 @@ from pathlib import Path
 # falling back to whatever Python env is currently running.
 # This ensures the right binary is used even if the venv isn't shell-activated.
 _EXE_NAME   = "edge-tts.exe" if sys.platform == "win32" else "edge-tts"
-_VENV_BIN   = Path(__file__).parent.parent / ".venv" / "Scripts" / _EXE_NAME
+_VENV_BIN   = Path(__file__).resolve().parents[3] / ".venv" / "Scripts" / _EXE_NAME
 _ACTIVE_BIN = Path(sys.executable).parent / _EXE_NAME
 EDGE_TTS_BIN = str(_VENV_BIN if _VENV_BIN.exists() else _ACTIVE_BIN)
 
 # Configuration
-# Root repo directory (one level up from where this script lives)
-REPO_DIR = Path(__file__).parent.parent
+# Root repo directory
+REPO_DIR = Path(__file__).resolve().parents[3]
 # The Obsidian vault lives in the Vault subfolder
 KB_DIR = REPO_DIR / "Vault"
-HISTORY_FILE = REPO_DIR / "tools" / ".podcast_history.json"
+HISTORY_FILE = Path(__file__).resolve().parent / ".podcast_history.json"
 
 # You can change the voice. Some natural choices:
 # en-US-AriaNeural (Female, natural)

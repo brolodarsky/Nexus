@@ -8,7 +8,7 @@ const { marked } = require('marked');
 // ---------------------------------------------------------------------------
 // Scan directories for renderable documents
 // ---------------------------------------------------------------------------
-const PORTFOLIO_DIR = path.resolve(__dirname, '../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence');
+const PORTFOLIO_DIR = path.resolve(__dirname, '../../../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence');
 const RESUMES_DIR = path.join(PORTFOLIO_DIR, 'Resumes');
 const COVER_LETTERS_DIR = path.join(PORTFOLIO_DIR, 'Cover Letters');
 
@@ -195,7 +195,7 @@ async function renderToPdf(mdPath, browser) {
 // Render a single markdown file to DOCX via the Python renderer
 // ---------------------------------------------------------------------------
 function renderToDocx(mdPath) {
-    const pythonPath = path.resolve(__dirname, '../../.venv/Scripts/python.exe');
+    const pythonPath = path.resolve(__dirname, '../../../../.venv/Scripts/python.exe');
     const scriptPath = path.resolve(__dirname, 'render_docx.py');
 
     try {
@@ -209,13 +209,6 @@ function renderToDocx(mdPath) {
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
-    const files = findRenderableFiles();
-
-    if (files.length === 0) {
-        console.log('No renderable documents found.');
-        process.exit(0);
-    }
-
     // Support passing a path directly as a CLI argument (for workflow/script use)
     let selected;
     if (process.argv[2]) {
@@ -227,10 +220,17 @@ async function main() {
             process.exit(1);
         }
     } else {
+        const files = findRenderableFiles();
+
+        if (files.length === 0) {
+            console.log('No renderable documents found.');
+            process.exit(0);
+        }
+
         selected = await promptFileSelection(files);
     }
 
-    if (selected.length === 0) {
+    if (!selected || selected.length === 0) {
         process.exit(0);
     }
 

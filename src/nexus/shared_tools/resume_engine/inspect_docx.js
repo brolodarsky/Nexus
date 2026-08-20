@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const AdmZip = require('adm-zip');
 
-const docxPath = path.resolve(__dirname, '../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - William Volodarsky.docx');
+const docxPath = path.resolve(__dirname, '../../../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Resume - William Volodarsky.docx');
 const zip = new AdmZip(docxPath);
 const documentXml = zip.readAsText('word/document.xml');
 

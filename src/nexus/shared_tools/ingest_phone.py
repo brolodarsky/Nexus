@@ -31,7 +31,7 @@ from pathlib import Path
 # ──────────────────────────────────────────────
 # Constants
 # ──────────────────────────────────────────────
-VAULT_ROOT = Path(__file__).resolve().parent.parent / "Vault"
+VAULT_ROOT = Path(__file__).resolve().parents[3] / "Vault"
 INBOX_DIR = VAULT_ROOT / "0. Inbox"
 
 APP_NAMES = {
