@@ -53,6 +53,8 @@ Nexus/
 │   │   └── workflow_creator/         # Create & improve agent workflows
 │   └── workflows/              # Structured procedures (slash commands)
 │       ├── add_job_requirement.md    # Job criteria extraction
+│       ├── ask_brain.md              # Semantic vault search
+│       ├── audit_career.md           # Career document drift audit
 │       ├── audit_inbox.md            # Zettelkasten inbox sorting
 │       ├── capture_content.md        # Raw external content capture
 │       ├── create_new_note.md        # Obsidian note creation
@@ -60,9 +62,14 @@ Nexus/
 │       ├── distill_learning.md       # Atomic note synthesis
 │       ├── ingest_medical_record.md  # Parse raw medical data
 │       ├── plan_activity.md          # Itinerary generation
-│       ├── ask_brain.md              # Semantic vault search
+│       ├── release.md                # Release compilation & changelog bump
 │       └── render_resume.md          # PDF resume rendering
+├── .changeset/                 # Release fragments
 ├── .venv/                      # Python virtual environment (not committed)
+├── scripts/                    # Maintenance & release utilities
+│   ├── audit_career_drift.py   # Tier-1 career document drift auditor
+│   ├── release.py              # Changeset compiler & release automation
+│   └── sync_vault.py           # Nested Vault repository git synchronization
 ├── Vault/                      # All Brain content lives here
 │   ├── .obsidian/              # Obsidian settings
 │   ├── .stfolder/              # Syncthing folder
@@ -149,8 +156,8 @@ Nexus/
 │       ├── email_tool.py        # Core email fetching logic
 │       └── vault_tools.py       # Vault navigation tools
 ├── start.ps1                   # Launches backend + frontend Control Panel
-├── requirements.txt            # Pinned Python dependencies
-└── .gitignore
+├── pyproject.toml              # UV dependency configuration
+└── uv.lock                     # Reproducible dependency lock
 ```
 
 ---
@@ -162,10 +169,10 @@ First time on a new machine:
 ```powershell
 uv venv
 .venv\Scripts\Activate.ps1
-uv pip install -r requirements.txt
+uv sync
 ```
 
-> The `.venv/` folder is excluded from Git. `requirements.txt` is the source of truth for dependencies.
+> The `.venv/` folder is excluded from Git. `pyproject.toml` and `uv.lock` are the source of truth for dependencies.
 
 ### Phone Chat Ingestion Setup (`ingest_phone.py`)
 To use the universal chat scraper, you must have ADB (Android Debug Bridge) installed and your phone configured:
@@ -206,6 +213,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 
 - `/capture_content`: Format, move, or clean up a raw capture note to serve as an inbox item for future knowledge synthesis.
 - `/add_job_requirement`: Automates extracting skills from a job description (PDF, URL, Markdown, etc.).
+- `/audit_career`: Runs cross-document drift audit across all career strategy, resume, and portfolio documents.
 - `/audit_inbox`: Sorts raw notes and bullet points from the Brain Inbox and Quick Capture into the main Zettelkasten structure.
 - `/create_new_note`: End-to-end workflow for creating, moving, and formatting original internal thoughts into the Vault.
 - `/create_project`: Consolidates rough notes or ideas into a structured project note, complete with extracted tasks and materials.
@@ -233,6 +241,7 @@ This repository distinguishes between three types of "cognitive" capabilities th
 
 | Script | Purpose | Usage |
 |---|---|---|
+| `audit_career_drift.py` | Performs deterministic Tier-1 drift audit across the 3.1 career cluster. | `python scripts/audit_career_drift.py` |
 | `release.py` | Compiles `.changeset/*.md` fragments into the changelog and bumps version. | `python scripts/release.py` |
 | `sync_vault.py` | Automatically commits and pushes the nested Vault repository (The Nested Heart). | `python scripts/sync_vault.py` |
 | `src/nexus/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `nexus` |
