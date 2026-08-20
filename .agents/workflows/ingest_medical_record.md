@@ -1,32 +1,34 @@
 ---
-description: Parse and ingest raw medical records (PDF, XML, Images) into the Vault
+description: Parse and ingest raw medical records (PDF, XML, Images) into the Vault.
 ---
 
-# Identify the Correct Tools
+# Steps
 
-1. **For PDF & Images:** Explain to the user that they should use the **Docling web demo** for high-fidelity extraction of complex tables. Tell the user to upload the file to Docling online, export the result as Markdown, and provide it to you.
-2. **For HL7 CDA XML:** If the user has provided a raw XML file or it's in the Vault, proceed to the next step to execute the automated python parser.
-3. **For other formats:** Provide suggestions to user.
+1. Identify Format and Ingestion Pathway:
+   - For PDF & Images: Direct user to the Docling web demo for high-fidelity table extraction; accept the exported markdown.
+   - For HL7 CDA XML: Run the automated parser script in step 2.
+   - For other formats: Evaluate text extraction options and confirm approach with user.
 
-## Execute Automated XML Ingestion if needed.
+2. Ingest and Parse Data:
+   - For XML files, run:
+     ```bash
+     .venv/Scripts/python.exe src/nexus/shared_tools/medical_xml_parser.py <path_to_xml> <output_directory>
+     ```
+     - Example: `.venv/Scripts/python.exe src/nexus/shared_tools/medical_xml_parser.py Vault/HealthData_SENSITIVE.xml "Vault/2. Health/2.5. Mom's Health Tracking/Mom_Lab_Work"`
+   - Verify generated markdown for data completeness.
 
-1. Use `python src/nexus/shared_tools/medical_xml_parser.py <path_to_xml> <output_directory>`
-   - Example: To ingest into Mom's logs: `src/nexus/shared_tools/medical_xml_parser.py Vault/HealthData_SENSITIVE.xml "Vault/2. Health/2.5. Mom's Health Tracking/Mom_Lab_Work"`
-2. Verify that the markdown was generated successfully.
+3. Standardize Note and Frontmatter:
+   - Apply the `generate_obsidian_note` skill to ensure valid structure and YAML frontmatter:
+     ```yaml
+     ---
+     aliases: ["Date - Report Name"]
+     tags: [health, lab_work, patient_name]
+     type: log
+     date: YYYY-MM-DD
+     ---
+     ```
+   - Standardize filename using convention `YYYY-MM-DD - Type - Extras.md` (e.g., `2026-04-07 - Clinical Summary - Encounters and Diagnoses.md`).
 
-## Post-Processing
-
-1. Validate the generated format. Ensure it includes standard Frontmatter:
-   ```yaml
-   ---
-   aliases: ["Date - Report Name"]
-   tags: [health, lab_work, patient_name]
-   type: log
-   date: YYYY-MM-DD
-   ---
-   ```
-2. Standardize the File Name: All ingested labs, visits, and logs must follow a consistent naming convention: `YYYY-MM-DD - Type - Extras.md`. Rename the file if necessary.
-   - Example: `2026-04-07 - Clinical Summary - Encounters and Diagnoses.md`
-   - Example: `2025-12-11 - Bloodwork - CBC and Metabolic Panel.md`
-3. DELETE the raw file. Once ingestion is successful and verified, use the command line to delete the original XML, PDF, or Image file to avoid clutter.
-4. Check the patient's `Health Summary.md` (e.g. `Mom's Health Summary.md`) and provide an entry linking to the new lab work/logs.
+4. Update Patient Dashboard and Clean Up:
+   - Open patient's `Health Summary.md` (e.g., `Health Summary.md` or `Mom's Health Summary.md`) and add a wiki-link to the new record under the relevant log section.
+   - Prompt user for confirmation before deleting the raw source file (XML, PDF, or image) to prevent vault clutter.

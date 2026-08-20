@@ -33,15 +33,14 @@ description: [What this workflow does and when to use it. Cross-reference altern
 2. Step Name: ...
 ```
 
-### Key rules
+### Key Rules & Instruction Design
 
-- Lean formatting: Avoid **bold** styling (token waste). Use Markdown headers (#, ##) and lists (1., -) for hierarchy.
-- No redundant preamble: Do not include H1 titles or overview paragraphs that repeat the frontmatter description. Jump straight to # Steps.
-- Filename is the title: The filename (e.g., capture_content.md) is the conceptual title.
-- description only in frontmatter: No name: field and no Trigger section in the body. The body is strictly for how, not when.
-- Steps are numbered and imperative: Each step should tell the agent exactly what action to take.
-- Reference skills explicitly: If a workflow delegates to a skill (e.g., generate_obsidian_note), name it in the step: "Apply the generate_obsidian_note skill to format and save the file."
-- Gate destructive actions: Any step that deletes, overwrites, or moves user content must be preceded by a "Present plan and await approval" step.
+- Structural entry point: Start directly with `# Steps` (or a brief `# Context` block if critical domain framing is needed before steps). Never repeat the frontmatter description.
+- description only in frontmatter: No `name:` field and no trigger sections in the body. Trigger logic lives in `description:` only.
+- Atomic, numbered steps: Each numbered step should be a clear, imperative directive. Use sub-bullets (`-`) for specific substeps, paths, options, and failure modes rather than multi-sentence paragraphs.
+- Explicit skill delegation: If a workflow relies on a skill (e.g., `generate_obsidian_note`, `project_work`), name the skill explicitly in the step text.
+- Gate destructive actions: Any step that deletes, moves, or overwrites user content must be preceded by an explicit "Present plan and await user approval" step.
+- Structural hierarchy over inline styling: Use lists and headers for agent signaling. Avoid relying on bolding for instruction emphasis.
 
 ---
 

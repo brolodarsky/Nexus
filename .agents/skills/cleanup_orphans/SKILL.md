@@ -3,23 +3,29 @@ name: cleanup_orphans
 description: Identify and report broken wiki-links and empty folders in the Vault. Use this skill whenever the user asks to "clean the vault", "find orphans", "check links", perform Zettelkasten maintenance, or mentions anything about broken links or missing files — even informally.
 ---
 
-# Cleanup Orphans — Maintenance Skill
+# Mandatory Behavior
 
-## Objectives
+Execute vault maintenance using the following non-destructive inspection protocol:
 
-1. **Find Broken Wiki-Links:**
-   - Scan all `.md` files in `Vault/` for `[[wiki-links]]` syntax.
-   - Identify any link that points to a non-existent file. Note: Obsidian wiki-links usually point to file basenames without the `.md` extension.
-   - Compile a list of exactly which files contain the broken links, and what the broken target is.
+## 1. Scan and Analyze
 
-2. **Find Empty Folders:**
-   - Scan `Vault/` for directories that contain no `.md` or media files (ignoring `.gitkeep`).
-   - Flag these for potential removal.
+- Scan for broken wiki-links:
+  - Search all `.md` files in `Vault/` for `[[wiki-links]]` syntax.
+  - Identify any link pointing to a non-existent note target (excluding `.git` and `.obsidian` internal paths).
+  - Compile the source file path and the target note name.
+- Scan for empty directories:
+  - Check `Vault/` subdirectories for folders containing no markdown, media, or tracked files (ignoring `.gitkeep`).
+  - Flag empty folders for review.
 
-## Action Protocol
+## 2. Present Diagnostic Report
 
-1. **Scan and Analyze:** Use tools (e.g. `grep_search`, `list_dir`, or Python scripts) to discover the broken links and empty directories.
-2. **Report:** Do NOT delete or modify files automatically. Present a concise report to the user listing:
-   - Every file containing a broken link, alongside the broken link text.
-   - Every empty folder found.
-3. **Resolution:** Wait for the user to instruct you on how to resolve each item (e.g. "delete the links", "create the missing notes", or "remove the empty folders").
+- Do not delete or modify files automatically.
+- Present a concise diagnostic table or list to the user:
+  - Broken links: Source file, broken link target, suggested resolution (fix target, delete link, or create missing note).
+  - Empty folders: Path to empty directory.
+
+## 3. Await User Instructions
+
+- Wait for explicit user confirmation before executing fixes:
+  - If creating missing notes, apply `generate_obsidian_note`.
+  - If removing empty folders or broken links, verify and apply edits carefully.

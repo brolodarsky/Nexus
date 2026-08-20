@@ -5,7 +5,7 @@
 ## Developer Agent Guidelines
 
 ### Meta-Boundary: Developer Agent vs. Nexus Engine
-This constitution guides **you**, the external developer/coding agent (e.g., Antigravity, Cursor) working in this repository. It is distinct from the **Nexus Agentic Engine** (located in `src/nexus/` and `tools/`), which is the local-first application being developed.
+This constitution guides **you**, the external developer/coding agent (e.g., Antigravity, Cursor) working in this repository. It is distinct from the **Nexus Agentic Engine** (located in `src/nexus/`), which is the local-first application being developed.
 
 For the internal logic, architecture, and principles governing the Nexus Engine agents themselves, refer to `src/nexus/core/ENGINE_CONSTITUTION.md`.
 

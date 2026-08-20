@@ -3,11 +3,9 @@ name: conventional_commits
 description: Enforce Conventional Commits format on every git commit. Always use this skill before running any `git commit` command — even small ones. If you are about to commit, stop and apply this format first.
 ---
 
-# Conventional Commits — Mandatory Trigger
+# Mandatory Behavior
 
-**ALWAYS use Conventional Commits format when creating a `git commit`.**
-
----
+Always use Conventional Commits format for every git commit.
 
 ## Format
 
@@ -15,48 +13,37 @@ description: Enforce Conventional Commits format on every git commit. Always use
 type(scope): description
 ```
 
-**Examples:**
-```
-feat(vault): add new folder structure (ref: TOC 3.2)
-fix(podcast): resolve venv path on Windows
-docs(readme): add setup instructions
-chore(gitignore): exclude Audio folder
-```
-
----
+### Examples
+- `feat(vault): add new folder structure (ref: TOC 3.2)`
+- `fix(podcast): resolve venv path on Windows`
+- `docs(readme): add setup instructions`
+- `chore(gitignore): exclude Audio folder`
 
 ## Valid Types
 
-| Type | When to use |
+| Type | When to Use |
 |---|---|
 | `feat` | New feature, script, skill, or Vault structure update |
 | `fix` | Bug fix or broken link repair |
 | `docs` | README, CHANGELOG, comments-only changes |
 | `chore` | Maintenance — .gitignore, dependencies, cleanup |
-| `refactor` | Code restructuring with no behaviour change |
+| `refactor` | Code restructuring with no behavior change |
 | `style` | Formatting, whitespace, linting |
 | `test` | Adding or modifying tests |
 
-## Scope (optional but encouraged)
+## Scope Rules
 
-Use a short word describing the area affected:
-- `vault` (structure only), `podcast`, `sync`, `readme`, `skill`, `workflow`, `gitignore`, `deps`
+Use a short noun describing the affected area:
+- Common scopes: `vault`, `podcast`, `sync`, `readme`, `skill`, `workflow`, `gitignore`, `deps`, `telemetry`
 
----
+## Commit Message Formatting
 
-## Rules
+1. Lowercase description: Do not capitalize the first word of the description.
+2. No trailing punctuation: Do not put a period at the end.
+3. Imperative mood: Write "add feature" rather than "added feature".
+4. Single logical change: Keep commits atomic and self-contained.
 
-1. **Keep the description lowercase** — do not capitalise the first word.
-2. **No period** at the end of the description.
-3. **Imperative mood** — write "add feature" not "added feature".
-4. **One logical change per commit** — don't bundle unrelated changes.
+## Batching and Push Rules
 
-## Batching Commits (`git commit`)
- 
- **Do NOT run `git commit` after every single minor file edit or individual tool execution.**
- Batch logical changes into single commits. For example, if adding a new tool involves 3 file edits (script, skill, changelog), commit all 3 together at the end of the task.
-
-## Pushing Changes (`git push`)
-
-**Do NOT run `git push` after every single minor file edit or documentation fix.** 
-Batch logical commits locally, and only `git push` at the very end of a task, session, or when specifically requested by the user, to reduce user interruptions and approval noise.
+- Batch local commits: Do not run `git commit` after every minor file edit. Group related changes (e.g., script + skill + docs) into a single logical commit at the end of a milestone.
+- Defer pushes: Batch logical commits locally and only run `git push` at the conclusion of the task or session to minimize confirmation noise.

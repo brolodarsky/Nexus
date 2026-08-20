@@ -207,11 +207,13 @@ This repository distinguishes between three types of "cognitive" capabilities th
 - `/capture_content`: Format, move, or clean up a raw capture note to serve as an inbox item for future knowledge synthesis.
 - `/add_job_requirement`: Automates extracting skills from a job description (PDF, URL, Markdown, etc.).
 - `/audit_inbox`: Sorts raw notes and bullet points from the Brain Inbox and Quick Capture into the main Zettelkasten structure.
+- `/create_new_note`: End-to-end workflow for creating, moving, and formatting original internal thoughts into the Vault.
 - `/create_project`: Consolidates rough notes or ideas into a structured project note, complete with extracted tasks and materials.
 - `/distill_learning`: Breaks down a dense external source (article, paper, PDF, URL) into atomic, interlinked notes. Prioritizes augmenting existing Vault notes over creating duplicates to ensure knowledge synthesis.
 - `/ingest_medical_record`: Parse and ingest raw medical records (PDF, XML, Images) into the Vault.
 - `/plan_activity`: Cross-references Activities List, Date Ideas, and People Data notes to generate a structured markdown itinerary.
 - `/ask_brain`: Agentic vault search. Uses a LangGraph ReAct agent to dynamically navigate the local filesystem and returns a grounded answer with source citations. Use when you need facts from your notes without reading files manually. No indexing required.
+- `/release`: Automates the release process by compiling changesets into the changelog, bumping the version, and committing/pushing the release.
 - `/render_resume`: Renders markdown documents (resumes, cover letters) into premium PDF and DOCX. Outputs page fill metrics (fill %, verdict, room remaining) so agents can add/trim content to optimize page utilization.
 - `/weekly_review`: Generates a weekly review memory from git history and vault diffs, and prompts the user to set explicit P0 goals for the upcoming week.
 

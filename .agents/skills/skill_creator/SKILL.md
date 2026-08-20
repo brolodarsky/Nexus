@@ -55,12 +55,14 @@ skill-name/
     └── assets/     - Files used in output (templates, icons, fonts)
 ```
 
-### Lean Formatting Rules
+### Lean Formatting & Instruction Design
 
-- Avoid bolding: Do not use bold styling in instructions. It is a token waste for agents.
-- Structural hierarchy: Use Markdown headers (#, ##, ###) and numbered/bulleted lists for hierarchy.
-- No redundant preamble: Do not include H1 titles or overview paragraphs that repeat the frontmatter description. Jump straight to Mandatory Behavior or Context.
-- description only in frontmatter: Keep the purpose of the skill in the YAML frontmatter. The body is strictly for behavior and logic.
+- Structural hierarchy over inline styling: Use markdown headers (#, ##, ###), numbered lists (1., 2.), and sub-bullets (-) to structure content. Agents parse document structure through hierarchy, not visual formatting.
+- Concise structural anchors: Start the body with a clean anchor (e.g., `# Mandatory Behavior` or `# Steps`). A brief context or domain framing section is welcome if it adds new context, but never repeat the frontmatter description.
+- Atomic instruction density: One directive per numbered item. Use sub-bullets for related rules, caveats, or failure modes rather than dense, run-on paragraphs.
+- description only in frontmatter: Keep the triggering logic and scope in YAML frontmatter. The body is strictly for execution logic.
+- Explicit cross-references: Explicitly name any sibling skills (e.g., `generate_obsidian_note`, `project_work`) or workflows that compose with this skill.
+- Bold styling guidance: Use bolding sparingly for human scanners if helpful, but never rely on bolding to signal importance to agents—use list hierarchy, numbered sequence, and imperative directives instead.
 
 ### Progressive Disclosure
 

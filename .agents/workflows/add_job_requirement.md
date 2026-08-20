@@ -20,17 +20,17 @@ description: Extracts skills from a job description (URL, PDF, or raw text) and 
          ...
      ```
 
-3. Update the Note (`Vault/3. Operations & Wealth/3.3. Career Strategy & Revenue/Employer Skill Requirements.md`):
+3. Update the Note (`Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Employer Skill Requirements.md`):
    - Append or insert the newly formatted entry into the `# 📋 Roles & Requirements` section.
 
 4. Regenerate the AI Summary:
    - Read the entirety of the `# Roles & Requirements` section.
-   - Synthesize the common themes, required degrees, prominent languages/frameworks, and domain knowledge. Sort by importance, ALWAYS NOTE MOST IMPORTANT SKILLS!!!
+   - Synthesize common themes, required qualifications, prominent languages/frameworks, and domain knowledge sorted by importance.
    - Replace the contents of the `# AI Summary` section with the newly generated synthesis.
 
 5. Optionally Update Job Hunt War Room — Section 4 (Industry Targets):
-   - Read `Vault/3. Operations & Wealth/3.3. Career Strategy & Revenue/Job Hunt War Room.md`.
-   - Determine which industry vertical in `## 4. Industry Targets` best fits the company (e.g. "Legal Tech", "FinTech", "AI Infrastructure & Agentic Labs", etc.).
-   - Check if the company is already listed under that vertical. If it is, skip this step.
-   - If it is not listed, ask the user: "[Company] isn't in the [Vertical] list in the War Room. Should I add it?"
-   - If the user confirms, append the company as a new bullet point (with a hyperlink to the company's careers page if available) under the correct vertical. Do not create a new vertical unless the company clearly doesn't fit any existing one.
+   - Read `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md`.
+   - Determine which industry vertical in `## 4. Industry Targets` best fits the company (e.g., "Legal Tech", "FinTech", "AI Infrastructure & Agentic Labs").
+   - Check if the company is already listed under that vertical; if so, skip this step.
+   - If not listed, ask the user: "[Company] isn't in the [Vertical] list in the War Room. Should I add it?"
+   - If confirmed, append the company (with hyperlink to careers page if available) under the correct vertical. Do not create a new vertical unless the company clearly doesn't fit any existing one.

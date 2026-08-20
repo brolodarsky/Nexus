@@ -21,6 +21,9 @@ When tasks are completed, started, or modified:
 - Locate the relevant task within the `Roadmap` section of the project note.
 - Update uncompleted tasks (e.g., `- [ ]`) to in-progress (e.g., `- [/]`) when working on them.
 - **CRITICAL**: When a task in the `Roadmap` is completed, do NOT just mark it as `- [x]`. Instead, **MOVE** the item to the `Build Log` section as a bullet point under a date heading (e.g., `### YYYY-MM-DD — Brief Description`). The Roadmap should only contain uncompleted items.
+- **Build Log Formatting Standards:**
+  - Write bullet points using concise, past-tense action verbs (e.g., `- Created ...`, `- Built ...`, `- Implemented ...`, `- Refactored ...`, `- Configured ...`).
+  - **NEVER** prefix lines with redundant markers like `- **Completed:**` or `- Done:`. The presence of an entry in the `Build Log` under a past date heading already denotes completion.
 - **CRITICAL**: Items in the `Standing Guidelines` section are permanent architectural rules. They are ongoing obligations and are NEVER checked off.
 
 ## 3. Update Project Planning and Scope
