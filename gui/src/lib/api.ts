@@ -7,6 +7,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 // ── Types ─────────────────────────────────────────────────────
 
+// Interface objects describing the shape of the API response data
 export interface HealthResponse {
   status: string;
   engine: string;
@@ -70,7 +71,16 @@ export interface VaultEntry {
 
 // ── Helpers ───────────────────────────────────────────────────
 
+// Generic fetch function used by all other functions
+// <T> is a generic type parameter, means that the function can be used with any type of data (e.g. AgentStatus, ChatHistoryEntry, VaultEntry)
+// Promise object handles asynchronous operations, it holds the eventual result of an asynchronous operation. (e.g. AgentStatus, ChatHistoryEntry, VaultEntry)
+// async: keyword that defines an asynchronous function.
+// fetch: built-in JavaScript function that makes HTTP requests.
+// RequestInit: interface defines the options for a fetch request (e.g. headers, body, method).
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  // await: keyword that waits for a promise to resolve.
+  // ...init: spread operator that copies the properties of the init object into the fetch request.
+  // spread operator: copies the properties of the init object into the fetch request.
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -142,18 +152,18 @@ export async function resetConversationRouting(conversationId: string): Promise<
 
 export interface TraceEvent {
   type:
-    | "agent_start"
-    | "agent_end"
-    | "llm_call"
-    | "llm_response"
-    | "tool_call"
-    | "tool_result"
-    | "tool_error"
-    | "route"
-    | "delegate"
-    | "info"
-    | "done"
-    | "error";
+  | "agent_start"
+  | "agent_end"
+  | "llm_call"
+  | "llm_response"
+  | "tool_call"
+  | "tool_result"
+  | "tool_error"
+  | "route"
+  | "delegate"
+  | "info"
+  | "done"
+  | "error";
   agent?: string;
   color?: string;
   message: string;
@@ -281,12 +291,12 @@ export async function getPendingHitl(): Promise<Transaction[]> {
   return apiFetch<Transaction[]>("/api/hitl/pending");
 }
 
-export async function approveHitl(id: number): Promise<{status: string, message: string}> {
-  return apiFetch<{status: string, message: string}>(`/api/hitl/${id}/approve`, { method: "POST" });
+export async function approveHitl(id: number): Promise<{ status: string, message: string }> {
+  return apiFetch<{ status: string, message: string }>(`/api/hitl/${id}/approve`, { method: "POST" });
 }
 
-export async function rejectHitl(id: number): Promise<{status: string, message: string}> {
-  return apiFetch<{status: string, message: string}>(`/api/hitl/${id}/reject`, { method: "POST" });
+export async function rejectHitl(id: number): Promise<{ status: string, message: string }> {
+  return apiFetch<{ status: string, message: string }>(`/api/hitl/${id}/reject`, { method: "POST" });
 }
 
 export async function listVault(path?: string): Promise<VaultEntry[]> {

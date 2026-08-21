@@ -38,6 +38,8 @@ While the current setup relies on Obsidian for viewing and an IDE for orchestrat
 ```
 Nexus/
 ├── .agents/                    # AI agent instructions
+│   ├── rules/                  # Standing rules & coding constraints
+│   │   └── code_commenting_standards.md # Learning-first educational commenting
 │   ├── skills/                 # Mandatory behaviors
 │   │   ├── analyze_health/           # Health diagnostics & context check
 │   │   ├── analyze_psych/            # Psych support & cognitive architecture
@@ -185,12 +187,13 @@ To use the universal chat scraper, you must have ADB (Android Debug Bridge) inst
 
 ## The Engine (Skills, Workflows & Tools)
 
-This repository distinguishes between three types of "cognitive" capabilities that define how the Brain automation works. It is critical to understand the distinction between the "Laws of Physics" (Skills) and the "Recipes" (Workflows):
+This repository distinguishes between capabilities and constraints that define how the Brain automation works. It is critical to understand the distinction between Rules, Skills, Workflows, and Tools:
 
-1. **Skills (`.agents/skills/`)**: **Mandatory Behaviors (The Laws of Physics)**. These are the fundamental rules that an AI Agent *must* follow whenever a specific trigger occurs (e.g., how to format YAML for *any* note, or when to update the changelog). They run automatically in the background.
-2. **Workflows (`.agents/workflows/`)**: **Active Procedures (The Recipes)**. These are explicit, multi-step slash commands (e.g., `/create_new_note` vs `/capture_content`) that the user calls to achieve complex outcomes. **Workflows rely on Skills.** (For example, both the `/create_new_note` and `/capture_content` workflows invoke the exact same underlying `generate_obsidian_note` skill when they need to save a file).
-3. **Engine Runtime Tools (`src/nexus/shared_tools/`)**: **Deterministic Capabilities**. These are Python scripts for domain-specific automation (like MP3 generation or IMAP email parsing) used by the agents.
-4. **Meta Scripts (`scripts/`)**: **Repository Maintenance**. Dev/CI tools used for folder validation, releases, and backups.
+1. **Rules (`.agents/rules/`)**: **Standing Constraints & Developer Guidelines**. Fundamental rules and coding standards (e.g., granular educational commenting requirements) loaded automatically across all agent sessions.
+2. **Skills (`.agents/skills/`)**: **Mandatory Behaviors (The Laws of Physics)**. These are the fundamental rules that an AI Agent *must* follow whenever a specific trigger occurs (e.g., how to format YAML for *any* note, or when to update the changelog). They run automatically in the background.
+3. **Workflows (`.agents/workflows/`)**: **Active Procedures (The Recipes)**. These are explicit, multi-step slash commands (e.g., `/create_new_note` vs `/capture_content`) that the user calls to achieve complex outcomes. **Workflows rely on Skills.** (For example, both the `/create_new_note` and `/capture_content` workflows invoke the exact same underlying `generate_obsidian_note` skill when they need to save a file).
+4. **Engine Runtime Tools (`src/nexus/shared_tools/`)**: **Deterministic Capabilities**. These are Python scripts for domain-specific automation (like MP3 generation or IMAP email parsing) used by the agents.
+5. **Meta Scripts (`scripts/`)**: **Repository Maintenance**. Dev/CI tools used for folder validation, releases, and backups.
 
 ### Agent Skills (Mandatory Behaviors)
 
@@ -297,7 +300,13 @@ While all vault content is intentionally gitignored so it never enters the repos
 ### 4. Agentic Config Mirror
 I maintain a mirror of the `src/nexus/shared_tools/` directory inside `Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/Agentic Config/`. This is an Obsidian-native development workflow that lets me tinker with scripts directly inside my Obsidian vault, using its linking and preview features, without breaking the production code at the repository root. Changes are manually promoted once tested.
 
+### 5. Learning-First Codebase (Granular Educational Commenting)
+Both the Python engine (`src/nexus/`) and the TypeScript frontend (`gui/`) are maintained as learning-first codebases. AI coding agents and human contributors adhere to a strict educational commenting standard:
+- Complex signatures, generics (`<T>`, `TypeVar`), async flows (`Promise`, `async/await`, tasks), streaming buffers, and framework idioms are demystified line-by-line with concrete examples.
+- Code comments serve as first-class educational scaffolding for developers with foundational coding knowledge, eliminating cryptic syntax and preserving long-term comprehensibility across all languages in the repo.
+
 ---
+
 
 ## How to Fork This Brain
 
