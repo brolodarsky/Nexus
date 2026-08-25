@@ -312,6 +312,7 @@ _The Content Log & Reference_
 	- **[Google Dev Forums](https://discuss.google.dev/categories)**
 	- **[Google Workspace Admin](https://admin.google.com/u/2/ac/home?hl=en)**
 	- **[LangSmith](https://smith.langchain.com/o/d59feb9e-e33c-4313-8135-b7bfa2796c37)**
+	- **[Mermaid Diagram Maker](https://mermaid.ai/app/dashboard)**
 	- **[OpenAI API](https://developers.openai.com/)**
 		- **[Documentation](https://developers.openai.com/api/docs)**
 		- **[Usage](https://platform.openai.com/usage)** - Track token usage.
