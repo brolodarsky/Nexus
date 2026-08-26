@@ -1,0 +1,42 @@
+{
+  "results": [
+    {
+      "case_id": 1,
+      "question": "Fetch recent emails from recruiter@openai.com",
+      "actual_answer": "[]",
+      "tools_used": [
+        "search_emails",
+        "list_recent_emails"
+      ],
+      "duration_sec": 16.72,
+      "score": 10,
+      "reasoning": "Returned valid JSON array. Used correct tool. ",
+      "status": "PASS"
+    },
+    {
+      "case_id": 2,
+      "question": "What are the 3 most recent emails?",
+      "actual_answer": "[\n  {\n    \"uid\": \"45764\",\n    \"subject\": \"Thank you from Palantir Technologies - William Volodarsky - Year at Palantir - Forward Deployed Software Engineer, Internship - Commercial\",\n    \"sender\": \"Palantir <no-reply@hire.lever.co>\",\n    \"date\": \"Wed, 26 Aug 2026 17:21:23 +0000\"\n  },\n  {\n    \"uid\": \"45763\",\n    \"subject\": \"Approved reservation: Study Room B8 created\",\n    \"sender\": \"Fort Lee Public Library <no-reply@fortleelib.org>\",\n    \"date\": \"Wed, 26 Aug 2026 17:13:06 +0000\"\n  },\n  {\n    \"uid\": \"45762\",\n    \"subject\": \"Your First Homecoming: all weekend, your way\",\n    \"sender\": \"Office of Alumni Relations <alumnioffice@fordham.edu>\",\n    \"date\": \"Wed, 26 Aug 2026 15:15:09 +0000\"\n  }\n]",
+      "tools_used": [
+        "list_recent_emails"
+      ],
+      "duration_sec": 4.48,
+      "score": 10,
+      "reasoning": "Returned valid JSON array. Used correct tool. ",
+      "status": "PASS"
+    },
+    {
+      "case_id": 3,
+      "question": "Get the body of email with UID 100",
+      "actual_answer": "[\n  {\n    \"uid\": \"45764\",\n    \"subject\": \"Thank you from Palantir Technologies - William Volodarsky - Year at Palantir - Forward Deployed Software Engineer, Internship - Commercial\",\n    \"sender\": \"Palantir <no-reply@hire.lever.co>\",\n    \"date\": \"Wed, 26 Aug 2026 17:21:23 +0000\",\n    \"body\": \"Dear William,\\n\\nThank you for your interest in Palantir. After careful consideration, we regret to inform you that we will not be proceeding with your candidacy for this role at this time.\\n\\nPlease note that you may receive further communications if you have applied for multiple positions or if we identify another opportunity that aligns with your profile.\\n\\nThank you again for your interest and we wish you best of luck in your job search.\\n\\nSincerely,\\n\\nPalantir Technologies\\n\\n[Palantir\u2019s Candidate Privacy](https://www.palantir.com/privacy-and-security/candidate-privacy-notice/)\"\n  }\n]",
+      "tools_used": [
+        "fetch_email_by_uid",
+        "list_recent_emails"
+      ],
+      "duration_sec": 10.35,
+      "score": 10,
+      "reasoning": "Returned valid JSON array. Used correct tool. ",
+      "status": "PASS"
+    }
+  ]
+}

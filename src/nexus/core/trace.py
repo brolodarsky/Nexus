@@ -118,7 +118,12 @@ class AgentTracer:
 
     def _print(self, icon: str, message: str):
         """Prints formatted message immediately to stdout with flush=True to avoid buffering delays."""
-        print(f"  {self._prefix()} {icon} {message}", flush=True)
+        try:
+            print(f"  {self._prefix()} {icon} {message}", flush=True)
+        except UnicodeEncodeError:
+            # Windows CP1252 / charmap console fallback
+            clean_msg = message.encode("ascii", errors="replace").decode("ascii")
+            print(f"  {self._prefix()} [*] {clean_msg}", flush=True)
 
     def _emit(self, event_type: str, message: str, data: Optional[dict] = None):
         """Builds a standardized trace event payload and publishes it to trace_bus."""

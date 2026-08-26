@@ -1,0 +1,22 @@
+{
+  "results": [
+    {
+      "case_id": 1,
+      "question": "Fetch recent emails from recruiter@openai.com",
+      "error": "'charmap' codec can't encode character '\\U0001f916' in position 28: character maps to <undefined>",
+      "status": "ERROR"
+    },
+    {
+      "case_id": 2,
+      "question": "What are the 3 most recent emails?",
+      "error": "'charmap' codec can't encode character '\\U0001f916' in position 28: character maps to <undefined>",
+      "status": "ERROR"
+    },
+    {
+      "case_id": 3,
+      "question": "Get the body of email with UID 100",
+      "error": "'charmap' codec can't encode character '\\U0001f916' in position 28: character maps to <undefined>",
+      "status": "ERROR"
+    }
+  ]
+}

@@ -36,7 +36,7 @@ def get_google_credentials(scopes: list[str], secrets_dir: str) -> Credentials:
                 creds.refresh(Request())
             except Exception as e:
                 # If refresh fails (e.g. revoked), we need to re-auth
-                print(f"Token refresh failed: {e}. Re-authenticating...")
+                print(f"Token refresh failed: {e}. Re-authenticating...", flush=True)
                 creds = None
         
         if not creds:
