@@ -3,6 +3,29 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.11.0] - 2026-08-26
+
+### Added
+- Created `scripts/audit_career_drift.py` for deterministic Tier-1 career document drift auditing (timestamp staleness, character bounds, skill coverage, telemetry).
+- Created `.agents/workflows/audit_career.md` (`/audit_career` slash command) for running cross-document career audits.
+- Added Three-Tier Drift Prevention & Sync Architecture and Phase 2 roadmap milestones to `Project - Career Agent.md`.
+- Integrated `/audit_career` checks into `Protocol - Career Maintenance.md`.
+- Created `.agents/rules/code_commenting_standards.md` establishing mandatory granular, educational code-commenting standards tailored to the developer's learning style.
+- Updated `AGENTS.md` (both in Nexus and Portfolio) and `README.md` with standing directives and architectural documentation requiring line-by-line syntax breakdowns, concrete examples for generics/types, and strict preservation of existing educational comments.
+- Implemented `HTMLToMarkdownParser` in tools.py for stream parsing HTML emails into clean Markdown while preserving clickable hyperlinks `[text](url)`, headings, and lists.
+- Added `_fetch_headers_batch` to execute single-trip IMAP header queries, eliminating N+1 network latency.
+- Added `_build_imap_query` to translate natural-language and freeform search phrases into valid RFC-3501 IMAP query filters.
+- Upgraded read_email.py CLI with `--search` flag and formatted tabular display.
+
+### Changed
+- Added dense, pedagogical inline and pre-block educational comments across `gui/src/lib/api.ts`, `src/nexus/api/routers/agents.py`, `src/nexus/core/trace.py`, `src/nexus/agents/router/graph.py`, and `src/nexus/agents/career/graph.py` adhering to `.agents/rules/code_commenting_standards.md`.
+
+### Fixed
+- Corrected relative path resolution in `src/nexus/shared_tools/resume_engine/render.js`, `render_docx.py`, and `inspect_docx.js` following the engine folder reorganization.
+- Fixed relative paths to virtual environment and vault directories in `generate_podcast.py` and `ingest_phone.py`.
+- Fixed silent body omission bug in `_extract_body` where empty `text/plain` multipart payloads prevented rich HTML fallback.
+- Suppressed non-visual HTML containers (`<style>`, `<script>`, `<head>`, `<svg>`, `<noscript>`) to eliminate stylesheet leakage into parsed emails.
+
 ## [2.10.0] - 2026-08-20
 
 ### Added
@@ -45,21 +68,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - `scripts/create_folders.py`: Removed obsolete initial folder scaffolding script.
 - `scripts/check_folders.py`: Removed obsolete dry-run folder checker script.
 - `scripts/add_gitkeeps.py`: Removed manual gitkeep script in favor of agentic gitkeep rules.
-
-## [2.8.0] - 2026-08-04
-
-### Added
-- Multi-Conversation Chat Architecture: The Ask Brain UI now supports multiple parallel conversation threads decoupled from eternal agent memory.
-- Added CRUD API endpoints for conversations under `/api/agents/ask/conversations`.
-- `AGENTS.md`: New `Project Scope Docs: Ultimate Authority` section establishing the parent/child project scope hierarchy as the ground truth for all Nexus engine work, with read-before and update-after obligations and conflict resolution rules.
-- `project_work` skill: New §5 `Nexus Engine: Parent + Child Project Scope Doc Hierarchy` detailing the exact folder path, doc structure, and mandatory before/after protocol for reading and updating scope docs on every engine task.
-
-### Changed
-- Refactored `chats_db.py` to use a `conversations` table instead of a single `sessions` table.
-- Career Agent now receives Domain Boundary instructions and emits `[HANDOFF]` to release sticky routing locks.
-- Frontend AskBrainPage updated with a two-pane layout featuring a conversation sidebar and "Reset Routing" control.
-- Updated model constants in `src/nexus/core/constants.py` by renaming `AI_MODEL` to `AI_MODEL_LOW` and including `AI_MODEL_MEDIUM` and `AI_MODEL_HIGH`. Updated the Career Agent (`src/nexus/agents/career/graph.py`) to use `AI_MODEL_MEDIUM` for main LLM operations and `AI_MODEL_LOW` for conversation summarization, and updated all other model references across router, librarian, email agent, and eval runners to `AI_MODEL_LOW`.
-- Updated `/add_job_requirement` workflow to use chronological YYYY-MM-DD naming convention for saved job listings to better track industry trends over time.
-
-### Fixed
-- Fixed bug where `RemoveMessage` objects from `summarize_conversation` were incorrectly appended to agent states instead of deleting old messages, causing an OpenAI `BadRequestError` (stringified as `Got unknown type`). Replaced `operator.add` with LangGraph's `add_messages` across career, router, librarian, and email agents.
