@@ -122,6 +122,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 **[Link - Career - Google Drive](https://drive.google.com/drive/u/0/folders/1uJfG9nFqFD_BgbMY4HJ4GyRtieem-kC8)**
 - **[[Job Hunt War Room]]**: Action plan and target company pipelines.
 - **[[Protocol - Career Maintenance]]:** Recurring professional cadences (daily/weekly).
+- **[[Career Lessons]]:** Enduring procedural memory & strategic rules for career execution.
 - **[[Project - Career Management System Upgrades]]:** Professional infrastructure roadmap.
 
 ### 3.1.1. Market Research & Future of Work
