@@ -82,7 +82,6 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 	- **[[Goals]]**
 	- **[[Profile & Maintenance - Neuro-Sensory Conflict]]**
 	- **[[Profile & Maintenance - Job Search & Cognitive Load]]**
-	- **[[Protocol - ERP Quick Reference]]**
 	- **[[Protocol - Social Approach & Rehearsal]]**
 	- **[[Protocol - CBT vs ACT Quick Reference]]**
 	- **[[Protocol - Nightly System Shutdown]]**
@@ -317,6 +316,9 @@ _The Content Log & Reference_
 	- **[OpenAI API](https://developers.openai.com/)**
 		- **[Documentation](https://developers.openai.com/api/docs)**
 		- **[Usage](https://platform.openai.com/usage)** - Track token usage.
+	- **Palantir**
+		- **[Documentation - Foundry - AIP - Overview](https://www.palantir.com/docs/foundry/aip/overview/)**
+		- **[Homepage](https://williamvolodarsky.usw-22.palantirfoundry.com/workspace/narrative/)**
 	- **[Tavily](https://app.tavily.com/home)**
 	- **[Tokenizer](https://platform.openai.com/tokenizer)**
 

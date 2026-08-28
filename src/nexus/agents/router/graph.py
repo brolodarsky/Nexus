@@ -55,6 +55,7 @@ class RouterState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     raw_content: str                     # The original unparsed user query or document text
     filters: Optional[dict]              # Optional metadata filters (domain, tag, type) passed from CLI
+    thread_id: Optional[str]            # UI conversation/thread UUID propagated to downstream subgraphs
     domain: Optional[str]                # Classified domain: "career" | "health" | "general"
     summary: Optional[str]               # Short 1-2 sentence distillation extracted by the router
     confidence: Optional[float]          # Router confidence score between 0.0 and 1.0
@@ -178,6 +179,7 @@ def run_librarian_node(state: RouterState) -> dict:
 
     raw_content = state.get("raw_content", "")
     filters = state.get("filters", None)
+    thread_id = state.get("thread_id") or "librarian_primary"
     
     # Extract any tool output context (e.g., fetched emails) to pass to the Librarian
     context_str = ""
@@ -187,7 +189,7 @@ def run_librarian_node(state: RouterState) -> dict:
             
     final_content = raw_content + "\n" + context_str if context_str else raw_content
 
-    response_text = ask_librarian(final_content, filters=filters)
+    response_text = ask_librarian(final_content, filters=filters, thread_id=thread_id)
 
     return {"messages": [HumanMessage(content=response_text)]}
 
@@ -203,6 +205,7 @@ def run_career_agent_node(state: RouterState) -> dict:
 
     raw_content = state.get("raw_content", "")
     summary = state.get("summary", "")
+    thread_id = state.get("thread_id") or "career_primary"
     
     # Extract any tool output context (e.g., fetched recruiter emails)
     context_str = ""
@@ -212,7 +215,7 @@ def run_career_agent_node(state: RouterState) -> dict:
             
     final_content = raw_content + "\n" + context_str if context_str else raw_content
 
-    response_text = run_career_agent(content=final_content, summary=summary)
+    response_text = run_career_agent(content=final_content, summary=summary, thread_id=thread_id)
 
     return {"messages": [HumanMessage(content=response_text)]}
 

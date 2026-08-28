@@ -8,6 +8,7 @@ import json
 import queue
 # threading: Standard library for spawning background OS threads for long-running synchronous agent invocations
 import threading
+import time
 # datetime & timezone: Provides UTC timestamp generation for message logs and event telemetry
 from datetime import datetime, timezone
 from typing import Optional
@@ -24,6 +25,8 @@ from pydantic import BaseModel
 
 # trace_bus: Global pub/sub event bus where LangGraph agents emit live trace events (tools, LLM calls)
 from nexus.core.trace import trace_bus
+# run_logger: Persists formatted execution run snapshots to logs/runs/ for observability and evals
+from nexus.core.run_logger import log_run, list_runs, get_run
 # chats_db: SQLite data access layer for persisting conversations, messages, and sticky agent routing state
 from nexus.core.chats_db import (
     get_active_agent, set_active_agent, log_message, get_chat_history,
@@ -187,6 +190,7 @@ async def ask_brain(request: AskRequest):
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     try:
+        t0 = time.time()
         conversation_id = request.conversation_id
         # Phase 1: Persist user message to SQLite chats.db before running agents
         log_message(role="user", content=request.query, conversation_id=conversation_id)
@@ -195,20 +199,21 @@ async def ask_brain(request: AskRequest):
         active_agent = get_active_agent(conversation_id)
         if active_agent == "career":
             from nexus.agents.career.api import run_career_agent
-            response = run_career_agent(content=request.query)
+            response = run_career_agent(content=request.query, thread_id=conversation_id)
             result = {"domain": "career", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
         elif active_agent == "librarian":
             from nexus.agents.librarian.api import ask_librarian
-            response = ask_librarian(query=request.query)
+            response = ask_librarian(query=request.query, thread_id=conversation_id)
             result = {"domain": "general", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
         else:
             # No sticky lock: run universal Content Router to classify and dispatch
             from nexus.agents.router.api import route_content
-            result = route_content(request.query)
+            result = route_content(request.query, thread_id=conversation_id)
 
         # Determine which downstream agent actually handled the query
         routed_domain = result.get("domain", "general")
         agent_name = "career" if routed_domain == "career" else "librarian"
+        elapsed_sec = time.time() - t0
         
         # Phase 3: Check for [HANDOFF] token — allows agents to relinquish sticky lock
         response_text = result.get("response", "")
@@ -227,6 +232,18 @@ async def ask_brain(request: AskRequest):
             confidence=result.get("confidence"),
             trace=[],
             conversation_id=conversation_id
+        )
+
+        # Phase 5: Persist structured JSON run snapshot to logs/runs/
+        log_run(
+            agent_name=agent_name,
+            query=request.query,
+            response=response_text,
+            thread_id=conversation_id,
+            domain=routed_domain,
+            confidence=result.get("confidence"),
+            reasoning=result.get("reasoning"),
+            latency_seconds=elapsed_sec,
         )
 
         # Update last_run timestamps in the static registry
@@ -260,6 +277,7 @@ def _run_pipeline(query: str, conversation_id: str, event_queue: queue.Queue):
     Runs agent graph execution in a background thread so the async event loop is not blocked.
     Collects trace events via trace_bus subscription and pushes the final 'done' event to event_queue.
     """
+    t0 = time.time()
     # Log user query to database immediately
     log_message(role="user", content=query, conversation_id=conversation_id)
     
@@ -274,18 +292,19 @@ def _run_pipeline(query: str, conversation_id: str, event_queue: queue.Queue):
         active_agent = get_active_agent(conversation_id)
         if active_agent == "career":
             from nexus.agents.career.api import run_career_agent
-            response = run_career_agent(content=query)
+            response = run_career_agent(content=query, thread_id=conversation_id)
             result = {"domain": "career", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
         elif active_agent == "librarian":
             from nexus.agents.librarian.api import ask_librarian
-            response = ask_librarian(query=query)
+            response = ask_librarian(query=query, thread_id=conversation_id)
             result = {"domain": "general", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
         else:
             from nexus.agents.router.api import route_content
-            result = route_content(query)
+            result = route_content(query, thread_id=conversation_id)
 
         routed_domain = result.get("domain", "general")
         agent_name = "career" if routed_domain == "career" else "librarian"
+        elapsed_sec = time.time() - t0
         
         # Check for agent-initiated [HANDOFF] signal
         response_text = result.get("response", "")
@@ -311,6 +330,19 @@ def _run_pipeline(query: str, conversation_id: str, event_queue: queue.Queue):
             confidence=result.get("confidence"),
             trace=trace_events,
             conversation_id=conversation_id
+        )
+
+        # Persist structured JSON run snapshot to logs/runs/
+        log_run(
+            agent_name=agent_name,
+            query=query,
+            response=response_text,
+            thread_id=conversation_id,
+            domain=routed_domain,
+            confidence=result.get("confidence"),
+            reasoning=result.get("reasoning"),
+            trace_events=trace_events,
+            latency_seconds=elapsed_sec,
         )
 
         # Push terminal 'done' event to thread queue to complete the SSE stream
@@ -393,3 +425,44 @@ async def ask_brain_stream(request: AskRequest, req: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ── Run Snapshot Inspection Endpoints ─────────────────────────
+
+@router.get("/runs")
+async def get_agent_runs(limit: int = 20, agent: Optional[str] = None):
+    """
+    Returns recent structured JSON run snapshots from logs/runs/.
+    Supports filtering by agent name and custom limit.
+    """
+    return list_runs(limit=limit, agent=agent)
+
+
+@router.get("/runs/{run_id}")
+async def get_agent_run(run_id: str):
+    """
+    Retrieves full details of a specific execution run snapshot by ID.
+    """
+    run_data = get_run(run_id)
+    if not run_data:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    return run_data
+
+
+# ── Unified Engine Dashboard Endpoint ─────────────────────────
+
+@router.get("/dashboard")
+async def get_engine_dashboard():
+    """
+    Returns consolidated real-time engine telemetry, including pending HITL items,
+    active conversation counts, agent execution statuses, and markdown summary.
+    """
+    from nexus.core.dashboard import get_dashboard_summary, generate_dashboard_markdown
+    summary = get_dashboard_summary()
+    markdown = generate_dashboard_markdown(summary)
+    return {
+        "summary": summary,
+        "markdown": markdown,
+    }
+
+

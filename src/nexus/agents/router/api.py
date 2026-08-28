@@ -5,13 +5,14 @@ import time
 
 from nexus.agents.router.graph import router_graph, router_tracer
 
-def route_content(content: str, filters: dict = None) -> dict:
+def route_content(content: str, filters: dict = None, thread_id: str = None) -> dict:
     """
     Entry point: classify and route a piece of raw content.
 
     Args:
         content: The raw text to classify (email body, note, job description, etc.)
         filters: Optional filters dict to pass along to the Librarian agent
+        thread_id: Optional conversation/thread UUID for persistent checkpointer state
 
     Returns:
         dict with keys: domain, summary, confidence, reasoning, response
@@ -20,6 +21,7 @@ def route_content(content: str, filters: dict = None) -> dict:
         "messages": [],
         "raw_content": content,
         "filters": filters,
+        "thread_id": thread_id,
         "domain": None,
         "summary": None,
         "confidence": None,
