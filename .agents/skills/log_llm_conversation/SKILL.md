@@ -1,11 +1,11 @@
 ---
 name: log_llm_conversation
-description: Log design discussions, brainstorming sessions, and key technical decisions at the end of a conversation or pair programming session. Make sure to trigger this skill whenever the user mentions saving a chat log, logging a conversation, journaling a decision, or at the end of any complex session where important architectural, project, or code decisions were made, even if the user does not explicitly request it.
+description: Log high-level design discussions, architectural trade-offs, and conceptual idea forging at the end of a session. Trigger this skill whenever important engine architecture, system design, or foundational technical/philosophical decisions are made. Do NOT trigger for routine domain workflows, recruiter conversations, or daily life task minutiae.
 ---
 
 # Mandatory Behavior
 
-Analyze the conversation history to extract design choices, technical reasoning, trade-offs, and architectural decisions. Prepend this summary to the top of the LLM conversation log.
+Analyze the conversation history to extract high-level architectural decisions, technical reasoning, foundational trade-offs, and idea forging. Prepend the structured summary to the top of the LLM conversation log.
 
 ## Target File
 
@@ -26,8 +26,11 @@ Prepend the entry immediately below the introduction header/frontmatter block us
 
 ## Rules
 
-1. Prevent duplicate entries: Check the top entries of the file to verify the conversation was not already logged.
-2. Maintain descending chronological order: Always prepend new entries at the top of the log list.
-3. High signal density: Write factual, concise bullet points rather than narrative paragraphs.
-4. Link relevant entities: Use `[[Note Name]]` wiki-links when referencing vault notes, projects, or protocols.
-5. Preserve document integrity: Do not modify existing historical log entries.
+1. Scope boundary:
+   - Restrict entries to engine architecture, technical paradigms, and macro cognitive evolution.
+   - Route domain-specific life minutiae (recruiter interactions, medical logs, daily tasks) to dedicated domain living notes (`Professional CRM`, `Saved Job Listings`) and localized atomic archives (`Archive/Conversations/`).
+2. Prevent duplicate entries: Check the top entries of the file to verify the conversation was not already logged.
+3. Maintain descending chronological order: Always prepend new entries at the top of the log list.
+4. High signal density: Write factual, concise bullet points rather than narrative paragraphs.
+5. Link relevant entities: Use `[[Note Name]]` wiki-links when referencing vault notes, projects, or protocols.
+6. Preserve document integrity: Do not modify existing historical log entries.
