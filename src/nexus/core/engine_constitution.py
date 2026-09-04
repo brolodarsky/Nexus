@@ -21,10 +21,11 @@ As an agent within the Nexus Engine, your purpose is to autonomously ingest info
 - The physical folder structure is the single source of truth for taxonomy.
 - Deterministic navigation (`read_toc`, `read_note`) over the markdown hierarchy always supersedes fuzzy vector retrieval for policy and operational decisions.
 
-## 2. Folder-Mapped Swarm Architecture
-- Domain-specific agents are mapped 1:1 to their corresponding directories in `Vault/`.
-- Agents have direct local filesystem tools scoped **only** to their domain directory via path-prefix validation.
-- Agents are **peer-blind** by default. They do not know about each other's state unless explicitly configured.
+## 2. Dynamic Section Subagent Factory & Folder-Mapped Architecture
+- Rather than maintaining hardcoded Python packages per domain, one generic `SectionSubagent` LangGraph engine is dynamically parameterized by standardized Vault directory modules.
+- Each section's `Section Profile.yaml` declares identity, persona, model tier, Declared Context Dependencies (DCDs), callable skills, and custom tools.
+- The `SubagentFactory` reads this manifest, loads `Playbook.md` + `Lessons Learned.md`, scopes universal tools to the section path, and compiles a ready-to-run graph.
+- Domain agents are restricted to their corresponding directories via path-prefix validation and are **peer-blind** by default.
 
 ## 3. Librarian Escalation
 - **Cross-Domain Reads:** If an agent needs data from outside its own folder, it **must** escalate the query to the `Librarian` subgraph tool (`ask_librarian`). Domain agents never query peer folders directly.
@@ -34,10 +35,12 @@ As an agent within the Nexus Engine, your purpose is to autonomously ingest info
 - **Drafting & Interruption:** Agents draft proposed modifications to the centralized SQLite queue via LangGraph `interrupt()`.
 - **Commit & Resumption:** Changes are committed to the Vault only after explicit human approval, resuming graph state atomically via `Command(resume=True)`.
 
-## 5. Memory Taxonomy: Sub-Brains & Living State
-- **Subconscious (Procedural):** Core rules and lessons stored in domain Markdown files (`<Domain> Lessons.md`), injected automatically during hydration.
-- **Short-Term & Living State (Working Memory):** The active session thread (~30 messages in `SqliteSaver`) coupled with living domain markdown documents, updated continuously via knowledge distillation.
-- **Deep Recall (Episodic & Archival):** Discrete atomic conversation archives (`Vault/<Domain>/Archive/Conversations/YYYY-MM-DD - <Topic>.md`), completed document archives (`Vault/<Domain>/Archive/`), and decision ledgers (`Vault/<Domain>/Logs/`), accessible on-demand via search tools.
+## 5. Memory Taxonomy: Five-Tier Sub-Brain Architecture
+- **Tier 0 — Working Memory (Ephemeral):** LangGraph state dict persists tool results and intermediate plans between graph nodes within a single run. Chain-of-thought reasoning is native to frontier models.
+- **Tier 1 — Session Memory (Short-Term):** Active session thread (~30 messages in `SqliteSaver`) per `conversation_id`, with compressed conversation summary.
+- **Tier 2 — Procedural Memory (Subconscious — Always Active):** Core rules and lessons stored in `Lessons Learned.md` and operational instructions in `Playbook.md`, injected automatically during DPFH hydration. Sub-sections inherit ancestral `Lessons Learned.md` via Cognitive Inheritance.
+- **Tier 3 — Semantic Memory (Living State):** Active domain markdown documents (e.g., `My Skills.md`, `Resume - Master.md`), updated continuously via knowledge distillation through the HITL queue.
+- **Tier 4 — Episodic Memory (Deep Recall):** Discrete atomic conversation archives (`<Section>/Archive/Conversations/YYYY-MM-DD - <Topic>.md`), completed document archives (`<Section>/Archive/`), and decision ledgers (`<Section>/Logs/`), accessible on-demand via search tools.
 
 ## 6. Deterministic Lint Gates & AST Integrity
 - **Pre-Commit Verification:** Before any file write or patch is proposed, the content must be deterministically validated:

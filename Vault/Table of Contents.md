@@ -13,6 +13,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 ## 1.1. Philosophy & Personal North Star
 - **[[Goals]]**
 - **[[To Do List]]**
+- **[[Short Term Execution Plan]]:** Rolling 2-week tactical execution sprint.
 - **[[Protocol - Daily Schedule]]:** Unified daily core working schedule.
 - **[[Current Learning]]:** Active focus and active subjects.
 - **Principles & Ethics:** Core values, decision-making frameworks.
@@ -22,7 +23,6 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 ### 1.1.1. Personal Logs
 - **📁 [Journal](obsidian://search?vault=Vault&query=path%3AJournal)**
 	- **[[2026 - Journal]]**: Technical progress, career strategy, and tactical "Engine" development.
-	- **[[Log - LLM Conversations]]**: Brainstorming, architectural decisions, and key insights from AI dialogues.
 - **[[Memories Log]]**: Personal milestones, social wins, and life highlights.
 	- **📁 [Memories Log Images](obsidian://search?vault=Vault&query=path%3AMemories_Log_Images)**
 - **The Trophy Case:** Screenshots of wins, kind words from others, and completed major projects.
@@ -90,7 +90,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 	- **[[Protocol - Preemptive Rejection & The Transparency Illusion]]**
 	- **[[Protocol - Social Stamina and Behavioral Reinvention]]**
 	- **[[Profile & Maintenance - OCD Post-War Dynamics]]**
-	- **[[Cognitive Engineering Log]]**
+	- **[[Log|Psych Log (Cognitive Engineering Log)]]**
 	- **[[Life Chronology]]**
 - **Meditation & Mindfulness:** Rituals for grounding and focus.
 - **Stress Mitigation:** Systems for decompressing after high-output days.
@@ -117,6 +117,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 # 3. Operations & Wealth
 _Financial and logistical systems to support a life of freedom._ The "Engine"
+- **[[Operations Lessons]]:** Enduring procedural memory & strategic rules for operations, wealth, and housing.
 ## 3.1. Career Strategy & Revenue
 **[Link - Career - Google Drive](https://drive.google.com/drive/u/0/folders/1uJfG9nFqFD_BgbMY4HJ4GyRtieem-kC8)**
 - **[[Job Hunt War Room]]**: Action plan and target company pipelines.
@@ -194,6 +195,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 
 ### 3.3.2. Family & Care
 - **Family Estate:**
+	- **[[Evaluation - Horizon House 1BR Purchase]]:** Strategic and financial analysis for 1BR co-op acquisition.
 	- **[[Plan - Selling Gold and Silver]]**
 - **Home**
 	- **[[Parents Home Purchase Application.pdf|Doc - Parents Home Purchase Application]]**
@@ -273,6 +275,7 @@ _The Content Log & Reference_
 
 # 6. Forge
 *Technical Mastery*
+- **[[Log|Forge Log]]**: Architecture Decision Records (ADRs), technical dialogues, and engine design trade-offs.
 
 ## 6.1. Projects 
 *The Lab*
@@ -568,6 +571,7 @@ The dominant language for AI/ML and Agentic Workflows.
 - **Benchmarking:** SWE-bench (software engineering mastery), WebArena (browser automation).
 - **Safety:** Defending against adversarial payloads, prompt injections, and infinite resource loops.
 
+- **[[Glossary - Nexus Engine Terminology]]:** Standardized acronyms and terminology for the Nexus Agentic Engine (AFS, DPFH, LTM, DCD, DTM, RSI, CI, HITL).
 - 📁 **Sources**
 	- **[[Article - Building Effective Agents]]**
 

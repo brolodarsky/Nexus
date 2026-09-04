@@ -1,12 +1,13 @@
 # Nexus: Agent-Integrated Knowledge OS & Cognitive Engine
 
-Nexus is a local-first, agent-orchestrated knowledge engine designed to bridge unstructured markdown notes (Zettelkasten) with autonomous agentic workflows, deterministic tools, and dynamic semantic search.
+Nexus is a local-first, agent-orchestrated knowledge engine designed to bridge unstructured markdown notes (Zettelkasten) with autonomous agentic workflows, deterministic tools, and dynamic semantic search. Its core innovation is the **Dynamic Section Subagent Factory** — one generic LangGraph agent engine dynamically parameterized by standardized Vault directory modules, eliminating the need for hardcoded Python packages per life domain.
 
 Rather than a static archive or a generic note template, Nexus acts as a cognitive framework. It couples a structured knowledge vault with a backend agent engine to ingest, search, process, and output real-world information.
 
 ## Key Technical Pillars
 
-*   **Agentic Engine (`src/nexus/`):** A custom LangGraph-based ReAct agent ("The Librarian") that dynamically navigates the local filesystem to locate, read, and cross-reference documents—delivering grounded answers with precise source citations without requiring pre-indexing or external vector databases. Specialized evaluation agents automatically run test suites to benchmark performance, with additional domain-specific agents planned.
+*   **Dynamic Section Subagent Factory (`src/nexus/`):** A `SubagentFactory` that reads standardized Vault directory modules (`Section Profile.yaml`, `Playbook.md`, `Lessons Learned.md`) to dynamically compile domain-specialized LangGraph agents at dispatch time. A dual-mode **Meta-Orchestrator** classifies queries and spawns Section Subagents via sticky handoff (deep 1-on-1 dialogue) or supervisor worker spawning (multi-domain parallel synthesis). Five-tier memory architecture (Working → Session → Procedural → Semantic → Episodic) with Cognitive Inheritance across parent-child sections.
+*   **Agentic File System Navigator (Librarian):** A LangGraph ReAct agent that deterministically navigates the local filesystem to locate, read, and cross-reference documents — delivering grounded answers with precise source citations without requiring pre-indexing or external vector databases. Serves as the universal cross-domain read substrate consumed by all Section Subagents.
 *   **Context-Aware Workflows (`.agents/workflows/`):** Multi-step agent instructions (exposed as slash commands) that automate complex tasks like extracting skills from job descriptions, parsing medical records, and synthesizing dense source material into atomic notes.
 *   **Enforced Agent Skills (`.agents/skills/`):** Mandatory system behaviors acting as background constraints ("laws of physics") that intercept agent actions to guarantee data integrity, formatting rules, and contextual safety guidelines.
 *   **Deterministic Automation Layer (`tools/`):** Python and Node.js integrations for phone chat screen-scraping (ADB), secure OAuth2 email retrieval, edge-TTS audio podcast generation, and automated PDF portfolio rendering.
@@ -139,14 +140,15 @@ Nexus/
 ├── CHANGELOG.md                # Running log of notable changes
 ├── src/nexus/                      # Agentic search & coordinator engine
 │   ├── main.py                  # Universal coordinator & mission control
-│   ├── agents/                  # Domain-specific agents
-│   │   ├── email/               # Email Agent (compiled subgraph for IMAP fetch/search)
-│   │   ├── librarian/           # Librarian agent (cross-domain vault search)
-│   │   ├── router/              # Content Router agent (classifier → domain dispatch)
-│   │   └── career/              # Career agent (DPFH, skill gap analysis, HITL writes)
+│   ├── agents/                  # Core infrastructure agents (compiled graphs)
+│   │   ├── email/               # Email Agent (I/O subgraph for IMAP fetch/search)
+│   │   ├── librarian/           # Librarian agent (cross-domain vault search substrate)
+│   │   ├── router/              # Meta-Orchestrator (SubagentFactory dispatch + dual-mode routing)
+│   │   └── career/              # Career agent (canonical SubagentFactory reference impl)
 │   ├── core/                    # Shared engine configuration
 │   │   ├── audio.py             # Whisper transcription service
 │   │   ├── constants.py         # Global constants
+│   │   ├── engine_constitution.py # Runtime constitution (5-tier memory, SubagentFactory rules)
 │   │   ├── google_auth.py       # Reusable OAuth2 manager
 │   │   └── hitl_queue.py        # SQLite HITL transaction queue
 │   ├── evals/                   # Benchmarking & Golden Dataset
