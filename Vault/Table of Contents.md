@@ -13,9 +13,10 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 ## 1.1. Philosophy & Personal North Star
 - **[[Goals]]**
 - **[[To Do List]]**
-- **[[Short Term Execution Plan]]:** Rolling 2-week tactical execution sprint.
+- **[[Short Term Execution Plan]]:** 10-day sliding tactical execution envelope (`[-5, +5]`).
 - **[[Protocol - Daily Schedule]]:** Unified daily core working schedule.
 - **[[Current Learning]]:** Active focus and active subjects.
+- **[[Personal Specs]]:** Master sizing card, footwear measurements, and wardrobe specifications.
 - **Principles & Ethics:** Core values, decision-making frameworks.
 - **The 10-Year Horizon:** Strategic goals for the longer term.
 - **Legacy & Impact:** What do I want to build that lasts?
@@ -90,7 +91,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 	- **[[Protocol - Preemptive Rejection & The Transparency Illusion]]**
 	- **[[Protocol - Social Stamina and Behavioral Reinvention]]**
 	- **[[Profile & Maintenance - OCD Post-War Dynamics]]**
-	- **[[Log|Psych Log (Cognitive Engineering Log)]]**
+	- **[[2. Health/2.3. Psych/Log|Log]]**
 	- **[[Life Chronology]]**
 - **Meditation & Mindfulness:** Rituals for grounding and focus.
 - **Stress Mitigation:** Systems for decompressing after high-output days.
@@ -133,6 +134,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 
 ### 3.1.2. Interview Prep & Technical Depth
 - **[[Interview Prep Hub]]**
+- **[[Tactile Coding & Pattern Playbook]]:** Daily DSA reps, canonical solutions, and interview invariants.
 - **[[Interview Question Bank]]:** Pre-written application responses and narratives.
 - **[[My Skills]]:** Master inventory of competencies.
 - **[[Summary - How To Stand Out To Employers Regardless of Experience]]:** Fordham Foundry panel on startup job hunting, networking, and creative outreach.
@@ -184,6 +186,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 
 ### 3.3.1. Home Improvement & Maintenance
 - **Household Ops:** Recurring tasks for living spaces.
+	- **[[Protocol - Plant Care]]:** Low-friction year-round maintenance schedule and weekly triage for indoor plants (Pothos & Snake Plant).
 - **[[Home Project Ideas]]:** Renovation ideas, furniture builds, and aesthetic upgrades.
 - **[[Project - Upstairs Flooring & Stairs]]**
 - **[[Project - Renovating the Kitchen]]**
@@ -230,6 +233,7 @@ _Dedicated space for exploration, relationships, and pure interest._ Connection 
 - **[[Activities List]]**: Hobbies, sports, or experiences I want to try.
 - **Adventure Log:** Places to visit.
 	- **[[List - Hiking Near Fort Lee]]**
+	- **[[List - Golf & Pitch and Putt Near Fort Lee]]**
 
 
 ## 4.2. Romance & Partnership
