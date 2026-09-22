@@ -25,9 +25,10 @@ description: Generates a weekly review memory and plans the upcoming week. Use w
    - Ask the user if they would like you to generate or update an `implementation_plan.md` artifact tailored to these goals to guide their Deep Work blocks for the week.
 7. Slide Forward the Short Term Execution Plan:
    - Open `Vault/1. The Core/1.1. Philosophy & Personal North Star/Short Term Execution Plan.md`.
-   - Apply the **`[-5, +5]` Sliding Window Protocol**:
-     - Roll the previous 5 days of verified momentum into `### ⏪ Verified Momentum (T-5 to T-1)`.
-     - Archive items older than 5 days off the active page without clutter.
-     - Anchor `### 🎯 Active Anchor` on the current date (`T-0`).
-     - Populate `### ⏩ Tactical Flight Path` with the concrete upcoming 5 days (`T+1` to `T+5`), aligning Day +5 with the 5-Day CRM Nudge Protocol.
+   - Apply the **Working-Set Sliding Envelope Protocol**:
+     - Keep track of **active working sets only** (exclude weekends and rest days; these belong in `Protocol - Daily Schedule.md`).
+     - Proactively ask: *"How did [yesterday / last working day] go? Can I log anything or mark any reps done?"*
+     - Anchor `## 1. 🎯 Today's Tactical Working Set (W-0)` near the very top of the note with granular, time-bounded containers and micro-actions.
+     - Compress `## 2. ⏪ Verified Momentum (W-5 to W-1)` into high-contrast, 1-line summaries per working set (archive older entries into weekly review memory).
+     - Compress `## 3. ⏩ Tactical Flight Path (W+1 to W+5)` into high-level targets per working set, aligning Day +5 with the 5-Day CRM Nudge Protocol.
      - Recalibrate the active window scorecard without psychological back-tax.

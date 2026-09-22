@@ -134,6 +134,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 
 ### 3.1.2. Interview Prep & Technical Depth
 - **[[Interview Prep Hub]]**
+- **[[Prep - SingleStore FDE & MCP Deep Dive]]:** Technical breakdown, FastMCP blueprint, and interview strategy for SingleStore FDE.
 - **[[Tactile Coding & Pattern Playbook]]:** Daily DSA reps, canonical solutions, and interview invariants.
 - **[[Interview Question Bank]]:** Pre-written application responses and narratives.
 - **[[My Skills]]:** Master inventory of competencies.

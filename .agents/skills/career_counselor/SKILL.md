@@ -30,7 +30,7 @@ Execute strategic career advisory by synthesizing vault context across three pri
 - Resume compilation: Apply the `/render_resume` workflow when generating or tailoring PDF/DOCX resumes.
 - Platform synchronization: Remind user to mirror resume or project changes to external profiles (Handshake, LinkedIn, Wellfound, YC) to avoid profile drift.
 - Task synchronization: Ensure actionable milestones are mirrored in `Vault/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md`.
-- Sliding window sprint: Maintain the 10-day rolling tactical envelope (`[-5, +5]`: 5-day lookback, active anchor on today, 5-day flight path) in `Vault/1. The Core/1.1. Philosophy & Personal North Star/Short Term Execution Plan.md` under the Sliding Window Protocol, anchoring Day 0 on the active date without back-tax.
+- Sliding window sprint: Maintain the rolling tactical working-set envelope (`W-5` to `W+5`: 5 working sets lookback, granular active anchor on today at the top, 5 working sets flight path) in `Vault/1. The Core/1.1. Philosophy & Personal North Star/Short Term Execution Plan.md`. Track working sets only (exclude rest days), proactively prompt the user on prior day outcomes ("How did yesterday go? Can I log anything?"), and keep past/future sets heavily summarized.
 
 ## 5. Decision Checklist
 
