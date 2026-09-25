@@ -156,6 +156,8 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 
 ### 3.1.4. Networking & Professional CRM
 - **[[Professional CRM]]:** Contacts, recruiters, mentors, and warm intro tracking.
+- **📁 [Archive](obsidian://search?vault=Vault&query=path%3A"3.%20Operations%20%26%20Wealth/3.1.%20Career%20Strategy%20%26%20Revenue/3.1.4.%20Networking%20%26%20Professional%20CRM/Archive")**
+	- **[[Professional CRM - Archive]]:** Inactive, closed, and historical networking contacts and outreach pipelines.
 
 ### 3.1.5. Income Streams & Side Revenue
 - **[[Income Streams Hub]]**

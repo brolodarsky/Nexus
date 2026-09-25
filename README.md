@@ -56,6 +56,7 @@ Nexus/
 │   │   └── workflow_creator/         # Create & improve agent workflows
 │   └── workflows/              # Structured procedures (slash commands)
 │       ├── add_job_requirement.md    # Job criteria extraction
+│       ├── archive_contact.md        # CRM contact & pipeline archiving
 │       ├── ask_brain.md              # Semantic vault search
 │       ├── audit_career.md           # Career document drift audit
 │       ├── audit_inbox.md            # Zettelkasten inbox sorting
