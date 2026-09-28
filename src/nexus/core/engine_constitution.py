@@ -54,4 +54,22 @@ As an agent within the Nexus Engine, your purpose is to autonomously ingest info
 
 ## 8. Prompt-Cache Hygiene
 - System prompts isolate static instructions and schemas at the prefix to maximize LLM prompt cache hits ($90\%+$), appending dynamic DPFH context strictly at the suffix.
+
+## 9. Standardized Section Anatomy & Sub-Brain Modules
+- Every Vault section (and eligible sub-section) conforms to an autonomous modular sub-brain schema:
+  - `Section Profile.yaml`: Section DNA (identity, persona, model tier, DCDs, callable skills, custom tools).
+  - `Playbook.md`: Operational guide and system prompt defining domain persona and standing priorities.
+  - `Lessons Learned.md`: Procedural memory (accumulated heuristics, user preferences, formatting rules).
+  - `Section Map.md`: Navigation index and DPFH fallback MOC.
+  - `Tasks.md`: Local Task Module (LTM) synchronized with the master To Do List.
+  - `Log.md`: Operational rep log and event journal.
+  - `Framework.md`: Permanent architectural specs and living state baseline.
+  - `Archive/`: Deep recall, completed projects, and atomic conversation archives (`Archive/Conversations/`).
+  - `Protocols/`: Executable standard operating procedures (`Protocol - *.md`) callable on demand.
+
+## 10. Cognitive Boundaries & Event-Driven Ephemerality
+- Domain subagents are short-lived, event-bounded workers rather than immortal chat threads.
+- **Inception:** Subagents spawn with lean priors paged into RAM via DPFH.
+- **Execution:** Focused reasoning in context with tool calls functioning as page faults to disk.
+- **Boundary Flush:** At event boundaries (user command, task completion, domain drift), the subagent executes a synchronous hippocampal flush (staging state diffs, writing atomic archives, updating procedural lessons) and terminates immediately, eliminating context rot.
 """

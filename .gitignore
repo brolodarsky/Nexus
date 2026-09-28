@@ -76,3 +76,4 @@ logs/
 
 __pycache__/
 *.pyc
+*.mp4

@@ -20,6 +20,8 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **Principles & Ethics:** Core values, decision-making frameworks.
 - **The 10-Year Horizon:** Strategic goals for the longer term.
 - **Legacy & Impact:** What do I want to build that lasts?
+- **[[Playbook]]:** Section 1.1 operational guide and episodic life archiving rules.
+- **📁 [Archive](obsidian://search?vault=Vault&query=path%3A"1.1.%20Philosophy%20%26%20Personal%20North%20Star/Archive"):** Daily tactical execution and working set archives (`Archive/YYYY/MM/YYYY-MM-DD.md`).
 
 ### 1.1.1. Personal Logs
 - **📁 [Journal](obsidian://search?vault=Vault&query=path%3AJournal)**
@@ -557,6 +559,7 @@ The dominant language for AI/ML and Agentic Workflows.
 - **[[Overview - AI Agents]]**
 - **Architectures:** Shift from conversational ReAct loops to Stateful Orchestration (State Machines, Flow Engineering, Reflexion).
 - **Memory & State:** Persistent state management, token-efficiency optimizations, and GraphRAG.
+	- **[[Concept - Cognitive Boundaries & Event-Driven Agent Memory]]:** Neuroscience Event Segmentation Theory (EST), Von Neumann hardware mapping (ALU/RAM/Disk), two-phase sleep consolidation, and impedance matching.
 #### Agent Tool Use & Integration (The "Hands")
 - **[[Function Calling & Structured Outputs]]:** The foundational bridge between LLMs and code execution (JSON schema enforcement).
 - **Tool Protocols:** **[[Concept - Model Context Protocol (MCP)]]:** Universal open standard for providing models with secure data context and tool access.
