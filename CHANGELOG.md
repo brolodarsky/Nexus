@@ -3,6 +3,27 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.13.0] - 2026-09-27
+
+### Added
+- Added `cognitive_boundary_flush` skill (`.agents/skills/cognitive_boundary_flush/SKILL.md`) implementing the 4-tier Hippocampal Flush protocol.
+- Added `/flush` slash-command workflow (`.agents/workflows/flush.md`) for explicit event boundary execution.
+- Added Engine Coding Standard 21 to `AGENTS.md` mandating proactive Hippocampal Flush prompting upon session conclusion or context switches.
+- Updated Section 10 of Engine Constitution (`src/nexus/core/engine_constitution.py`) with the formal 5-step Hippocampal Flush protocol.
+- Added `/archive_contact` agentic workflow (`.agents/workflows/archive_contact.md`) for systematic pruning of closed, rejected, or stale networking contacts and requisitions.
+- Defined formal CRM Archiving Protocol in `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Protocol - Career Maintenance.md` to preserve Tier 3 living state context windows by migrating inactive rows to `Professional CRM - Archive.md`.
+- Integrated Standardized Section Anatomy (Section 9) and Event-Driven Cognitive Boundaries (Section 10) into `src/nexus/core/engine_constitution.py`.
+- Added FastMCP dependency (`mcp>=1.30.0`) to `pyproject.toml` and `uv.lock`.
+- Updated public `Table of Contents.md` with link to `Concept - Cognitive Boundaries & Event-Driven Agent Memory`.
+- Added Engine Standard 20 (`Episodic Life Archiving & Anti-Hallucination Grounding`) to `AGENTS.md` and established Section 1.1 `Playbook.md` to ensure agents interactively verify daily events via calendar and user confirmation, reject copy-pasting aspirational container templates or routine habits, and preserve a grounded 4-compartment life/mission record.
+- Integrated the rolling working-set sliding envelope protocol into `.agents/workflows/weekly_review.md` and `.agents/skills/career_counselor/SKILL.md` to ensure `Short Term Execution Plan.md` tracks active working sets only (excluding rest days), places today's granular containers at the top for ADHD focus, enforces proactive prior-day reconciliation prompting, and heavily compresses past/future sets.
+
+### Changed
+- Clarified the Project Scope Docs hierarchy in `AGENTS.md` to distinguish software infrastructure projects (compiled Python subgraphs in `src/nexus/` and GUI apps) from declarative domain section subagents (governed natively by standardized section files in `Vault/<Section>/`, eliminating duplicate child project docs).
+
+### Deprecated
+- Deprecated and removed legacy `log_llm_conversation` skill in favor of localized atomic episodic archiving in `<Section>/Archive/Conversations/` and domain-scoped ADR logging.
+
 ## [2.12.0] - 2026-09-04
 
 ### Added
