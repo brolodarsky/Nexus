@@ -8,19 +8,24 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-def get_google_credentials(scopes: list[str], secrets_dir: str) -> Credentials:
+def get_google_credentials(
+    scopes: list[str], 
+    secrets_dir: str, 
+    token_filename: str = "token.json"
+) -> Credentials:
     """
     Generic Google OAuth2 credential handler.
     Loads existing tokens, refreshes them if expired, or triggers a browser-based login flow.
     
     Args:
-        scopes: List of OAuth2 scopes required.
-        secrets_dir: Path to the directory containing 'credentials.json' and where 'token.json' will be saved.
+        scopes: List of OAuth2 scopes required (e.g. Google Calendar, Gmail).
+        secrets_dir: Path to the directory containing 'credentials.json' and where the token will be saved.
+        token_filename: Name of the token cache file (defaults to 'token.json'; use 'token_calendar.json' for calendar).
         
     Returns:
         A valid google.oauth2.credentials.Credentials object.
     """
-    token_file = os.path.join(secrets_dir, "token.json")
+    token_file = os.path.join(secrets_dir, token_filename)
     credentials_file = os.path.join(secrets_dir, "credentials.json")
     
     creds = None

@@ -238,6 +238,7 @@ This repository distinguishes between capabilities and constraints that define h
 | `youtube_transcript.py` | Downloads YouTube transcripts to text files. | `python src/nexus/shared_tools/youtube_transcript.py <url>` |
 | `read_webpage.py` | Extracts clean markdown content from single webpages via trafilatura. | `python src/nexus/shared_tools/read_webpage.py <url> [-o output.md]` |
 | `read_email.py` | Fetches a single email by IMAP UID and returns clean markdown. Supports Google OAuth2. | `python src/nexus/shared_tools/read_email.py <uid> [-o output.md]` / `python src/nexus/shared_tools/read_email.py --list-recent 10` |
+| `calendar_engine.py` | Deterministic Google Calendar integration for listing, creating, and updating events with local OAuth token isolation. | `python src/nexus/shared_tools/calendar_engine.py --today` |
 | `generate_podcast.py` | Converts a specific markdown note to MP3 via edge-tts. | `python src/nexus/shared_tools/generate_podcast.py <path> [--force]` |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python src/nexus/shared_tools/medical_xml_parser.py <path> <output_dir>` |
 | `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python src/nexus/shared_tools/ingest_phone.py --screens 50` |

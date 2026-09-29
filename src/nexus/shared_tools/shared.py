@@ -110,3 +110,85 @@ def get_read_note_tool(agent_name: str, domain_path: str = None):
         return result
             
     return read_note
+
+
+# ── Google Calendar Agentic Tool Wrappers ────────────────────────────────────
+
+@tool
+def get_calendar_schedule(days_ahead: int = 1) -> str:
+    """Fetch live schedule from Google Calendar for today (and optionally upcoming days).
+
+    Use this tool to inspect the user's real-time schedule, detect shifted time blocks,
+    and ground daily planning or evening reviews without guessing.
+
+    Args:
+        days_ahead: Number of days forward to inspect (default: 1 for today only).
+    """
+    from datetime import datetime, time, timedelta
+    from nexus.shared_tools.calendar_engine import list_events, format_events_as_markdown
+
+    now_local = datetime.now().astimezone()
+    start_dt = datetime.combine(now_local.date(), time.min).astimezone()
+    end_dt = datetime.combine(now_local.date() + timedelta(days=days_ahead - 1), time.max).astimezone()
+
+    events = list_events(start_iso=start_dt.isoformat(), end_iso=end_dt.isoformat())
+    return format_events_as_markdown(events, title=f"Schedule ({start_dt.strftime('%A, %b %d')})")
+
+
+@tool
+def create_calendar_event(
+    summary: str,
+    start_iso: str,
+    end_iso: str,
+    description: str = "",
+    location: str = "",
+) -> str:
+    """Create a new event on Google Calendar.
+
+    Args:
+        summary: Event title (e.g. 'Deep Work: Resume Engine', 'Gym: Push Day').
+        start_iso: RFC3339 datetime string (e.g. '2026-09-29T16:00:00-04:00') or date 'YYYY-MM-DD'.
+        end_iso: RFC3339 datetime string (e.g. '2026-09-29T17:30:00-04:00') or date 'YYYY-MM-DD'.
+        description: Optional notes, exercise target sets, or agenda.
+        location: Optional location string or video meeting link.
+    """
+    from nexus.shared_tools.calendar_engine import create_event
+    res = create_event(
+        summary=summary,
+        start_iso=start_iso,
+        end_iso=end_iso,
+        description=description,
+        location=location,
+    )
+    return f"✅ Event created: '{res.get('summary')}' (ID: {res.get('id')}) from {res.get('start')} to {res.get('end')}."
+
+
+@tool
+def update_calendar_event(
+    event_id: str,
+    summary: str = "",
+    start_iso: str = "",
+    end_iso: str = "",
+    description: str = "",
+    location: str = "",
+) -> str:
+    """Update or reschedule an existing event on Google Calendar.
+
+    Args:
+        event_id: The unique Google Calendar event ID.
+        summary: New event title (leave empty to keep unchanged).
+        start_iso: New start time in RFC3339 format (leave empty to keep unchanged).
+        end_iso: New end time in RFC3339 format (leave empty to keep unchanged).
+        description: New description (leave empty to keep unchanged).
+        location: New location (leave empty to keep unchanged).
+    """
+    from nexus.shared_tools.calendar_engine import update_event
+    res = update_event(
+        event_id=event_id,
+        summary=summary or None,
+        start_iso=start_iso or None,
+        end_iso=end_iso or None,
+        description=description or None,
+        location=location or None,
+    )
+    return f"✅ Event updated: '{res.get('summary')}' (ID: {res.get('id')})."
