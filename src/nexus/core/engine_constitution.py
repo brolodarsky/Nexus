@@ -40,7 +40,7 @@ As an agent within the Nexus Engine, your purpose is to autonomously ingest info
 - **Tier 1 — Session Memory (Short-Term):** Active session thread (~30 messages in `SqliteSaver`) per `conversation_id`, with compressed conversation summary.
 - **Tier 2 — Procedural Memory (Subconscious — Always Active):** Core rules and lessons stored in `Lessons Learned.md` and operational instructions in `Playbook.md`, injected automatically during DPFH hydration. Sub-sections inherit ancestral `Lessons Learned.md` via Cognitive Inheritance.
 - **Tier 3 — Semantic Memory (Living State):** Active domain markdown documents (e.g., `My Skills.md`, `Resume - Master.md`), updated continuously via knowledge distillation through the HITL queue.
-- **Tier 4 — Episodic Memory (Deep Recall):** Discrete atomic conversation archives (`<Section>/Archive/Conversations/YYYY-MM-DD - <Topic>.md`), completed document archives (`<Section>/Archive/`), and decision ledgers (`<Section>/Logs/`), accessible on-demand via search tools.
+- **Tier 4 — Episodic Memory (Deep Recall):** Discrete atomic event archives (`<Section>/Events/YYYY/YYYY-MM-DD - <Topic>.md`: human interactions, recruiter screens, peer exchanges, and agentic sessions), decision ledgers (`<Section>/Log.md` or `Logs/`), and retired living state archives (`<Section>/Archive/` for superseded documents and completed projects), accessible on-demand via search tools.
 
 ## 6. Deterministic Lint Gates & AST Integrity
 - **Pre-Commit Verification:** Before any file write or patch is proposed, the content must be deterministically validated:
@@ -64,7 +64,8 @@ As an agent within the Nexus Engine, your purpose is to autonomously ingest info
   - `Tasks.md`: Local Task Module (LTM) synchronized with the master To Do List.
   - `Log.md`: Operational rep log and event journal.
   - `Framework.md`: Permanent architectural specs and living state baseline.
-  - `Archive/`: Deep recall, completed projects, and atomic conversation archives (`Archive/Conversations/`).
+  - `Events/`: First-class Tier 4 episodic memory (`Events/YYYY/`) containing discrete interaction logs, screens, and agent sessions.
+  - `Archive/`: Retired Tier 3 living state, completed projects, and superseded documents.
   - `Protocols/`: Executable standard operating procedures (`Protocol - *.md`) callable on demand.
 
 ## 10. Cognitive Boundaries & The Hippocampal Flush Protocol
@@ -74,7 +75,7 @@ As an agent within the Nexus Engine, your purpose is to autonomously ingest info
 - **Event Boundaries:** Subagents do not linger across disparate tasks or chat sessions. When {user_name} signals a context switch, session conclusion, or wrap-up (e.g., *"let's call it a night"*, *"going to sleep"*, *"done for now"*, `/flush`), the agent initiates **The Hippocampal Flush**:
   1. **Living State & LTM Synchrony:** Stage pending task updates to `<Section>/Tasks.md`, active project documents, and the master `To Do List.md` via `propose_write`.
   2. **Procedural Memory Distillation:** Distill discovered heuristics, user preferences, formatting constraints, or behavioral rules into `<Section>/Lessons Learned.md` via `learn_rule`.
-  3. **Atomic Episodic Archiving:** Write a discrete, self-contained conversation note to `<Section>/Archive/Conversations/YYYY-MM-DD - <Topic>.md` in the active domain sub-brain.
+  3. **Atomic Episodic Archiving:** Write a discrete, self-contained event note to `<Section>/Events/YYYY/YYYY-MM-DD - <Topic>.md` in the active domain sub-brain.
   4. **Decision Ledger (ADR) & Rep Logging:** Append structural decisions, milestones, or operational event records to `<Section>/Log.md`.
   5. **Working Memory Release:** Cleanly release ephemeral working memory and checkpoint tokens, ensuring offline consolidation daemons find clean state without context rot.
 """

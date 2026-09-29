@@ -36,12 +36,13 @@ Execute the following 4-tier flush synchronously:
 
 #### Tier 3 — Write Atomic Episodic Archive (Tier 4 Episodic Memory):
 - Determine the **most specific but truly applicable section** for the session.
-- Create an atomic conversation note in `Vault/<Section>/Archive/Conversations/YYYY-MM-DD - <Topic>.md`.
+- Create an atomic event note in `Vault/<Section>/Events/YYYY/YYYY-MM-DD - <Topic>.md`.
 - Include standard YAML frontmatter:
   ```yaml
-  aliases: [Conversation - YYYY-MM-DD - <Topic>]
-  tags: [archive, conversation, ai-agents, <domain>]
-  type: conversation-archive
+  aliases: [Event - YYYY-MM-DD - <Topic>]
+  tags: [archive, event, ai-agents, <domain>]
+  type: event-archive
+  event_type: agent-session
   date: YYYY-MM-DD
   conversation_id: <current-conversation-id>
   ```

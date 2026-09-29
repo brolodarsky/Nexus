@@ -20,10 +20,10 @@ description: Executes the Cognitive Boundary Unit End (The Hippocampal Flush) to
    - Check if the user corrected the agent, expressed preferences, or established a reusable heuristic.
    - Append concise heuristics to `Vault/<Section>/Lessons Learned.md`.
 
-3. **Archive Atomic Conversation (Episodic Memory):**
+3. **Archive Atomic Event (Episodic Memory):**
    - Locate the most specific applicable section folder (e.g., `Vault/6. Forge/`, `Vault/2. Health/`, `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/`).
-   - Create an atomic markdown note in `Vault/<Section>/Archive/Conversations/YYYY-MM-DD - <Topic>.md`.
-   - Populate frontmatter (`aliases`, `tags`, `type: conversation-archive`, `date`, `conversation_id`).
+   - Create an atomic markdown note in `Vault/<Section>/Events/YYYY/YYYY-MM-DD - <Topic>.md`.
+   - Populate frontmatter (`aliases`, `tags`, `type: event-archive`, `event_type: agent-session | human-exchange`, `date`, `conversation_id`).
    - Include an Executive Summary, Key Decisions, and list of Documents Created/Modified.
 
 4. **Append Decision Record (ADR):**

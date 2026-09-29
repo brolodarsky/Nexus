@@ -20,7 +20,7 @@ Use this workflow to archive specific contacts or run a comprehensive pruning sw
    - Match the target table schema in `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.4. Networking & Professional CRM/Archive/Professional CRM - Archive.md`:
      `| Name | Role / Title | Company | Source | Last Contact | Status / Next Action | Historical Notes |`
    - Set **Status / Next Action** to `Closed / Archive`, `Closed / Rejected`, `Closed / Expired`, etc.
-   - Ensure **Historical Notes** record the final resolution date, reason, and retain any wiki-links to conversation logs (`[[Archive/Conversations/...]]`) or job requisitions (`[[Saved Job Listings/...]]`).
+   - Ensure **Historical Notes** record the final resolution date, reason, and retain any wiki-links to event logs (`[[Events/...]]`) or job requisitions (`[[Saved Job Listings/...]]`).
 
 3. Propose Two-Phase Commit Diff (HITL):
    - Present the candidate row(s) to the user with the justification for archiving.
