@@ -59,6 +59,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 [Link - Health - Google Drive](https://drive.google.com/drive/u/0/folders/1h_0QTrXWrNzyXtcDiM8bbolaMKAYU8PG)
 ## 2.1. Fitness
 - **[[Exercise Schedule & Planning]]:** Weekly program, exercise alternatives, and personal records.
+- **[[Tennis Development & Technique]]:** Master tennis mechanics, coaching logs with Jun, wall drill protocols, and court footwear specs.
 - **[Weight Loss Tracker](https://docs.google.com/spreadsheets/d/1YSXEWa5T5EXI_4_tVPZ3-wdpv8eyu3dDTaM9VPHxe0M/edit?usp=sharing)**
 - **Cardiovascular Base:** Running/Cycling logs and endurance strategies.
 	- **[[Plan - One-Year Cardio Endurance]]**
@@ -345,221 +346,17 @@ _The Content Log & Reference_
 
 
 ## 6.2. Library & Learning
-- **Technical Archive:** Engineering-specific YouTube tutorials, GitHub repos, and research papers.
+- **Engineering Knowledge Base:** Applied AI engineering, agentic architecture, LLM systems, and core software engineering. Foundational theory and math are preserved in the [[Technical Reference Archive]].
 
-### 6.2.1. Math
-[LibreTexts Mathematics](https://math.libretexts.org/)
-#### Linear Algebra
-**Core Concepts:**
-- [[Overview - Linear Algebra]]
-	- Vectors, matrices, and matrix operations 
-		- ([Khan Academy: Vectors and spaces](https://www.khanacademy.org/math/linear-algebra/vectors-and-spaces))
-	- Linear transformations, Systems of linear equations
-	- Dot products, cross products
-**Advanced Topics for AI:**
-- Eigenvalues and eigenvectors ([3Blue1Brown: Eigenvectors and eigenvalues](https://www.youtube.com/watch?v=PFDu9oVAE-g&list=PLZHQObOWTQDPD3MizzM2xVFitgF8hE_ab&index=14))
-- Singular Value Decomposition (SVD) ([Stanford CS229: SVD Review](https://cs229.stanford.edu/section/cs229-svd.pdf))
-- Principal Component Analysis (PCA) ([StatQuest: PCA explained](https://www.youtube.com/watch?v=FgakZw6K1QQ))
-- Tensors and tensor operations (especially for Deep Learning) ([TensorFlow: Introduction to Tensors](https://www.tensorflow.org/guide/tensor))
-**Resources:**
-- [Essence of Linear Algebra (YouTube - 3Blue1Brown)](https://www.youtube.com/playlist?list=PLZHQObOWTQDPD3MizzM2xVFitgF8hE_ab) - Highly intuitive visual explanations.
-- [Khan Academy: Linear Algebra](https://www.khanacademy.org/math/linear-algebra)
-- [Mathematics for Machine Learning Specialization (Coursera)](https://www.coursera.org/specializations/mathematics-machine-learning)
-- 📁 **Sources**
-
-#### Probability & Statistics
-**Core Concepts:**
-- TODO
-**Descriptive statistics & Probability theory**
-- Mean, Median, Mode, Variance, Standard Deviation
-- Sample spaces, conditional probability
-- Bayes' Theorem ([3Blue1Brown](https://www.youtube.com/watch?v=HZGCoVF3YvM))
-**[[Probability Distributions]]**
-- Normal, Poisson, Binomial, Uniform
-**Advanced Topics for AI:**
-- Hypothesis testing & p-values, confidence intervals
-- Regression analysis (Linear, Logistic - covered further in ML)
-- Markov Chains, Hidden Markov Models (HMMs) - (Core for classical NLP)
-- Information Theory: Entropy, Mutual Information, KL Divergence ([Visual Information Theory](https://colah.github.io/posts/2015-09-Visual-Information/))
-**Resources:**
--  [NIST/SEMATECH e-Handbook of Statistical Methods](https://www.itl.nist.gov/div898/handbook/index.htm)
-- TOADD
-#### Calculus & Optimization
-**Core Concepts:**
-- [[Calculus Overview]]
-- [[Differentiation & Partial Derivatives]]
-- Integrals and Multivariable calculus
-**Optimization Techniques for AI:**
-- [Gradient Descent](https://www.youtube.com/watch?v=IHZwWFHWa-w) (StatQuest) and its variants (SGD, Adam, etc.)
-- Loss functions, cost functions
-- Convex optimization
-#### Graph Theory
-- Nodes, edges, directed vs. undirected graphs.
-- Graph traversal: BFS, DFS on graphs.
-- Shortest path algorithms (Dijkstra, A*).
-- Graph coloring, connectivity, and cycle detection.
-
-### 6.2.2. Programming & Software Engineering
-#### Core Programming Languages
-##### [[Python]]
-The dominant language for AI/ML and Agentic Workflows.
-- Fundamentals: Data types, loops, classes, async/await (crucial for API calls).
-- Key Libraries for AI:
-- [[NumPy]] : Numerical computing, N-dimensional arrays.
-- [Pandas](https://pandas.pydata.org/docs/user_guide/10min.html): Data manipulation.
-- [Scikit-learn](https://scikit-learn.org/stable/user_guide.html): Core machine learning library.
-- [PyTorch](https://pytorch.org/tutorials/): Deep learning frameworks.
-- Requests / AIOHTTP / Pydantic: Crucial for building and interacting with Agent APIs.
-##### Web Technologies (For Browser Agents)
-- DOM (Document Object Model) manipulation.
-- HTML/CSS structures (XPath, CSS Selectors) for agent web scraping.
-- JavaScript basics for understanding client-side rendering.
-- [Mermaid.js](https://mermaid.js.org/): Markdown-native diagramming language (flowcharts, sequence diagrams, graph TD). Renders in Obsidian, GitHub, and most doc tools.
-##### Other Languages
-- **C++**: Critical for performance-intensive AI (CUDA kernels, physics simulations).
-- **TypeScript**: Increasingly popular for Agent frameworks (LangChain.js, specialized desktop apps).
-- **SQL / Shell Scripting (Bash)**: Essential for data pulling and CLI integrations.
-#### Software Engineering Practices
-- **[[Software Project Maturity Checklist]]:** Standardized checklist for enterprise-grade applications.
-- Version Control (Git) and CI/CD (GitHub Actions)
-- Testing: `pytest`, mocking API calls (crucial for testing LLM outputs).
-- API Design: RESTful principles, GraphQL, OpenAPI/Swagger specifications (how LLMs read APIs).
-- 📁 **Sources**
-
-
-### 6.2.3. Algorithms & Data Structures
-#### Core Data Structures
-- Arrays, Linked Lists, Stacks, Queues.
-- Hash Maps / Hash Tables.
-- Trees: Binary Trees, BSTs, Heaps, Tries.
-- Graphs: Adjacency Lists, Adjacency Matrices.
-#### Core Algorithms
-- Sorting: Merge Sort, Quick Sort, and complexity analysis.
-- Searching: Binary Search, BFS, DFS.
-- Dynamic Programming and Memoization.
-- Greedy Algorithms.
-- Recursion and Backtracking.
-#### Complexity Analysis
-- Big-O, Big-Ω, Big-Θ notation.
-- Time vs. Space tradeoffs.
-- 📁 **Sources**
-
-
-### 6.2.4. System Design & Distributed Systems
-#### Fundamentals
-- Client-Server architecture, Load Balancing, Caching (Redis, CDNs).
-- Database design: Relational vs. NoSQL, sharding, replication.
-- CAP Theorem, Eventual consistency.
-#### Distributed System Patterns
-- Message queues (Kafka, RabbitMQ), Pub/Sub.
-- Microservices vs. Monoliths.
-- Consensus algorithms (Raft, Paxos).
-#### Interview-Oriented Design
-- Designing scalable systems (URL shortener, chat app, news feed).
-- Capacity estimation and bottleneck analysis.
-- 📁 **Sources**
-
-
-### 6.2.5. Data Processing, Engineering & MLOps
-#### Data Collection & Pipelines
-- **Web scraping** (BeautifulSoup, Scrapy), API ingestion.
-- **Data Storage:** SQL vs NoSQL, Data Lakes, Data Warehouses.
-- **Feature Engineering:** Normalization, encoding, handling missing data.
-#### MLOps (Machine Learning Operations) & Deployment
-- Model deployment, serving architectures (vLLM, Ollama for local LLMs).
-- **Containerization:** Docker, Kubernetes.
-- **Cloud AI:** AWS Bedrock, GCP Vertex AI, Azure OpenAI. [Google Vertex AI](https://docs.cloud.google.com/vertex-ai/docs/start/introduction-unified-platform)
-- **Monitoring:** Tracking token usage, latency, and LLM hallucinations (LangSmith, Helicone).
-- 📁 **Sources**
-	- **[[Article - IBM Granite-Docling Document Understanding VLM]]**
-	- **[[Article - VALID Framework LLM EHR Data Validation]]**
-
-### 6.2.6. Machine Learning
-[Machine Learning Glossary]([Supervised Learning](https://developers.google.com/machine-learning/glossary#supervised-learning))
-#### Types of Learning
-- [[Supervised Learning]]: Learning from labeled data (Classification & Regression).
-- [Unsupervised Learning](https://developers.google.com/machine-learning/glossary#unsupervised-learning): Clustering (K-Means), Dimensionality Reduction (PCA).
-- Reinforcement Learning: Reward-based learning in environments.
-- Self-Supervised Learning: (The foundation of modern LLMs).
-#### Model Evaluation & Metrics
-- Train-validation-test split, Cross-Validation.
-- Metrics: Accuracy, Precision, Recall, F1-score, MSE.
-- [Bias-Variance Tradeoff](https://en.wikipedia.org/wiki/Bias%E2%80%93variance_tradeoff), Overfitting/Underfitting. Regularization techniques (L1, L2).
-#### Common Machine Learning Algorithms
-- Linear & Logistic Regression
-- Tree-Based Models: Decision Trees, Random Forests, Gradient Boosting (XGBoost).
-- SVMs, K-Nearest Neighbors (KNN).
-- 📁 **Sources**
-
-
-### 6.2.7. Deep Learning
-#### Neural Network Fundamentals
-- Neurons, Layers, Activation Functions (Sigmoid, ReLU, GELU).
-- Forward Propagation & Backpropagation.
-- Optimizers (Adam, RMSprop) and Loss Functions (Cross-Entropy).
-#### Deep Learning Architectures
-- **CNNs (Convolutional Neural Networks):** Image and video processing (ResNet, YOLO).
-- **RNNs & LSTMs:** Sequential data processing (legacy NLP).
-- **Transformers:** The definitive architecture for modern AI (Self-Attention mechanism). 
-  - [The Illustrated Transformer (Jay Alammar)](http://jalammar.github.io/illustrated-transformer/)
-#### Generative AI Advanced Concepts
-- **Large Language Models (LLMs):** Pre-training vs. Instruction Fine-Tuning vs. RLHF.
-- **Diffusion Models:** Image and video generation (Stable Diffusion, Midjourney, Sora).
-- **Multi-Modal Models:** Vision-Language Models (VLMs) like GPT-4o, Claude 3.5 Sonnet.
-	- **[[Concept - Vision vs Language Models]]**
-- 📁 **Sources**
-
-
-### 6.2.8. NLP & Vector Search
-#### Core NLP & Embeddings
-- Text Representation: Word2Vec, Contextual Embeddings.
-- Vector Embeddings: Dense representations of text.
-- [[Vector Databases]]: ChromaDB, Pinecone, [Milvus](https://milvus.io/intro), Qdrant. 
-- Chunking strategies for parsing large documents.
-#### Post-Training & Application
-- **[[Prompt Engineering]]:** System prompts, few-shot prompting, prompt injection defenses.
-- **[[Retrieval Augmented Generation (RAG)]]:** Connecting LLMs to external data via Vector DBs.
-  - Advanced RAG: Semantic routing, query rewriting, re-ranking (Cohere).
-  - [OpenAI - Cookbook - Doing RAG on PDFs using File Search in the Responses API](https://developers.openai.com/cookbook/examples/file_search_responses)
-- **[[Context Fragmentation]]:** Why isolated vector chunking fails multi-hop long-term reasoning, and why GraphRAG/Agentic loops are necessary.
-- Fine-Tuning: LoRA, QLoRA, Parameter-Efficient Fine-Tuning (PEFT).
-#### Knowledge Graphs & GraphRAG
-- Ontologies, RDF, and triple stores (subject-predicate-object).
-- Knowledge Graph construction from unstructured text.
-- **GraphRAG:** Combining knowledge graphs with retrieval-augmented generation for multi-hop reasoning.
-- Graph Neural Networks (GNNs): Node classification, link prediction.
-- Tools: Neo4j, Amazon Neptune.
-- 📁 **Sources**
-
-
-### 6.2.9. Computer Vision
-**Core Concepts**
-- **Image Preprocessing:** OpenCV, Filtering, transformations.
-- **Object Detection:** YOLO, SSD.
-- **Image Segmentation:** Semantic vs. Instance.
-- **3D Computer Vision:** Point clouds, SLAM (Visual localization).
-- **Vision Transformers (ViT)** and cross-modal implementations.
-- 📁 **Sources**
-
-
-### 6.2.10. Reinforcement Learning
-**Core Concepts**
-- **Markov Decision Processes (MDPs)**, value & policy iteration.
-- **Algorithms:** Q-Learning, Policy Gradients, PPO (Proximal Policy Optimization).
-- **Deep Reinforcement Learning (DRL)**
-- **RLHF** (Reinforcement Learning from Human Feedback) & **RLAIF** (from AI Feedback).
-- 📁 **Sources**
-
-
-### 6.2.11. Intelligent Agents & Autonomy
-
-- **📁 [Course - AI Agents in LangGraph](<file:\\\C:\Users\Willi\Documents\Projects\Nexus\Vault\6. Forge\6.2. Library & Learning\6.2.11. Intelligent Agents & Autonomy\Course - AI Agents in LangGraph>)**
+### 6.2.1. Intelligent Agents & Autonomy
+- **📁 [[Course Overview- AI Agents In LangGraph|Course - AI Agents in LangGraph]]**
 	- **[[Course Overview- AI Agents In LangGraph]]**
 #### LLM-Based Agents
 - **[[Overview - AI Agents]]**
 - **Architectures:** Shift from conversational ReAct loops to Stateful Orchestration (State Machines, Flow Engineering, Reflexion).
 - **Memory & State:** Persistent state management, token-efficiency optimizations, and GraphRAG.
 	- **[[Concept - Cognitive Boundaries & Event-Driven Agent Memory]]:** Neuroscience Event Segmentation Theory (EST), Von Neumann hardware mapping (ALU/RAM/Disk), two-phase sleep consolidation, and impedance matching.
+	- **[[Concept - Cognitive Impedance Matching & AI System Coupling]]**
 #### Agent Tool Use & Integration (The "Hands")
 - **[[Function Calling & Structured Outputs]]:** The foundational bridge between LLMs and code execution (JSON schema enforcement).
 - **Tool Protocols:** **[[Concept - Model Context Protocol (MCP)]]:** Universal open standard for providing models with secure data context and tool access.
@@ -580,40 +377,78 @@ The dominant language for AI/ML and Agentic Workflows.
 - **Enterprise Governance:** Managing autonomous boundaries, strict tool bounding, and Human-in-the-Loop (HITL) checkpoints.
 - **Benchmarking:** SWE-bench (software engineering mastery), WebArena (browser automation).
 - **Safety:** Defending against adversarial payloads, prompt injections, and infinite resource loops.
-
 - **[[Glossary - Nexus Engine Terminology]]:** Standardized acronyms and terminology for the Nexus Agentic Engine (AFS, DPFH, LTM, DCD, DTM, RSI, CI, HITL).
 - 📁 **Sources**
 	- **[[Article - Building Effective Agents]]**
+	- **[[Article - Agent Harness Engineering vs. Loop Engineering vs. Graph Engineering]]**
+	- **[[Article - The Impedance Mismatch of Human-AI Systems]]**
+	- **[[Article - We Analyzed 534 Agentic AI Engineering Jobs. Here's the LangChain Market]]**
+	- **[[Capture - YouTube - CLI vs MCP for AI Agents]]**
 
-### 6.2.12. AI for Science & Healthcare
-#### Articles & Research
+### 6.2.2. Language Models & Production RAG
+#### Core NLP & Embeddings
+- Text Representation: Word2Vec, Contextual Embeddings.
+- Vector Embeddings: Dense representations of text.
+- [[Vector Databases]]: ChromaDB, Pinecone, [Milvus](https://milvus.io/intro), Qdrant. 
+- Chunking strategies for parsing large documents.
+#### Post-Training & Application
+- **[[Prompt Engineering]]:** System prompts, few-shot prompting, prompt injection defenses.
+- **[[Retrieval Augmented Generation (RAG)]]:** Connecting LLMs to external data via Vector DBs.
+  - Advanced RAG: Semantic routing, query rewriting, re-ranking (Cohere).
+  - [OpenAI - Cookbook - Doing RAG on PDFs using File Search in the Responses API](https://developers.openai.com/cookbook/examples/file_search_responses)
+- **[[Context Fragmentation]]:** Why isolated vector chunking fails multi-hop long-term reasoning, and why GraphRAG/Agentic loops are necessary.
+- Fine-Tuning: LoRA, QLoRA, Parameter-Efficient Fine-Tuning (PEFT).
+#### Knowledge Graphs & GraphRAG
+- Ontologies, RDF, and triple stores (subject-predicate-object).
+- Knowledge Graph construction from unstructured text.
+- **GraphRAG:** Combining knowledge graphs with retrieval-augmented generation for multi-hop reasoning.
+- Graph Neural Networks (GNNs): Node classification, link prediction.
+- Tools: Neo4j, Amazon Neptune.
+
+### 6.2.3. Programming & Software Engineering
+#### Core Programming Languages
+##### [[Python]]
+The dominant language for AI/ML and Agentic Workflows.
+- Fundamentals: Data types, loops, classes, async/await (crucial for API calls).
+- Key Libraries for AI:
+  - [[NumPy]]: Numerical computing, N-dimensional arrays.
+  - [[Pandas]]: Data manipulation and tabular analysis.
+  - [Scikit-learn](https://scikit-learn.org/stable/user_guide.html): Core machine learning library.
+  - [PyTorch](https://pytorch.org/tutorials/): Deep learning frameworks.
+  - Requests / AIOHTTP / Pydantic: Crucial for building and interacting with Agent APIs.
+##### Web Technologies (For Browser Agents)
+- DOM (Document Object Model) manipulation.
+- HTML/CSS structures (XPath, CSS Selectors) for agent web scraping.
+- JavaScript basics for understanding client-side rendering.
+- [Mermaid.js](https://mermaid.js.org/): Markdown-native diagramming language (flowcharts, sequence diagrams, graph TD).
+##### Databases & Systems
+- **[[SQL Overview]]:** Essential for data pulling and CLI integrations.
+- **TypeScript:** Increasingly popular for Agent frameworks (LangChain.js, specialized desktop apps).
+- **C++:** Critical for performance-intensive AI (CUDA kernels, physics simulations).
+#### Software Engineering Practices
+- **[[Software Project Maturity Checklist]]:** Standardized checklist for enterprise-grade applications.
+- Version Control (Git) and CI/CD (GitHub Actions)
+- Testing: `pytest`, mocking API calls (crucial for testing LLM outputs).
+- API Design: RESTful principles, GraphQL, OpenAPI/Swagger specifications.
+
+### 6.2.4. Data Engineering & MLOps
+#### Data Collection & Pipelines
+- **[[Data Collection & Acquisition]]:** Web scraping, API ingestion, and raw dataset pipelines.
+- **Data Storage:** SQL vs NoSQL, Data Lakes, Data Warehouses.
+- **Feature Engineering:** Normalization, encoding, handling missing data.
+#### MLOps & Deployment
+- Model deployment, serving architectures (vLLM, Ollama for local LLMs).
+- **Containerization:** Docker, Kubernetes.
+- **Cloud AI:** AWS Bedrock, GCP Vertex AI, Azure OpenAI.
+- **Monitoring:** Tracking token usage, latency, and LLM hallucinations (LangSmith, Helicone).
 - 📁 **Sources**
-	- **[[Article - TRIBE v2 Brain Predictive Foundation Model]]**
+	- **[[Article - IBM Granite-Docling Document Understanding VLM]]**
+	- **[[Article - VALID Framework LLM EHR Data Validation]]**
 
-#### Structural Biology & Bioinformatics
-- **AlphaFold 3 & Protein Folding:** Predicting protein structures and molecular interactions.
-- **Drug Discovery:** Generative AI for small molecule design.
-#### Clinical & Medical AI
-- **Medical LLMs:** Fine-tuning base models for medical QA (e.g., Med-PaLM 2, Clinical Camel).
-- **Diagnostics:** Computer vision applied to radiology and pathology.
-- **EHR Integration:** Extracting structural data from unstructured clinical text (HL7, FHIR context).
-#### Neuroscience & BCI
-- **Brain-Computer Interfaces:** Translating neural activity into digital commands.
-- **fMRI Decoding:** Foundation models for neuro-prediction.
-
-### 6.2.13. Robotics (Hardware & Control Systems)
-#### Kinematics, Dynamics & Control
-- Forward/Inverse Kinematics.
-- PID controllers, State-space representation, Model Predictive Control (MPC).
-#### Sensors, Actuators & ROS
-- Cameras, LiDAR, IMUs. Motor controllers.
-- Robot Operating System ([ROS 2](https://docs.ros.org/en/rolling/)). Nodes, Topics, Messages.
-- **Simulation:** Gazebo, NVIDIA Isaac Sim, MuJoCo.
-- 📁 **Sources**
-
-
-### 6.2.14. AI Ethics, Safety & Governance
-- **Explainable AI (XAI):** Interpretability tools (LIME, SHAP).
-- **Safety Guardrails:** Securing agentic workflows and prompt injection defense.
-- **Regulation:** Tracking the EU AI Act and global compliance.
-- 📁 **Sources**
+### 6.2.5. Technical Reference Archive
+- **[[Technical Reference Archive]]:** Consolidated Map of Content (MOC) archiving foundational theory and low-frequency academic reference:
+  - **Mathematics for Computing & AI:** [[Overview - Linear Algebra]], [[Calculus Overview]], [[Differentiation & Partial Derivatives]], [[Probability Distributions]]
+  - **Classical Machine Learning:** [[Supervised Learning]], [[Linear Regression]], [[Logistic Regression]]
+  - **Deep Learning Foundations:** [[Concept - Vision vs Language Models]], neural network architectures, transformers, and diffusion models
+  - **Domain AI Applications:** [[Article - TRIBE v2 Brain Predictive Foundation Model]] (AI for Science & Healthcare)
+  - **Archived Curricula & Syllabi:** External courses, Khan Academy, 3Blue1Brown, and StatQuest references.
