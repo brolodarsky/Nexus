@@ -66,7 +66,7 @@ When asked to generate, move, format, or import a note/thought into the user's O
 
 ## 7. To Do List Registration
 
-When creating a note with the `Protocol -` or `Project -` prefix, you MUST also register it in `Vault/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md`.
+When creating a note with the `Protocol -` or `Project -` prefix, you MUST also register it in `Vault/1. Core/1.1. Philosophy & Personal North Star/To Do List.md`.
 
 ### Protocol Registration
 1.  **Read** `To Do List.md` and locate the `## Recurring Protocols` section.

@@ -3,12 +3,12 @@ aliases: [TOC, Index, Map of Content]
 tags: [index, master]
 type: overview
 ---
-# 0. Buffers & Inboxes
-- **📁 [Inbox](obsidian://search?vault=Vault&query=path%3AInbox):** Temp file storage for items bound for integration.
+# 0. Inbox
+- **Inbox:** Temp storage for incoming items bound for integration.
 - **[[0. Quick Capture|Quick Capture]]:** Temp scratchpad note for items bound for integration.
-
-
-# 1. The Core: Identity & Governance
+ 
+ 
+# 1. Core: Identity & Governance
 _Systemic foundations for mental clarity, resilience, long-term vision, and daily tactical execution._
 ## 1.1. Philosophy & Personal North Star
 - **[[Goals]]**
@@ -20,14 +20,14 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **Principles & Ethics:** Core values, decision-making frameworks.
 - **The 10-Year Horizon:** Strategic goals for the longer term.
 - **Legacy & Impact:** What do I want to build that lasts?
-- **[[Playbook]]:** Section 1.1 operational guide and episodic life archiving rules.
-- **📁 [Archive](obsidian://search?vault=Vault&query=path%3A"1.1.%20Philosophy%20%26%20Personal%20North%20Star/Archive"):** Daily tactical execution and working set archives (`Archive/YYYY/MM/YYYY-MM-DD.md`).
+- **[[1. Core/1.1. Philosophy & Personal North Star/Playbook|Playbook]]:** Section 1.1 operational guide and episodic life archiving rules.
+- **Archive:** Daily tactical execution and working set archives (`Archive/YYYY/MM/YYYY-MM-DD.md`).
 
 ### 1.1.1. Personal Logs
-- **📁 [Journal](obsidian://search?vault=Vault&query=path%3AJournal)**
+- **Journal**
 	- **[[2026 - Journal]]**: Technical progress, career strategy, and tactical "Engine" development.
 - **[[Memories Log]]**: Personal milestones, social wins, and life highlights.
-	- **📁 [Memories Log Images](obsidian://search?vault=Vault&query=path%3AMemories_Log_Images)**
+- **Memories Log Images**
 - **The Trophy Case:** Screenshots of wins, kind words from others, and completed major projects.
 
 
@@ -40,7 +40,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **[[Template - Capture]]** Used for capturing raw content (YouTube transcripts, podcasts, articles, etc.)
 - **[[Protocol - Brain Maintenance]]**
 - **Toolbox:** Documentation for the Pixel 8 Pro, Obsidian/Logseq workflows, and local LLM setups.
-- **📁 [Archive](obsidian://search?vault=Vault&query=path%3A"1.2.%20Personal%20Knowledge%20Management%20(PKM)/Archive")**
+- **Archive**
 
 ## 1.3. Security & Digital Sovereignty
 - **Security Audit:** Password management strategy, 2FA recovery locations, and encryption protocols.
@@ -74,8 +74,8 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **[[Insurance Card]]**
 	- [[Doc - Medical Insurance 2026 Summary of Benefits and Coverage (SBC)]]: 2026 Oscar Health Summary of Benefits and Coverage
 - **[[Prescriptions]]**
-- **📁 [Health_Logs](obsidian://search?vault=Vault&query=path%3AHealth_Logs):** Doctor's visits
-- **📁 [Lab_Work](obsidian://search?vault=Vault&query=path%3ALab_Work)**
+- **Health Logs:** Doctor's visits
+- **Lab Work**
 - **Vaccination & Screening:** Long-term preventative maintenance records.
 - **Sleep Hygiene:** Protocols for deep rest and circadian rhythm alignment.
 
@@ -97,8 +97,8 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 	- **[[Life Chronology]]**
 - **Meditation & Mindfulness:** Rituals for grounding and focus.
 - **Stress Mitigation:** Systems for decompressing after high-output days.
-- **📁 [Articles](obsidian://search?vault=Vault&query=path%3A"2.%20Health/2.3.%20Psych/Articles"):** Research and reference material for psychological health.
-- **📁 [Archive](obsidian://search?vault=Vault&query=path%3A"2.%20Health/2.3.%20Psych/Archive")**
+- **Articles:** Research and reference material for psychological health.
+- **Archive**
 - **ACT**
 	- **[[Concept - ACT Hexaflex]]**
 - **CBT / ERP / I-CBT**
@@ -113,12 +113,12 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 ## 2.5. Mom's Health Tracking
 - **[[Mom's Health Summary]]**: Master dashboard for tracking symptoms, lab work, medications, and visits for Mom.
 - **[[Mom's Insurance Cards]]**
-- **📁 [Mom's Health Logs](obsidian://search?vault=Vault&query=path%3AMom_Health_Logs)**
-- **📁 [Mom's Lab Work](obsidian://search?vault=Vault&query=path%3AMom_Lab_Work)**
+- **Mom's Health Logs**
+- **Mom's Lab Work**
 
 
 
-# 3. Operations & Wealth
+# 3. Operations
 _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **[[Operations Lessons]]:** Enduring procedural memory & strategic rules for operations, wealth, and housing.
 ## 3.1. Career Strategy & Revenue
@@ -158,7 +158,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 
 ### 3.1.4. Networking & Professional CRM
 - **[[Professional CRM]]:** Contacts, recruiters, mentors, and warm intro tracking.
-- **📁 [Archive](obsidian://search?vault=Vault&query=path%3A"3.%20Operations%20%26%20Wealth/3.1.%20Career%20Strategy%20%26%20Revenue/3.1.4.%20Networking%20%26%20Professional%20CRM/Archive")**
+- **Archive**
 	- **[[Professional CRM - Archive]]:** Inactive, closed, and historical networking contacts and outreach pipelines.
 
 ### 3.1.5. Income Streams & Side Revenue
@@ -228,7 +228,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **📁 Archive**
 
 
-# 4. Playground
+# 4. Life
 _Dedicated space for exploration, relationships, and pure interest._ Connection & Joy
 ## 4.1. Social Life & Community
 - **Family Data**
@@ -263,7 +263,7 @@ _Dedicated space for exploration, relationships, and pure interest._ Connection 
 
 
 
-# 5. Capture & Archive
+# 5. Reference
 _The Content Log & Reference_
 ## 5.1. The Content Log (General)
 - **YouTube "Everything Else" List:** Videos unrelated to other Nexus sections (entertainment, intrigue, rabbit holes, etc).
@@ -282,9 +282,9 @@ _The Content Log & Reference_
 
 
 
-# 6. Forge
+# 6. Engineering
 *Technical Mastery*
-- **[[Log|Forge Log]]**: Architecture Decision Records (ADRs), technical dialogues, and engine design trade-offs.
+- **[[6. Engineering/Log|Engineering Log]]**: Architecture Decision Records (ADRs), technical dialogues, and engine design trade-offs.
 
 ## 6.1. Projects 
 *The Lab*

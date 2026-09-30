@@ -9,8 +9,8 @@ Execute strategic career advisory by synthesizing vault context across three pri
 
 ## 1. Ground Context in Three Pillars
 
-- Strategy (3.1): Read `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/` to understand active search strategy, target companies, and market research.
-- Evidence (6.1): Read `Vault/6. Forge/6.1. Projects/` to evaluate flagship applications, codebases, and artifacts suitable for hiring evidence.
+- Strategy (3.1): Read `Vault/3. Operations/3.1. Career Strategy & Revenue/` to understand active search strategy, target companies, and market research.
+- Evidence (6.1): Read `Vault/6. Engineering/6.1. Projects/` to evaluate flagship applications, codebases, and artifacts suitable for hiring evidence.
 - Psychology (2.3): Read `Vault/2. Health/2.3. Psych/` to assess current cognitive load and avoid job-search burnout or context thrashing.
 
 ## 2. Market Grounding
@@ -25,16 +25,16 @@ Execute strategic career advisory by synthesizing vault context across three pri
 
 ## 4. Vault Updates and Cross-References
 
-- Strategic updates: Propose updates to `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md` whenever strategies evolve.
+- Strategic updates: Propose updates to `Vault/3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md` whenever strategies evolve.
 - Project note maintenance: Apply the `project_work` skill when modifying active career projects or roadmap scope.
 - Resume compilation: Apply the `/render_resume` workflow when generating or tailoring PDF/DOCX resumes.
 - Platform synchronization: Remind user to mirror resume or project changes to external profiles (Handshake, LinkedIn, Wellfound, YC) to avoid profile drift.
-- Task synchronization: Ensure actionable milestones are mirrored in `Vault/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md`.
-- Sliding window sprint: Maintain the rolling tactical working-set envelope (`W-5` to `W+5`: 5 working sets lookback, granular active anchor on today at the top, 5 working sets flight path) in `Vault/1. The Core/1.1. Philosophy & Personal North Star/Short Term Execution Plan.md`. Track working sets only (exclude rest days), proactively prompt the user on prior day outcomes ("How did yesterday go? Can I log anything?"), and keep past/future sets heavily summarized.
+- Task synchronization: Ensure actionable milestones are mirrored in `Vault/1. Core/1.1. Philosophy & Personal North Star/To Do List.md`.
+- Sliding window sprint: Maintain the rolling tactical working-set envelope (`W-5` to `W+5`: 5 working sets lookback, granular active anchor on today at the top, 5 working sets flight path) in `Vault/1. Core/1.1. Philosophy & Personal North Star/Short Term Execution Plan.md`. Track working sets only (exclude rest days), proactively prompt the user on prior day outcomes ("How did yesterday go? Can I log anything?"), and keep past/future sets heavily summarized.
 
 ## 5. Decision Checklist
 
-- Aligns with the personal North Star in `1. The Core`?
+- Aligns with the personal North Star in `1. Core`?
 - Leverages deployed flagship evidence in `6.1. Projects`?
 - Accounts for cognitive bandwidth in `2.3. Psych`?
 - Supported by current market evidence?

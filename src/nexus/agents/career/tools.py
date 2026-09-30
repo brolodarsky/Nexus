@@ -12,7 +12,7 @@ from nexus.shared_tools.vault_reader import read_note_content, search_within
 from nexus.shared_tools.shared import ask_librarian_escalation, get_propose_write_tool, get_read_note_tool
 
 # ── Constants ────────────────────────────────────────────────────────────────
-CAREER_DOMAIN_PATH = VAULT_PATH / "3. Operations & Wealth" / "3.1. Career Strategy & Revenue"
+CAREER_DOMAIN_PATH = VAULT_PATH / "3. Operations" / "3.1. Career Strategy & Revenue"
 RESUMES_PATH = CAREER_DOMAIN_PATH / "3.1.3. Professional Portfolio & Evidence" / "Resumes"
 MASTER_RESUME_PATH = RESUMES_PATH / "Resume - Master.md"
 

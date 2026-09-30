@@ -12,8 +12,8 @@ description: Scaffolds a structured canonical project note from raw ideas, inbox
 
 2. Determine Folder Location & Naming:
    - Cross-reference `Vault/Table of Contents.md` and physical folder structure to choose the appropriate directory:
-     - Software / AI: `Vault/6. Forge/6.1. Projects/6.1.1. Flagship Applications/` or `6.1.2. Agentic R&D/`
-     - Operations / DIY: `Vault/3. Operations & Wealth/3.2. Home & Auto/` or similar.
+     - Software / AI: `Vault/6. Engineering/6.1. Projects/6.1.1. Flagship Applications/` or `6.1.2. Agentic R&D/`
+     - Operations / DIY: `Vault/3. Operations/3.3. Infrastructure & Logistics/` or similar.
    - Use `list_dir` on the target directory to verify existing naming patterns.
    - Format the filename using the standard taxonomic prefix: `Project - <Project Name>.md` (e.g., `Project - Nutrition Meal Planner.md`).
 
@@ -68,9 +68,9 @@ type: project
    - Add a `[[wiki-link]]` to the new project note in the corresponding section of `Vault/Table of Contents.md`.
 
 6. Register in To Do List:
-   - Add the project note link to the `Active Projects` section of `Vault/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md`:
+   - Add the project note link to the `Active Projects` section of `Vault/1. Core/1.1. Philosophy & Personal North Star/To Do List.md`:
      `- [ ] [[Project - <Project Name>]] — Brief one-line objective`
 
 7. Cleanup & Confirm:
-   - If the source material was an inbox scratchpad in `Vault/5. Capture & Archive/5.1. Brain Dump & Inbox/`, delete or archive the scratchpad.
+   - If the source material was an inbox scratchpad in `Vault/0. Inbox/`, delete or archive the scratchpad.
    - Output a summary of the created file path, TOC link, and To Do List entry to the user.

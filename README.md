@@ -77,9 +77,8 @@ Nexus/
 ├── Vault/                      # All Brain content lives here
 │   ├── .obsidian/              # Obsidian settings
 │   ├── .stfolder/              # Syncthing folder
-│   ├── 0. Inbox/               # Temp file storage for items bound for integration
-│   ├── 0. Quick Capture.md     # Temp scratchpad note
-│   ├── 1. The Core/                # Identity, governance, and foundations
+│   ├── 0. Inbox/               # Temp file storage for items bound for integration (includes Quick Capture)
+│   ├── 1. Core/                # Identity, governance, and foundations
 │   │   ├── 1.1. Philosophy & Personal North Star/    # Values, principles, and long-term vision
 │   │   │   └── Personal Logs/                        # Journal, Memories, and The Trophy Case
 │   │   ├── 1.2. Personal Knowledge Management (PKM)/ # Nexus.0 meta and maintenance protocols
@@ -93,7 +92,7 @@ Nexus/
 │   │   ├── 2.3. Psych/                               # Cognitive load and mindfulness rituals
 │   │   ├── 2.4. Nutrition/                           # Recipe vault and nutrition science
 │   │   └── 2.5. Mom's Health Tracking/               # Caregiving logs, symptoms, and medical records for Mom
-│   ├── 3. Operations & Wealth/     # Financial and logistical systems
+│   ├── 3. Operations/              # Financial and logistical systems
 │   │   ├── 3.1. Career Strategy & Revenue/           # Job hunt, professional profile, and portfolio
 │   │   │   ├── 3.1.1. Market Research & Future of Work/
 │   │   │   ├── 3.1.2. Interview Prep & Technical Depth/
@@ -106,15 +105,15 @@ Nexus/
 │   │       ├── 3.3.1. Home Improvement & Maintenance/
 │   │       ├── 3.3.2. Family & Care/
 │   │       └── 3.3.3. Auto/
-│   ├── 4. Playground/              # Social, culture, and creativity
+│   ├── 4. Life/                    # Social, culture, and creativity
 │   │   ├── 4.1. Social Life & Community/             # People data, social club, and adventures
 │   │   ├── 4.2. Romance & Partnership/               # Relationship maintenance and date ideas
 │   │   ├── 4.3. Culture & Inspiration/               # Media archive, reading list, and education
 │   │   └── 4.4. Creativity/                          # Writing, jokes, and creative exploration
-│   ├── 5. Capture & Archive/       # The Content Log & Reference
+│   ├── 5. Reference/               # External reference, logs & digital inventory
 │   │   ├── 5.1. The Content Log (General)/           # Web archive and YouTube history
 │   │   └── 5.2. Digital Inventory/                   # Hardware/software audits and backups
-│   ├── 6. Forge/                   # Technical projects and learning
+│   ├── 6. Engineering/             # Technical projects and learning
 │   │   ├── 6.1. Projects/                            # Active development "The Lab"
 │   │   │   ├── 6.1.1. Flagship Applications/         # Primary high-importance projects
 │   │   │   ├── 6.1.2. Agentic R&D/                   # Agentic skills (mirrored), workshops, and tinkering

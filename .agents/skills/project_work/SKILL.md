@@ -37,7 +37,7 @@ When conceptual items are added, removed, or changed:
 ## 4. Keep Global Tracking Documents in Sync
 
 Ensure other files that reference this project are also kept up to date:
-- If a new project note is created, register it under the Active Projects section of Vault/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md.
+- If a new project note is created, register it under the Active Projects section of Vault/1. Core/1.1. Philosophy & Personal North Star/To Do List.md.
 - If a project is completed, archived, or no longer needed, run the archive_project protocol to update To Do List.md, Table of Contents.md, and move the project file to its section-specific archive directory.
 - Update any MOCs (Map of Content) or higher-level project notes that link to or track the current project.
 
@@ -47,7 +47,7 @@ This section applies **automatically** whenever work touches `src/nexus/`, `tool
 
 ### Folder
 All Nexus project scope docs live in:
-`Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/Project - Nexus Agentic Engine/`
+`Vault/6. Engineering/6.1. Projects/6.1.2. Agentic R&D/Project - Nexus Agentic Engine/`
 
 ### Structure
 - **Parent (master scope):** `Project - Nexus Agentic Engine.md` — governs the entire engine (architecture, cross-cutting roadmap, overall Current State).

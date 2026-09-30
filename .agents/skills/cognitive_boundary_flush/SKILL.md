@@ -28,11 +28,11 @@ Execute the following 4-tier flush synchronously:
 #### Tier 1 — Reconcile Living State & LTM (Tier 3 Semantic Memory):
 - Check what files, projects, or tasks were modified or completed during the session.
 - Update the relevant domain's Local Task Module (`Vault/<Section>/Tasks.md`).
-- If global project statuses shifted, update `Vault/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md` (Active Projects or Completed Trophy Case).
+- If global project statuses shifted, update `Vault/1. Core/1.1. Philosophy & Personal North Star/To Do List.md` (Active Projects or Completed Trophy Case).
 
 #### Tier 2 — Distill Procedural Memory (Tier 2 Subconscious):
 - Review the session for any newly discovered operational rules, formatting guidelines, architectural boundaries, or failure modes.
-- Append concise, bulleted heuristics to the relevant section's `Lessons Learned.md` (e.g. `Vault/6. Forge/Lessons Learned.md` or `Vault/2. Health/Lessons Learned.md`).
+- Append concise, bulleted heuristics to the relevant section's `Lessons Learned.md` (e.g. `Vault/6. Engineering/Lessons Learned.md` or `Vault/2. Health/Lessons Learned.md`).
 
 #### Tier 3 — Write Atomic Episodic Archive (Tier 4 Episodic Memory):
 - Determine the **most specific but truly applicable section** for the session.
@@ -53,7 +53,7 @@ Execute the following 4-tier flush synchronously:
   - **Documents Created, Archived & Modified:** Explicit list with clickable markdown links.
 
 #### Tier 4 — Record Decision Ledger / ADR (if applicable):
-- If the session produced structural engine decisions, system design changes, or architectural shifts, append a concise ADR entry to `Vault/<Section>/Log.md` (e.g., `Vault/6. Forge/Log.md`).
+- If the session produced structural engine decisions, system design changes, or architectural shifts, append a concise ADR entry to `Vault/<Section>/Log.md` (e.g., `Vault/6. Engineering/Log.md`).
 
 ---
 

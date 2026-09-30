@@ -11,7 +11,7 @@ description: Render markdown resumes/letters to PDF/DOCX and output page fill me
      ```
    - To render a specific file directly (non-interactive):
      ```bash
-     node src/nexus/shared_tools/resume_engine/render.js "Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Resumes/Resume - Master.md"
+     node src/nexus/shared_tools/resume_engine/render.js "Vault/3. Operations/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Resumes/Resume - Master.md"
      ```
 
 2. Read Page Metrics:

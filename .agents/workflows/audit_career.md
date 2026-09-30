@@ -15,12 +15,12 @@ description: Run cross-document drift audit across all career strategy and portf
 
 2. Perform Tier-2 Semantic LLM Drift Audit:
    - Read the core cluster files:
-     - `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/My Skills.md`
-     - `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Resumes/Resume - Master.md`
-     - `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Resumes/Resume - Master (Extended).md`
-     - `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Platform Profiles.md`
-     - `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Portfolio Hub.md`
-     - `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md`
+     - `Vault/3. Operations/3.1. Career Strategy & Revenue/My Skills.md`
+     - `Vault/3. Operations/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Resumes/Resume - Master.md`
+     - `Vault/3. Operations/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Resumes/Resume - Master (Extended).md`
+     - `Vault/3. Operations/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Platform Profiles.md`
+     - `Vault/3. Operations/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Portfolio Hub.md`
+     - `Vault/3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md`
    - Evaluate cross-document alignment across 4 dimensions:
      1. **Grounded Claims:** Is every skill claimed in `Resume - Master` backed by an evidence brief in `Portfolio Hub` and listed in `My Skills`?
      2. **Profile Parity:** Do the headlines, bios, and summaries in `Platform Profiles.md` accurately mirror the narrative in `Resume - Master.md`?

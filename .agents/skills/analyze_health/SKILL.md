@@ -33,4 +33,4 @@ When new findings emerge or clinical priorities shift, update the patient's `Hea
 - Table hygiene: Keep active/urgent items at the top; move treated or managed items to the bottom.
 - Symptom consolidation: Group managed symptom clusters into consolidated rows (e.g., 'Allergic Rhinitis').
 - Demote obsolete hypotheses: Move debunked theories to the bottom or archive them.
-- Task synchronization: Mirror urgent medical tasks (appointments, medication tapers) in `Vault/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md`.
+- Task synchronization: Mirror urgent medical tasks (appointments, medication tapers) in `Vault/1. Core/1.1. Philosophy & Personal North Star/To Do List.md`.

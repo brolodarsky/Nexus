@@ -25,7 +25,7 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 VAULT_DIR = REPO_ROOT / "Vault"
-CAREER_DIR = VAULT_DIR / "3. Operations & Wealth" / "3.1. Career Strategy & Revenue"
+CAREER_DIR = VAULT_DIR / "3. Operations" / "3.1. Career Strategy & Revenue"
 EVIDENCE_DIR = CAREER_DIR / "3.1.3. Professional Portfolio & Evidence"
 RESUMES_DIR = EVIDENCE_DIR / "Resumes"
 PORTFOLIO_REPO = REPO_ROOT.parent / "portfolio"

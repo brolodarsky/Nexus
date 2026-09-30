@@ -8,7 +8,7 @@ const { marked } = require('marked');
 // ---------------------------------------------------------------------------
 // Scan directories for renderable documents
 // ---------------------------------------------------------------------------
-const PORTFOLIO_DIR = path.resolve(__dirname, '../../../../Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence');
+const PORTFOLIO_DIR = path.resolve(__dirname, '../../../../Vault/3. Operations/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence');
 const RESUMES_DIR = path.join(PORTFOLIO_DIR, 'Resumes');
 const COVER_LETTERS_DIR = path.join(PORTFOLIO_DIR, 'Cover Letters');
 

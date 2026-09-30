@@ -11,7 +11,7 @@ When instructed to archive or complete a `Project - [Name].md` file, perform the
 - Move the active `Project - [Name].md` file into a year-based subfolder inside the `Archive/` folder of its current Vault section.
 - Match the subfolder to the current year (e.g., `Archive/2026/`).
 - Create `Archive/` or `Archive/[Year]/` directories if they do not already exist.
-- Example: Move `Vault/1. The Core/1.2. PKM/Project - Example.md` to `Vault/1. The Core/1.2. PKM/Archive/2026/Project - Example.md`.
+- Example: Move `Vault/1. Core/1.2. PKM/Project - Example.md` to `Vault/1. Core/1.2. PKM/Archive/2026/Project - Example.md`.
 
 ## 2. Update Frontmatter
 - Update the project note's YAML frontmatter with completed status:
@@ -21,7 +21,7 @@ When instructed to archive or complete a `Project - [Name].md` file, perform the
   ```
 
 ## 3. Update Master To Do List
-- Remove the project from the Active Projects section of `Vault/1. The Core/1.1. Philosophy & Personal North Star/To Do List.md`.
+- Remove the project from the Active Projects section of `Vault/1. Core/1.1. Philosophy & Personal North Star/To Do List.md`.
 - Append the project to the Completed section with today's date:
   `- **[YYYY-MM-DD] [[Project - Example Name]]:** Brief summary of completion.`
 

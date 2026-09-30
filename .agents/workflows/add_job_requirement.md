@@ -20,7 +20,7 @@ description: Extracts skills from a job description (URL, PDF, or raw text) and 
          ...
      ```
 
-3. Update the Note (`Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Employer Skill Requirements.md`):
+3. Update the Note (`Vault/3. Operations/3.1. Career Strategy & Revenue/Employer Skill Requirements.md`):
    - Append or insert the newly formatted entry into the `# 📋 Roles & Requirements` section.
 
 4. Regenerate the AI Summary:
@@ -29,7 +29,7 @@ description: Extracts skills from a job description (URL, PDF, or raw text) and 
    - Replace the contents of the `# AI Summary` section with the newly generated synthesis.
 
 5. Optionally Update Job Hunt War Room — Section 4 (Industry Targets):
-   - Read `Vault/3. Operations & Wealth/3.1. Career Strategy & Revenue/Job Hunt War Room.md`.
+   - Read `Vault/3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md`.
    - Determine which industry vertical in `## 4. Industry Targets` best fits the company (e.g., "Legal Tech", "FinTech", "AI Infrastructure & Agentic Labs").
    - Check if the company is already listed under that vertical; if so, skip this step.
    - If not listed, ask the user: "[Company] isn't in the [Vertical] list in the War Room. Should I add it?"
