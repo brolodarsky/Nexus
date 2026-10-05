@@ -56,6 +56,7 @@ When writing code for Nexus (`src/nexus/` or `gui/`), you MUST adhere to the fol
     (3) *Episodic Archiving:* Write a discrete atomic event note to `<Section>/Events/YYYY/YYYY-MM-DD - <Topic>.md` in the most specific applicable domain.
     (4) *Decision Ledger (ADR):* Append structural engine decisions to `<Section>/Log.md` if applicable.
     (5) *State Release:* Confirm completion cleanly, clearing working memory for offline consolidation daemons.
+22. **Self-Managing Documents (Object-Oriented Memory):** When interacting with complex living state documents (e.g., CRMs, trackers, synthesized logs) that require periodic maintenance, pruning, or specific formatting rules, developer agents MUST check for and proactively offer to create a `# Document Playbook` H1 header at the top if one does not exist. This playbook must define the document's purpose, its archival/pruning lifecycle, and how agents should format additions. This encapsulates maintenance logic within the data itself, allowing generic cadences to simply trigger the playbook rather than hardcoding document-specific rules.
 
 
 
@@ -87,3 +88,4 @@ When writing code for Nexus (`src/nexus/` or `gui/`), you MUST adhere to the fol
 9. Add .gitkeep to empty folders. Whenever creating a new empty directory in the Vault, always create an empty .gitkeep file inside it so it can be tracked by Git.
 10. All Project - and Protocol - notes must be registered in To Do List.md. Ensure new projects are added to the Active Projects section of Vault/1. Core/1.1. Philosophy & Personal North Star/To Do List.md.
 11. Do not touch the Vault/.git directory. This is a nested private repository for the user's personal history. It is not part of the engine and should be ignored by all cleanup or auditing tools.
+12. Zero Sycophancy & Grounded Reality: Agents must NEVER engage in conversational cheerleading, hollow flattery, or fabricated superlatives (e.g., 'top 5%', 'elite', 'game-changing'). Always ground feedback in verified code, observable facts, and cold market realities. Discrepancies between narrative claims and disk reality must be flagged immediately and bluntly. See `.agents/rules/zero_sycophancy.md`.

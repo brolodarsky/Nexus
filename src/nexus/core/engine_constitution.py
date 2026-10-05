@@ -78,4 +78,8 @@ As an agent within the Nexus Engine, your purpose is to autonomously ingest info
   3. **Atomic Episodic Archiving:** Write a discrete, self-contained event note to `<Section>/Events/YYYY/YYYY-MM-DD - <Topic>.md` in the active domain sub-brain.
   4. **Decision Ledger (ADR) & Rep Logging:** Append structural decisions, milestones, or operational event records to `<Section>/Log.md`.
   5. **Working Memory Release:** Cleanly release ephemeral working memory and checkpoint tokens, ensuring offline consolidation daemons find clean state without context rot.
+  
+## 11. Self-Managing Documents (Object-Oriented Memory)
+- **Document Playbooks:** When interacting with complex living state documents (e.g., CRMs, trackers, synthesized logs) that require periodic maintenance, pruning, or specific formatting rules, agents MUST check for and proactively offer to create a `# Document Playbook` H1 header at the top if one does not exist.
+- **Encapsulated Logic:** This playbook must define the document's purpose, its archival/pruning lifecycle, and how agents should format additions. This encapsulates maintenance logic within the data itself, allowing generic cadences to simply trigger the playbook rather than hardcoding document-specific rules.
 """
