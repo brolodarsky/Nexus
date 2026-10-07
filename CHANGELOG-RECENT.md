@@ -3,6 +3,39 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.14.0] - 2026-10-07
+
+### Added
+- Added rule 22 to `AGENTS.md` (Self-Managing Documents): Establishing the `# Document Playbook` architecture for complex living state documents, encapsulating maintenance/archival logic directly inside the data layer.
+- Created `src/nexus/shared_tools/calendar_engine.py` providing deterministic Google Calendar API integration (`list_events`, `create_event`, `update_event`, `delete_event`, `clean_html_description`, and CLI commands) with UTF-8 Windows terminal support.
+- Added agentic shared LangChain `@tool` wrappers in `src/nexus/shared_tools/shared.py` (`get_calendar_schedule`, `create_calendar_event`, `update_calendar_event`).
+- Documented `calendar_engine.py` in `README.md` under Deterministic Tools.
+- Standardized first-class `Events/` directory (`<Section>/Events/YYYY/`) for Tier 4 Episodic Memory across all universal section sub-brains, housing discrete historical records (`YYYY-MM-DD - <Topic>.md`: networking exchanges, screens, interviews, agent sessions).
+- Added Rule 12 (`Zero Sycophancy & Grounded Reality`) and `.agents/rules/zero_sycophancy.md` enforcing absolute anti-sycophancy and fact-grounded communication across all agent interactions.
+
+### Changed
+- Refactored `Protocol - Career Maintenance.md` cadences to natively trigger the `Employer Skill Requirements.md` document playbook rather than duplicating logic.
+- Extended `src/nexus/core/google_auth.py` with `token_filename` parameter to enable isolated OAuth tokens per service (`token_calendar.json` vs `token.json`).
+- Updated AGENTS.md, README.md, and Glossary to reference the new Concept - The Nexus Execution Lifecycle SSOT, removing duplicated anatomy schemas and formalizing the Operational vs. Conceptual section classification rule.
+- Refactor and condense Section 6.2 (`Library & Learning`) from 14 sprawling academic sub-sections into a focused 4-part AI Engineering Core (`6.2.1. Intelligent Agents & Autonomy`, `6.2.2. Language Models & Production RAG`, `6.2.3. Programming & Software Engineering`, `6.2.4. Data Engineering & MLOps`).
+- Consolidate foundational mathematics, classical machine learning, deep learning theory, and biomedical AI into `Technical Reference Archive.md` (MOC) under `Archive/`, eliminating 166 lines of syllabus clutter from `Table of Contents.md` while preserving 100% of user notes. Prune 6 empty stub directories.
+- Moved the engine constitution to `src/nexus/core/ENGINE_CONSTITUTION.md`, loaded by `engine_constitution.py`, so internal agents and IDE agents (Resident + Builder) read one shared rule file. Slimmed AGENTS.md to a boot sequence plus Builder coding standards. The resident behaviors (life archiving, flush trigger, Document Playbooks, grounding) moved into the constitution, and the section anatomy now points to the Execution Lifecycle SSOT (Operational vs. Conceptual).
+- Decoupled Cold Storage (`<Section>/Archive/`) from Episodic Neocortex (`<Section>/Events/`), clarifying `Archive/` strictly as cold storage for retired Tier 3 Living State (superseded documents, completed projects, closed CRM contacts) rather than burying active life history.
+- Migrated legacy `Archive/Conversations/` to `Events/2026/` across `3.1. Career Strategy & Revenue`, `6. Forge`, and `2. Health/2.3. Psych`.
+- Updated engine specifications, section building protocols, and agent instructions in `AGENTS.md`, `src/nexus/core/engine_constitution.py`, `Project - Nexus Agentic Engine.md`, and `Glossary - Nexus Engine Terminology.md`.
+- Reworded AGENTS.md standards 2 and 19 and the README headline to mark the SubagentFactory and Cognitive Inheritance as planned architecture, since `src/nexus/` has no agent-spawning tooling and all agents are hardcoded LangGraph graphs.
+- Moved the documented location of Section 1.1 daily execution logs from `Archive/YYYY/MM/` to `Events/YYYY/` (AGENTS.md standard 20, Table of Contents) for consistency with the universal section anatomy.
+- Executed top-level Vault taxonomy refactor to establish single-word, sovereign life domains:
+  - `1. The Core` $\to$ `1. Core`
+  - `3. Operations & Wealth` $\to$ `3. Operations`
+  - `4. Playground` $\to$ `4. Life`
+  - `5. Capture & Archive` $\to$ `5. Reference`
+  - `6. Forge` $\to$ `6. Engineering`
+- Cleaned Vault root: moved loose `0. Quick Capture.md` into `0. Inbox/`, loose psychology guide into `2. Health/2.3. Psych/`, `Movies/` into `4. Life/4.3. Culture & Inspiration/`, and `Project Helix Instructions/` into `6. Engineering/6.1. Projects/`.
+- Updated `Table of Contents.md` section headers and deprecated fragile `obsidian://search` URI links in favor of clean, sovereign Markdown structure.
+- Updated path references across all engine agents (`src/nexus/agents/career/`), resume engines (`render.js`, `render_docx.py`, `inspect_docx.js`), maintenance scripts (`scripts/audit_career_drift.py`), `.agents/skills/`, and `.agents/workflows/`.
+- Updated `AGENTS.md` and `README.md` to reflect the new taxonomy.
+
 ## [2.13.0] - 2026-09-27
 
 ### Added
@@ -47,26 +80,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - Resolved split-brain thread ID isolation bug by propagating UI `conversation_id` down to LangGraph `thread_id` checkpointers across Router, Career, and Librarian agents.
-
-## [2.11.0] - 2026-08-26
-
-### Added
-- Created `scripts/audit_career_drift.py` for deterministic Tier-1 career document drift auditing (timestamp staleness, character bounds, skill coverage, telemetry).
-- Created `.agents/workflows/audit_career.md` (`/audit_career` slash command) for running cross-document career audits.
-- Added Three-Tier Drift Prevention & Sync Architecture and Phase 2 roadmap milestones to `Project - Career Agent.md`.
-- Integrated `/audit_career` checks into `Protocol - Career Maintenance.md`.
-- Created `.agents/rules/code_commenting_standards.md` establishing mandatory granular, educational code-commenting standards tailored to the developer's learning style.
-- Updated `AGENTS.md` (both in Nexus and Portfolio) and `README.md` with standing directives and architectural documentation requiring line-by-line syntax breakdowns, concrete examples for generics/types, and strict preservation of existing educational comments.
-- Implemented `HTMLToMarkdownParser` in tools.py for stream parsing HTML emails into clean Markdown while preserving clickable hyperlinks `[text](url)`, headings, and lists.
-- Added `_fetch_headers_batch` to execute single-trip IMAP header queries, eliminating N+1 network latency.
-- Added `_build_imap_query` to translate natural-language and freeform search phrases into valid RFC-3501 IMAP query filters.
-- Upgraded read_email.py CLI with `--search` flag and formatted tabular display.
-
-### Changed
-- Added dense, pedagogical inline and pre-block educational comments across `gui/src/lib/api.ts`, `src/nexus/api/routers/agents.py`, `src/nexus/core/trace.py`, `src/nexus/agents/router/graph.py`, and `src/nexus/agents/career/graph.py` adhering to `.agents/rules/code_commenting_standards.md`.
-
-### Fixed
-- Corrected relative path resolution in `src/nexus/shared_tools/resume_engine/render.js`, `render_docx.py`, and `inspect_docx.js` following the engine folder reorganization.
-- Fixed relative paths to virtual environment and vault directories in `generate_podcast.py` and `ingest_phone.py`.
-- Fixed silent body omission bug in `_extract_body` where empty `text/plain` multipart payloads prevented rich HTML fallback.
-- Suppressed non-visual HTML containers (`<style>`, `<script>`, `<head>`, `<svg>`, `<noscript>`) to eliminate stylesheet leakage into parsed emails.
