@@ -2,7 +2,7 @@
 
 Nexus is a local-first, agent-orchestrated knowledge engine designed to bridge unstructured markdown notes (Zettelkasten) with autonomous agentic workflows, deterministic tools, and dynamic semantic search. Its core innovation is the **Dynamic Section Subagent Factory** — one generic LangGraph agent engine dynamically parameterized by standardized Vault directory modules, eliminating the need for hardcoded Python packages per life domain.
 
-Rather than a static archive or a generic note template, Nexus acts as a cognitive framework. It couples a structured knowledge vault with a backend agent engine to ingest, search, process, and output real-world information.
+Rather than a static archive or a generic note template, Nexus acts as a cognitive framework. It couples a structured knowledge vault with a backend agent engine to ingest, search, process, and output real-world information. For the definitive Single Source of Truth (SSOT) on the engine's memory architecture, section schemas, and cognitive lifecycles, see the [Concept - The Nexus Execution Lifecycle](file:///C:/Users/Willi/Documents/Projects/Nexus/Vault/6.%20Engineering/6.2.%20Library%20&%20Learning/6.2.1.%20Intelligent%20Agents%20&%20Autonomy/Concept%20-%20The%20Nexus%20Execution%20Lifecycle.md) note.
 
 ## Key Technical Pillars
 
@@ -148,7 +148,8 @@ Nexus/
 │   ├── core/                    # Shared engine configuration
 │   │   ├── audio.py             # Whisper transcription service
 │   │   ├── constants.py         # Global constants
-│   │   ├── engine_constitution.py # Runtime constitution (5-tier memory, SubagentFactory rules)
+│   │   ├── ENGINE_CONSTITUTION.md # Shared Resident rules (internal + IDE agents)
+│   │   ├── engine_constitution.py # Loader: fills {user_name}/{current_time} placeholders
 │   │   ├── google_auth.py       # Reusable OAuth2 manager
 │   │   └── hitl_queue.py        # SQLite HITL transaction queue
 │   ├── evals/                   # Benchmarking & Golden Dataset
