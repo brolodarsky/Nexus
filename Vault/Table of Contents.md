@@ -13,7 +13,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 ## 1.1. Philosophy & Personal North Star
 - **[[Goals]]**
 - **[[To Do List]]**
-- **[[Short Term Execution Plan]]:** 10-day sliding tactical execution envelope (`[-5, +5]`).
+- **[[Plan]]:** 10-day sliding tactical execution envelope (`[-5, +5]`).
 - **[[Protocol - Daily Schedule]]:** Unified daily core working schedule.
 - **[[Current Learning]]:** Active focus and active subjects.
 - **[[Personal Specs]]:** Master sizing card, footwear measurements, and wardrobe specifications.
@@ -21,7 +21,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **The 10-Year Horizon:** Strategic goals for the longer term.
 - **Legacy & Impact:** What do I want to build that lasts?
 - **[[1. Core/1.1. Philosophy & Personal North Star/Playbook|Playbook]]:** Section 1.1 operational guide and episodic life archiving rules.
-- **Archive:** Daily tactical execution and working set archives (`Archive/YYYY/MM/YYYY-MM-DD.md`).
+- **Events:** Daily tactical execution and working set logs (`Events/YYYY/YYYY-MM-DD - <Title>.md`).
 
 ### 1.1.1. Personal Logs
 - **Journal**
