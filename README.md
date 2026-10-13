@@ -148,8 +148,7 @@ Nexus/
 │   ├── core/                    # Shared engine configuration
 │   │   ├── audio.py             # Whisper transcription service
 │   │   ├── constants.py         # Global constants
-│   │   ├── ENGINE_CONSTITUTION.md # Shared Resident rules (internal + IDE agents)
-│   │   ├── engine_constitution.py # Loader: fills {user_name}/{current_time} placeholders
+│   │   ├── engine_constitution.py # Loader for Vault/Playbook.md ({user_name}/{current_time} placeholders)
 │   │   ├── google_auth.py       # Reusable OAuth2 manager
 │   │   └── hitl_queue.py        # SQLite HITL transaction queue
 │   ├── evals/                   # Benchmarking & Golden Dataset
@@ -157,9 +156,10 @@ Nexus/
 │   │   ├── runner.py            # Automated eval script
 │   │   └── results/             # Structured eval reports
 │   ├── interfaces/              # Entry-point implementations (cli, voice, telegram)
-│   └── tools/                   # Shared engine utilities
-│       ├── email_tool.py        # Core email fetching logic
-│       └── vault_tools.py       # Vault navigation tools
+│   └── shared_tools/            # Shared engine utilities & deterministic CLI tools
+│       ├── vault_reader.py      # Pure-Python Vault navigation & search functions
+│       ├── shared.py            # Shared LangChain @tool factories (read_note, propose_write, ask_librarian)
+│       └── summarizer.py        # Conversation window compression & archiving node
 ├── start.ps1                   # Launches backend + frontend Control Panel
 ├── pyproject.toml              # UV dependency configuration
 └── uv.lock                     # Reproducible dependency lock
@@ -255,11 +255,12 @@ This repository distinguishes between capabilities and constraints that define h
 | `src/nexus/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m nexus.evals.runner` |
 | `src/nexus/agents/router/evals/runner.py` | Deterministic evaluation of the Content Router agent logic. | `python src/nexus/agents/router/evals/runner.py` |
 | `src/nexus/agents/career/evals/runner.py` | LLM-as-a-judge evaluation of the Career Agent and HITL compliance. | `python src/nexus/agents/career/evals/runner.py` |
-| `src/nexus/agents/librarian/agent.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service. | `nexus <query>` |
-| `src/nexus/agents/email/agent.py` | Email Agent subgraph (LangGraph). Handles IMAP connections to fetch and search emails. | `N/A (Called by Router)` |
-| `src/nexus/agents/router/agent.py` | Content Router Agent. LangGraph classifier that fetches context via tools and routes incoming content to domain agents. | `python src/nexus/agents/router/agent.py` |
-| `src/nexus/agents/career/agent.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python src/nexus/agents/career/agent.py` |
-| `src/nexus/tools/vault_tools.py` | Local filesystem LangChain tools for Vault navigation (`read_toc`, `read_note`, `search_vault`, `get_vault_structure`). Supports targeted subtree search and frontmatter tag filtering. | N/A |
+| `src/nexus/agents/librarian/graph.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service (`api.py` entry point). | `nexus <query>` |
+| `src/nexus/agents/email/graph.py` | Email Agent subgraph (LangGraph). Handles IMAP connections to fetch and search emails. | `N/A (Called by Router)` |
+| `src/nexus/agents/router/graph.py` | Content Router Agent. LangGraph classifier that fetches context via tools and routes incoming content to domain agents. | `python -m nexus.agents.router.api` |
+| `src/nexus/agents/career/graph.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python -m nexus.agents.career.api` |
+| `src/nexus/shared_tools/vault_reader.py` | Pure-Python filesystem utilities for Vault navigation (`read_toc_content`, `read_note_content`, `search_within`, `get_structure`). | N/A (library module) |
+| `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` factories (`get_read_note_tool`, `get_propose_write_tool`, `ask_librarian_escalation`, calendar tools). | N/A (library module) |
 | `src/nexus/shared_tools/summarizer.py` | Shared LangGraph node function for compressing conversation history into Short-Term Recall and Deep Recall archives. | N/A (library module) |
 | `src/nexus/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
 | `src/nexus/core/chats_db.py` | SQLite-backed persistent UI chat history and sticky session state. | N/A (library module) |

@@ -3,6 +3,8 @@ aliases: [TOC, Index, Map of Content]
 tags: [index, master]
 type: overview
 ---
+**Root Playbook:** **[[Playbook|Vault Playbook (Engine Constitution)]]**
+
 # 0. Inbox
 - **Inbox:** Temp storage for incoming items bound for integration.
 - **[[0. Quick Capture|Quick Capture]]:** Temp scratchpad note for items bound for integration.
@@ -236,6 +238,7 @@ _Dedicated space for exploration, relationships, and pure interest._ Connection 
 - **"People Data":** Things people tell me - Preferences, important context. B-days in Google contacts.
 - **Gift Ideas:** Running list of potential gifts for friends and family.
 - **Social Club:** Event planning and community building.
+	- **[[Itinerary - Maryland & DC Day Out with Cousins]]:** Day plan featuring IHOP, Needwood short golf, tennis, and evening Union Station tour.
 - **[[Activities List]]**: Hobbies, sports, or experiences I want to try.
 - **Adventure Log:** Places to visit.
 	- **[[List - Hiking Near Fort Lee]]**

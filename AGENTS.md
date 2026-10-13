@@ -1,28 +1,22 @@
 # AGENTS.md
 
-> How any IDE agent (Antigravity, Cursor) works in this repo. You are **Resident + Builder**: you follow the same rules as internal Nexus agents (Resident), and you also write engine code (Builder).
+> How any IDE agent (Antigravity, Cursor) works in this repo. You are **Resident + Builder**:
+> - **Operating IN Nexus (Resident):** Route all non-build behavior through [`Vault/Playbook.md`](Vault/Playbook.md) (`[[Playbook|Vault Playbook]]`), the target section's `Playbook.md` / `Lessons Learned.md` / `Tasks.md`, and the target note's `# Document Playbook`.
+> - **Operating ON Nexus (Builder):** When writing engine code (`src/nexus/`, `gui/`, `scripts/`) or modifying Vault structure, follow the Builder rules below.
 
 ## Boot Sequence (every thread)
-1. **Resident rules:** Read [`src/nexus/core/ENGINE_CONSTITUTION.md`](src/nexus/core/ENGINE_CONSTITUTION.md). It holds the lifecycle, boundaries, memory tiers, flush protocol, archiving, and grounding rules. Internal agents get the exact same file.
-2. **Architecture (engine/Vault-structure work only):** Read `[[Concept - The Nexus Execution Lifecycle]]` (`Vault/6. Engineering/6.2. Library & Learning/6.2.1. Intelligent Agents & Autonomy/`). It is the SSOT for the lifecycle, section anatomy, and BUILT/PLANNED status.
-3. **Route → Hydrate:** Pick the target Vault section from the request and the TOC. Read its `Playbook.md`, `Lessons Learned.md`, and `Tasks.md` if they exist (Conceptual sections have none).
-4. **Execute:** Read other sections only when necessary, and say why.
-5. **Flush:** At event boundaries, offer `/flush` (constitution §8).
-
-## Authority
-- **Engine scope docs:** `Vault/6. Engineering/6.1. Projects/6.1.2. Agentic R&D/Project - Nexus Agentic Engine/`. The parent `Project - Nexus Agentic Engine.md` covers roadmap and build log. Child `Project - *.md` docs cover compiled subgraphs and apps (Router, Librarian, Email, Control Panel). Domain sections have no project docs; their instructions live in their section files.
-- **Read first, update after:** Open the relevant scope doc or section files before non-trivial work. Update them afterward via the `project_work` skill.
-- **Conflicts:** On implementation details, the scoped doc or section Playbook wins. On engine-wide architecture, raise the discrepancy before proceeding.
-- **Authorized:** Reading anything in `Vault/` for context. Running `src/nexus/shared_tools/` and `scripts/` with `.venv`.
+1. **Resident rules (always):** Read [`Vault/Playbook.md`](Vault/Playbook.md).
+2. **Hydrate (always):** Identify the target Vault section(s) from the request and `Vault/Table of Contents.md`. Read their `Playbook.md`, `Lessons Learned.md`, and `Tasks.md` if they exist, plus any `# Document Playbook` in the target notes.
+3. **Builder context (engine/Vault-structure work only):** Read `[[Concept - The Nexus Execution Lifecycle]]` (`Vault/6. Engineering/6.2. Library & Learning/6.2.1. Intelligent Agents & Autonomy/`) and the relevant scope doc in `Vault/6. Engineering/6.1. Projects/6.1.2. Agentic R&D/Project - Nexus Agentic Engine/`, then update via the `project_work` skill after completing work.
 
 ---
 
 ## Engine Coding Standards (Builder rules for `src/nexus/` and `gui/`)
-Architecture behind these standards: see the SSOT. Numbering is stable; other docs cite these numbers.
+Architecture behind these standards: see `[[Concept - The Nexus Execution Lifecycle]]`. Numbering is stable; other docs cite these numbers.
 
 1. **AFS first:** Use deterministic file-system navigation over chunk-based RAG.
 2. **SubagentFactory: PLANNED, NOT BUILT.** All current agents (`router`, `librarian`, `career`, `email`) are hardcoded LangGraph graphs. Don't describe spawning or factory compilation as working. Building it is gated by the Demo-Gated Rule in `Vault/1. Core/1.1. Philosophy & Personal North Star/Goals.md`.
-3. **DPFH & Librarian escalation:** Inject local directory lists before running. All cross-domain lookups go through the Librarian subgraph.
+3. **DPFH & Librarian escalation:** Inject local directory lists before running. All cross-domain lookups go through the Librarian subgraph (or direct cross-domain reads where configured).
 4. **HITL queue:** Vault writes and real-world actions are two-phase commits through the SQLite queue.
 5. **File structure:** Core infra agents use `api.py` / `graph.py` / `tools.py`. Section agents are declarative (Vault files, not Python packages).
 6. **Tool boundaries:** Pure data layers (e.g., `vault_reader.py`) never contain `@tool`. Tool factories live in `src/nexus/shared_tools/shared.py`. Domains use the standard suite (`search_my_domain`, `read_note`, `propose_write`, `learn_rule`, `ask_librarian`); no domain-prefixed tools.
@@ -36,9 +30,9 @@ Architecture behind these standards: see the SSOT. Numbering is stable; other do
 14. **Native `interrupt()` / `Command(resume=True)`:** HITL state is suspended in `memory.sqlite` and resumed through FastAPI endpoints.
 15. **Prompt prefix isolation:** Static prefix (constitution, persona, schemas) + dynamic suffix (DPFH, lessons, summaries). Target ≥90% cache hits.
 16. **Circuit breakers:** ≤5 tool iterations per turn in conditional edges. Timeouts and spend caps on background daemons.
-17. **Centralized constitution:** Universal agent behavior lives ONLY in `src/nexus/core/ENGINE_CONSTITUTION.md` (loaded by `engine_constitution.py`). Section Playbooks hold only persona, domain workflows, and DPFH placeholders. Never duplicate generic mechanics into Playbooks or into this file.
+17. **Centralized root playbook:** Universal agent behavior lives ONLY in [`Vault/Playbook.md`](Vault/Playbook.md) (loaded by `engine_constitution.py`). Section Playbooks hold only persona, domain workflows, and DPFH placeholders. Never duplicate generic mechanics into Section Playbooks or into this file.
 
-> Standards 18–22 (section anatomy, Cognitive Inheritance, life archiving, flush trigger, Document Playbooks) moved on 2026-10-07 to the SSOT (anatomy, CI) and to the constitution (§6, §8, §9, §10).
+> Standards 18–22 (section anatomy, Cognitive Inheritance, life archiving, flush trigger, Document Playbooks) moved on 2026-10-07 to the SSOT (anatomy, CI) and to `Vault/Playbook.md` (§6, §8, §9, §10).
 
 ---
 
@@ -68,4 +62,4 @@ Architecture behind these standards: see the SSOT. Numbering is stable; other do
 9. Add `.gitkeep` to every new empty Vault folder.
 10. Register every `Project -` / `Protocol -` note under Active Projects in `Vault/1. Core/1.1. Philosophy & Personal North Star/To Do List.md`.
 11. Never touch `Vault/.git`. It is a nested private repo, so exclude it from cleanup and audit tools.
-12. Zero sycophancy: no flattery or invented superlatives. Ground claims in verified code and facts, and flag doc-vs-disk drift bluntly. See `.agents/rules/zero_sycophancy.md`.
+12. Zero sycophancy: no flattery or invented superlatives. Ground claims in verified code and facts, and flag doc-vs-disk drift bluntly. See [`Vault/Playbook.md`](Vault/Playbook.md) §11.
