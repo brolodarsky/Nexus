@@ -2,8 +2,30 @@
 shared.py — Shared @tool wrappers for cross-agent infrastructure.
 Any domain agent can import these tools into their tool array.
 """
+from typing import Optional
 from langchain_core.tools import tool
 from nexus.core.constants import VAULT_PATH
+
+@tool
+def get_vault_structure(path: Optional[str] = None) -> str:
+    """Browse the vault's directory tree. Acts as an 'agentic ls' for navigating the vault.
+
+    - Called with NO path (or path=None): returns ALL folders recursively (no files).
+      Use this first to orient yourself and identify which sections to drill into.
+    - Called WITH a specific folder path: returns folders AND files within that subtree.
+      Use this to see exactly what notes exist in a target area.
+
+    Args:
+        path: Optional relative path from Vault root (e.g. "2. Health/2.2. Medical").
+              If omitted, returns the full folder tree from the vault root.
+    """
+    # Import pure-Python filesystem reader dynamically to maintain modularity
+    from nexus.shared_tools.vault_reader import get_directory_tree
+
+    # If path is omitted, show folders only for cheap orientation. If drilled into a path, show notes too.
+    show_files = path is not None
+    return get_directory_tree(path=path, show_files=show_files)
+
 
 @tool
 def ask_librarian_escalation(query: str) -> str:

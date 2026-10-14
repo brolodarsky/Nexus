@@ -13,6 +13,8 @@ from pathlib import Path
 
 from nexus.core.config import settings
 from nexus.core.constants import VAULT_PATH
+# Import deterministic vault directory tree builder for zero-overhead prompt structure hydration (<1ms disk read)
+from nexus.shared_tools.vault_reader import get_directory_tree
 
 # Root playbook path at the top of the Vault hierarchy (`Vault/Playbook.md`)
 CONSTITUTION_PATH: Path = VAULT_PATH / "Playbook.md"
@@ -22,11 +24,15 @@ def get_engine_constitution() -> str:
     """Return the root Vault Playbook with runtime placeholders filled in.
 
     Placeholders in the markdown:
-      {user_name}    -> settings.nexus_user_name   (e.g. "William")
-      {current_time} -> local timestamp            (e.g. "2026-10-13 17:30:00")
+      {user_name}        -> settings.nexus_user_name   (e.g. "William")
+      {current_time}     -> local timestamp            (e.g. "2026-10-13 17:30:00")
+      {vault_structure}  -> live directory tree string (deterministic folder hierarchy)
     """
     # Read fresh on every call (<1ms): human edits in Obsidian are live on the next LLM turn (Standard 9).
     template = CONSTITUTION_PATH.read_text(encoding="utf-8")
+
+    # Deterministically hydrate the live folder structure (folders only, no files) to give immediate orientation.
+    vault_structure_tree = get_directory_tree(path=None, show_files=False)
 
     # str.replace (not str.format): markdown may legitimately contain other {braces},
     # e.g. "{domain_files}" examples. .format() would raise KeyError on those.
@@ -34,4 +40,5 @@ def get_engine_constitution() -> str:
         template
         .replace("{user_name}", settings.nexus_user_name)
         .replace("{current_time}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        .replace("{vault_structure}", vault_structure_tree)
     )

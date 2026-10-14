@@ -6,8 +6,7 @@
 
 ## Boot Sequence (every thread)
 1. **Resident rules (always):** Read [`Vault/Playbook.md`](Vault/Playbook.md).
-2. **Hydrate (always):** Identify the target Vault section(s) from the request and `Vault/Table of Contents.md`. Read their `Playbook.md`, `Lessons Learned.md`, and `Tasks.md` if they exist, plus any `# Document Playbook` in the target notes.
-3. **Builder context (engine/Vault-structure work only):** Read `[[Concept - The Nexus Execution Lifecycle]]` (`Vault/6. Engineering/6.2. Library & Learning/6.2.1. Intelligent Agents & Autonomy/`) and the relevant scope doc in `Vault/6. Engineering/6.1. Projects/6.1.2. Agentic R&D/Project - Nexus Agentic Engine/`, then update via the `project_work` skill after completing work.
+2. **Builder context (engine/Vault-structure work only):** Read `[[Concept - The Nexus Execution Lifecycle]]` (`Vault/6. Engineering/6.2. Library & Learning/6.2.1. Intelligent Agents & Autonomy/`) and the relevant scope doc in `Vault/6. Engineering/6.1. Projects/6.1.2. Agentic R&D/Project - Nexus Agentic Engine/`, any other potentially helpful docs in the Engineering section, then update via the `project_work` skill after completing work.
 
 ---
 

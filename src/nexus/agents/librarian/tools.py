@@ -8,32 +8,16 @@ from langchain_core.tools import tool
 
 from nexus.shared_tools.vault_reader import (
     read_toc_content,
-    get_directory_tree,
     read_note_content,
     search_within
 )
+# Standardize on shared tool implementation for vault structure hydration across all agents
+from nexus.shared_tools.shared import get_vault_structure
 
 @tool
 def read_toc() -> str:
     """Reads the Table of Contents.md file to understand the folder structure of the Vault."""
     return read_toc_content()
-
-@tool
-def get_vault_structure(path: Optional[str] = None) -> str:
-    """Browse the vault's directory tree. Acts as an 'agentic ls' for navigating the vault.
-
-    - Called with NO path (or path=None): returns ALL folders recursively (no files).
-      Use this first to orient yourself and identify which sections to drill into.
-    - Called WITH a specific folder path: returns folders AND files within that subtree.
-      Use this to see exactly what notes exist in a target area.
-
-    Args:
-        path: Optional relative path from Vault root (e.g. "2. Health/2.2. Medical").
-              If omitted, returns the full folder tree from the vault root.
-    """
-    # If path is omitted, show folders only. If provided, show files too.
-    show_files = path is not None
-    return get_directory_tree(path=path, show_files=show_files)
 
 @tool
 def read_note(note_path: str) -> str:
