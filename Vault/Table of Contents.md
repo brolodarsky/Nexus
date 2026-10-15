@@ -59,6 +59,8 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 # 2. Health
 [Link - Health - Google Drive](https://drive.google.com/drive/u/0/folders/1h_0QTrXWrNzyXtcDiM8bbolaMKAYU8PG)
+- **[[2. Health/Playbook|Playbook]]:** Section 2 operational guide, clinical loop follow-ups, and pending visit-note ingestion rules.
+- **[[2. Health/Tasks|Tasks]]:** Section 2 local task module.
 ## 2.1. Fitness
 - **[[Exercise Schedule & Planning]]:** Weekly program, exercise alternatives, and personal records.
 - **[[Tennis Development & Technique]]:** Master tennis mechanics, coaching logs with Jun, wall drill protocols, and court footwear specs.
@@ -73,7 +75,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 ## 2.2. Medical
 - **[[Health Summary]]**: Master dashboard for symptoms, workups, doctors visits, lab work, biomarkers, medical history and longitudinal tracking.
-- **[[Doc - Psychiatrist Intake Summary]]**
+- **[[Sleep Specialist Intake Summary]]**
 - **[[Insurance Card]]**
 	- [[Doc - Medical Insurance 2026 Summary of Benefits and Coverage (SBC)]]: 2026 Oscar Health Summary of Benefits and Coverage
 - **[[Prescriptions]]**
@@ -81,31 +83,27 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **Lab Work**
 - **Vaccination & Screening:** Long-term preventative maintenance records.
 - **Sleep Hygiene:** Protocols for deep rest and circadian rhythm alignment.
+- **Archive**
 
 
 ## 2.3. Psych
-- **Cognitive Load Management:** Tools for balancing caregiving, technical work, and social life.
-	- **[[Goals]]**
-	- **[[Profile & Maintenance - Neuro-Sensory Conflict]]**
-	- **[[Profile & Maintenance - Job Search & Cognitive Load]]**
-	- **[[Protocol - Social Approach & Rehearsal]]**
-	- **[[Protocol - CBT vs ACT Quick Reference]]**
-	- **[[Protocol - Nightly System Shutdown]]**
-	- **[[Protocol - Reduce Phone Use]]**
-	- **[[Protocol - Dating Grounding & Dopamine Management]]**
-	- **[[Protocol - Preemptive Rejection & The Transparency Illusion]]**
-	- **[[Protocol - Social Stamina and Behavioral Reinvention]]**
-	- **[[Profile & Maintenance - OCD Post-War Dynamics]]**
-	- **[[2. Health/2.3. Psych/Log|Log]]**
-	- **[[Life Chronology]]**
-- **Meditation & Mindfulness:** Rituals for grounding and focus.
-- **Stress Mitigation:** Systems for decompressing after high-output days.
-- **Articles:** Research and reference material for psychological health.
-- **Archive**
-- **ACT**
-	- **[[Concept - ACT Hexaflex]]**
-- **CBT / ERP / I-CBT**
-	- **[[Concept - I-CBT vs ERP]]**
+- **Profiles & Core Architecture:**
+	- **[[Profile & Maintenance - Job Search & Cognitive Load]]:** Master framework for ego-syntonic depression (BA + CBT thought records), OCD covert loops, ADHD stimulant calibration, and domestic boundaries.
+	- **[[Profile & Maintenance - Neuro-Sensory Conflict]]:** OCD developmental cascade, approach-avoidance dynamics, sensory regulation, and clinical status.
+	- **[[2. Health/2.3. Psych/Log|Log]]:** Active CBT Thought Record and ERP/I-CBT Rep Log.
+- **Clinical Modalities & Field Protocols:**
+	- **[[Protocol - CBT vs ACT Quick Reference]]:** 4-way clinical triage matrix (BA + CBT vs. I-CBT vs. ERP vs. ACT) and Thought Record guide.
+	- **[[Protocol - Loop Rescue (ERP & I-CBT)]]:** 10-second field manual for the three covert OCD loops (Loops 1, 2, 3).
+	- **[[Concept - I-CBT vs ERP]]:** Upstream inferential confusion (I-CBT) vs. downstream behavioral habituation (ERP).
+	- **[[ADHD Skills Training - Practical Workarounds]]:** Desk-anchored stimulant dosing, somatic displacement guardrails, and executive-function scaffolding.
+	- **[[Protocol - Social Approach & Rehearsal]]:** Graded sober exposure ladder (Tiers 1–4) and conversation sustainability frameworks.
+	- **[[Protocol - Preemptive Rejection & The Transparency Illusion]]:** Eliminating self-deprecating disclaimers as a social safety behavior.
+	- **[[Protocol - Dating Grounding & Dopamine Management]]:** De-crystallization drills and app batch governance.
+	- **[[Protocol - Reduce Phone Use]]:** Environmental stimulus control and ACT urge surfing for screen/porn guardrails.
+	- **[[Protocol - Nightly System Shutdown]]:** Evening wind-down, CPAP prep, and screen curfew to protect the Morning 3-Minute BA boot.
+- **Articles:** Reference material and clinical studies (including **[[Concept - ACT Hexaflex]]**).
+- **Events:** Episodic deep-dive analyses (`Events/YYYY/YYYY-MM-DD - <Topic>.md`).
+- **Archive:** Retired historical protocols and chronology notes (`Archive/YYYY/`).
 
 
 ## 2.4. Nutrition
