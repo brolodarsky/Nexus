@@ -19,15 +19,22 @@ def read_toc_content() -> str:
         return f"Error reading Table of Contents: {str(e)}"
 
 
-def get_directory_tree(path: Optional[str] = None, show_files: bool = False) -> str:
+# Optional[str] / Optional[int] are union types (str | None, int | None) allowing callers to omit path/depth limits.
+def get_directory_tree(
+    path: Optional[str] = None,
+    show_files: bool = False,
+    max_depth: Optional[int] = None,
+) -> str:
     """
     Returns an indented directory tree string.
     
     Args:
         path: Optional relative path from Vault root.
         show_files: If True, include files in the output.
+        max_depth: Optional maximum folder depth to expand as separate lines; deeper child folders collapse inline.
     """
     if path:
+        # The `/` operator on a pathlib.Path object joins path segments cleanly across OS platforms.
         start_path = VAULT_PATH / path
         if not start_path.exists() or not start_path.is_dir():
             return (
@@ -37,8 +44,16 @@ def get_directory_tree(path: Optional[str] = None, show_files: bool = False) -> 
     else:
         start_path = VAULT_PATH
 
-    lines = []
-    _build_tree(start_path, lines, prefix="", show_files=show_files)
+    lines: List[str] = []
+    # Start recursive traversal at depth=1 (immediate children of start_path).
+    _build_tree(
+        start_path,
+        lines,
+        prefix="",
+        show_files=show_files,
+        max_depth=max_depth,
+        current_depth=1,
+    )
 
     if not lines:
         return f"No contents found at '{path or 'Vault root'}'."
@@ -47,19 +62,47 @@ def get_directory_tree(path: Optional[str] = None, show_files: bool = False) -> 
     return header + "\n" + "\n".join(lines)
 
 
-def _build_tree(directory: Path, lines: list, prefix: str, show_files: bool):
+def _build_tree(
+    directory: Path,
+    lines: list,
+    prefix: str,
+    show_files: bool,
+    max_depth: Optional[int] = None,
+    current_depth: int = 1,
+):
     """Recursively build an indented tree representation of a directory."""
     try:
+        # Sort directory entries alphabetically by filename (case-sensitive) for deterministic prompt caching.
         entries = sorted(directory.iterdir(), key=lambda e: e.name)
     except PermissionError:
+        # Ignore OS-protected folders rather than crashing the entire tree traversal.
         return
 
+    # List comprehensions filter entries into directories (excluding IGNORE_DIRS like .git) and files.
     dirs = [e for e in entries if e.is_dir() and e.name not in IGNORE_DIRS]
     files = [e for e in entries if e.is_file()] if show_files else []
 
     for d in dirs:
-        lines.append(f"{prefix}  {d.name}/")
-        _build_tree(d, lines, prefix=prefix + "  ", show_files=show_files)
+        # When max_depth is reached, collapse immediate child folders inline (e.g. `dir/ [sub1, sub2]`) to save vertical lines.
+        if max_depth is not None and current_depth >= max_depth:
+            try:
+                sub_dirs = sorted(
+                    e.name for e in d.iterdir() if e.is_dir() and e.name not in IGNORE_DIRS
+                )
+            except PermissionError:
+                sub_dirs = []
+            inline_suffix = f" [{', '.join(sub_dirs)}]" if sub_dirs else ""
+            lines.append(f"{prefix}  {d.name}/{inline_suffix}")
+        else:
+            lines.append(f"{prefix}  {d.name}/")
+            _build_tree(
+                d,
+                lines,
+                prefix=prefix + "  ",
+                show_files=show_files,
+                max_depth=max_depth,
+                current_depth=current_depth + 1,
+            )
 
     for f in files:
         lines.append(f"{prefix}  {f.name}")

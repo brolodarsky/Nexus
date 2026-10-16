@@ -10,6 +10,7 @@ One file => zero drift between the two agent populations.
 
 from datetime import datetime
 from pathlib import Path
+import re
 import sys
 
 from nexus.core.config import settings
@@ -35,8 +36,13 @@ def get_engine_constitution() -> str:
     # Read fresh on every call (<1ms): human edits in Obsidian are live on the next LLM turn (Standard 9).
     template = CONSTITUTION_PATH.read_text(encoding="utf-8")
 
-    # Deterministically hydrate the live folder structure (folders only, no files) to give immediate orientation.
-    vault_structure_tree = get_directory_tree(path=None, show_files=False)
+    # Strip Obsidian YAML frontmatter (`--- ... ---`) and top `**Back to:**` navigation bar to save prompt tokens.
+    template = re.sub(r"^---\s*\r?\n.*?\r?\n---\s*\r?\n?", "", template, count=1, flags=re.DOTALL)
+    template = re.sub(r"^\*\*Back to:\*\*.*\r?\n+", "", template, count=1, flags=re.MULTILINE)
+
+    # Deterministically hydrate the live folder structure (folders only, max_depth=2 with depth-3 children inline)
+    # to compress the directory tree from ~100 lines to ~28 lines while preserving all 3rd-level section names.
+    vault_structure_tree = get_directory_tree(path=None, show_files=False, max_depth=2)
 
     # str.replace (not str.format): markdown may legitimately contain other {braces},
     # e.g. "{domain_files}" examples. .format() would raise KeyError on those.
@@ -50,7 +56,6 @@ def get_engine_constitution() -> str:
 
 
 if __name__ == "__main__":
-    # IDE agents (see AGENTS.md) run `python -m nexus.core.engine_constitution` and inject stdout as instructions.
     # UTF-8 reconfigure: the Playbook contains em dashes/emoji that crash Windows' default cp1252 console.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
