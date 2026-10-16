@@ -233,7 +233,7 @@ This repository distinguishes between capabilities and constraints that define h
 |---|---|---|
 | `youtube_transcript.py` | Downloads YouTube transcripts to text files. | `python src/nexus/shared_tools/youtube_transcript.py <url>` |
 | `read_webpage.py` | Extracts clean markdown content from single webpages via trafilatura. | `python src/nexus/shared_tools/read_webpage.py <url> [-o output.md]` |
-| `read_email.py` | Fetches a single email by IMAP UID and returns clean markdown. Supports Google OAuth2. | `python src/nexus/shared_tools/read_email.py <uid> [-o output.md]` / `python src/nexus/shared_tools/read_email.py --list-recent 10` |
+| `gmail_engine.py` | Gmail REST API v1 integration: search (native Gmail syntax), read/thread as markdown, labels, archive, trash, drafts (never sends). Isolated OAuth token at `.secrets/token_gmail.json`. | `python -m nexus.shared_tools.gmail_engine --auth` / `--list 10` / `--search "from:x newer_than:7d"` / `--read <id> [-o out.md]` / `--draft TO SUBJ BODY [--reply-to <id>]` |
 | `calendar_engine.py` | Deterministic Google Calendar integration for listing, creating, and updating events with local OAuth token isolation. | `python src/nexus/shared_tools/calendar_engine.py --today` |
 | `generate_podcast.py` | Converts a specific markdown note to MP3 via edge-tts. | `python src/nexus/shared_tools/generate_podcast.py <path> [--force]` |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python src/nexus/shared_tools/medical_xml_parser.py <path> <output_dir>` |
@@ -252,12 +252,13 @@ This repository distinguishes between capabilities and constraints that define h
 | `src/nexus/agents/router/evals/runner.py` | Deterministic evaluation of the Content Router agent logic. | `python src/nexus/agents/router/evals/runner.py` |
 | `src/nexus/agents/career/evals/runner.py` | LLM-as-a-judge evaluation of the Career Agent and HITL compliance. | `python src/nexus/agents/career/evals/runner.py` |
 | `src/nexus/agents/librarian/graph.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service (`api.py` entry point). | `nexus <query>` |
-| `src/nexus/agents/email/graph.py` | Email Agent subgraph (LangGraph). Handles IMAP connections to fetch and search emails. | `N/A (Called by Router)` |
 | `src/nexus/agents/router/graph.py` | Content Router Agent. LangGraph classifier that fetches context via tools and routes incoming content to domain agents. | `python -m nexus.agents.router.api` |
 | `src/nexus/agents/career/graph.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python -m nexus.agents.career.api` |
 | `src/nexus/shared_tools/vault_reader.py` | Pure-Python filesystem utilities for Vault navigation (`read_toc_content`, `read_note_content`, `search_within`, `get_structure`). | N/A (library module) |
 | `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` factories (`get_read_note_tool`, `get_propose_write_tool`, `ask_librarian_escalation`, calendar tools). | N/A (library module) |
 | `src/nexus/shared_tools/summarizer.py` | Shared LangGraph node function for compressing conversation history into Short-Term Recall and Deep Recall archives. | N/A (library module) |
+| `src/nexus/core/engine_constitution.py` | Hydrates `Vault/Playbook.md` placeholders (`{current_time}`, `{user_name}`, `{vault_structure}`, `{shared_tools}`). IDE Resident agents inject its stdout at boot. | `python -m nexus.core.engine_constitution` |
+| `src/nexus/core/tool_catalog.py` | Static (`ast`, no imports) catalog of `src/nexus/shared_tools/` modules for the `{shared_tools}` placeholder. | `python -m nexus.core.tool_catalog` |
 | `src/nexus/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
 | `src/nexus/core/chats_db.py` | SQLite-backed persistent UI chat history and sticky session state. | N/A (library module) |
 | `src/nexus/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve (write to disk), reject. | Via GUI or API |

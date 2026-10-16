@@ -1,3 +1,4 @@
+"""medical_xml_parser.py — Parses HL7 CDA medical XML files into structured Markdown. Usage: <path> <output_dir>."""
 import sys
 import os
 import xml.etree.ElementTree as ET

@@ -16,7 +16,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **[[Goals]]**
 - **[[To Do List]]**
 - **[[Plan]]:** 10-day sliding tactical execution envelope (`[-5, +5]`).
-- **[[Protocol - Daily Schedule]]:** Unified daily core working schedule.
+- **[[Daily Schedule]]:** Unified daily core working schedule.
 - **[[Current Learning]]:** Active focus and active subjects.
 - **[[Personal Specs]]:** Master sizing card, footwear measurements, and wardrobe specifications.
 - **Principles & Ethics:** Core values, decision-making frameworks.
@@ -308,12 +308,11 @@ _The Content Log & Reference_
 	2. **[[Project - Basic Engine Control Panel]]**
 	3. **[[Project - Career Agent]]**
 	4. **[[Project - Content Router Agent]]**
-	5. **[[Project - Email Agent]]**
-	6. **[[Project - Persistent Engine Hosting]]**
-	7. **[[Project - Agent Context Optimization & Changeset Automation]]**
-	8. **[[Project - Nexus Demo]]**
-	9. **[[Project - StockBot]]**
-	10. **[[Project - Health Agent]]**
+	5. **[[Project - Persistent Engine Hosting]]**
+	6. **[[Project - Agent Context Optimization & Changeset Automation]]**
+	7. **[[Project - Nexus Demo]]**
+	8. **[[Project - StockBot]]**
+	9. **[[Project - Health Agent]]**
 	- **[[Workshop - MCP Additions]]**
 	- **📁 Archive**
 - **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for eCommerce Silislick.com family business.

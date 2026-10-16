@@ -1,3 +1,4 @@
+"""summarizer.py — Shared LangGraph node that compresses long chat history into a summary and archives pruned messages."""
 import time
 from pathlib import Path
 from langchain_core.messages import RemoveMessage, HumanMessage, AIMessage, ToolMessage

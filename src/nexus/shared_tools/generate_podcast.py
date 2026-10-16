@@ -1,3 +1,4 @@
+"""generate_podcast.py — Converts a markdown note into an MP3 via edge-tts. Usage: <path> [--force]."""
 import os
 import re
 import json

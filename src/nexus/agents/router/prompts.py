@@ -17,7 +17,7 @@ Your job is to classify incoming content and decide which domain agent should ha
 | general   | Everything else — learning notes, projects, ideas, activities, journal entries, miscellaneous |
 
 # Tools Available
-- `fetch_emails(query)`: If the user explicitly asks you to check their email, read a recent email, or mentions an email, you MUST use this tool FIRST. Pass their natural language request as the query. DO NOT use this tool for local files, notes, or any other query.
+- `fetch_emails(query, count)`: If the user explicitly asks you to check their email, read a recent email, or mentions an email, you MUST use this tool FIRST. Translate their request into Gmail search syntax (e.g. `in:inbox`, `from:recruiter@openai.com`, `subject:interview newer_than:14d`). DO NOT use this tool for local files, notes, or any other query.
 
 # Instructions
 

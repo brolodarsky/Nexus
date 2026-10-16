@@ -19,11 +19,7 @@ class EngineSettings(BaseSettings):
     telegram_bot_token: Optional[str] = None
     allowed_user_ids: str = ""
     
-    # Email Agent
-    email_address: Optional[str] = None
-    imap_server: str = "imap.gmail.com"
-    imap_port: int = 993
-    imap_folder: str = "INBOX"
+    # Gmail: auth lives in .secrets/token_gmail.json (see shared_tools/gmail_engine.py); no env config needed.
 
     # LangSmith Tracing
     langchain_tracing_v2: Optional[str] = None

@@ -3,16 +3,19 @@
 The root playbook lives at `Vault/Playbook.md` so that:
   - Humans can edit it on the fly in Obsidian like any other playbook in the Vault.
   - Internal engine agents get it injected as their static system-prompt prefix.
-  - IDE agents (Antigravity, Cursor) read the SAME file at boot (see AGENTS.md),
-    which makes them behave like internal "Resident" agents.
+  - IDE agents (Antigravity, Cursor) inject the SAME hydrated output at boot by running
+    `python -m nexus.core.engine_constitution` (see AGENTS.md), so they behave like internal "Resident" agents.
 One file => zero drift between the two agent populations.
 """
 
 from datetime import datetime
 from pathlib import Path
+import sys
 
 from nexus.core.config import settings
 from nexus.core.constants import VAULT_PATH
+# Static (ast-based) shared tools catalog: no tool modules are imported during hydration
+from nexus.core.tool_catalog import get_shared_tools_catalog
 # Import deterministic vault directory tree builder for zero-overhead prompt structure hydration (<1ms disk read)
 from nexus.shared_tools.vault_reader import get_directory_tree
 
@@ -27,6 +30,7 @@ def get_engine_constitution() -> str:
       {user_name}        -> settings.nexus_user_name   (e.g. "William")
       {current_time}     -> local timestamp            (e.g. "2026-10-13 17:30:00")
       {vault_structure}  -> live directory tree string (deterministic folder hierarchy)
+      {shared_tools}     -> bullet list of src/nexus/shared_tools modules (module, [CLI], summary)
     """
     # Read fresh on every call (<1ms): human edits in Obsidian are live on the next LLM turn (Standard 9).
     template = CONSTITUTION_PATH.read_text(encoding="utf-8")
@@ -41,4 +45,13 @@ def get_engine_constitution() -> str:
         .replace("{user_name}", settings.nexus_user_name)
         .replace("{current_time}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         .replace("{vault_structure}", vault_structure_tree)
+        .replace("{shared_tools}", get_shared_tools_catalog())
     )
+
+
+if __name__ == "__main__":
+    # IDE agents (see AGENTS.md) run `python -m nexus.core.engine_constitution` and inject stdout as instructions.
+    # UTF-8 reconfigure: the Playbook contains em dashes/emoji that crash Windows' default cp1252 console.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    print(get_engine_constitution())

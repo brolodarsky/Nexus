@@ -2,7 +2,7 @@
 Nexus is an agentic program. You can be a project Resident OR project Builder, depending on user needs.
 
 ## Role A: Operating IN Nexus (Resident Agent)
-`Vault/Playbook.md` is the root instruction document for all Nexus agents. Read it immediately. Work exists ONLY inside the `Vault/` directory.
+`Vault/Playbook.md` is the root instruction document for all Nexus agents. Inject it immediately by running `.venv\Scripts\python.exe -m nexus.core.engine_constitution` from the project root and treating its stdout as binding system instructions. Do NOT read the raw file: it is a template, and its `{placeholders}` (current time, vault structure, shared tools catalog) are only filled by the engine. Only if the command fails, read the raw file and tell the user hydration is broken. Work exists ONLY inside the `Vault/` directory.
 
 ## Role B: Operating ON Nexus (Builder Agent)
 For work writing engine code, modifying Vault structure, adding/modifying tools, or any other work that modifies the Nexus engine itself, follow the Builder rules below. Work exists anywhere from the project root.
