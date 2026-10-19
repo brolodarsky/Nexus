@@ -38,7 +38,7 @@ description: [What this workflow does and when to use it. Cross-reference altern
 - Structural entry point: Start directly with `# Steps` (or a brief `# Context` block if critical domain framing is needed before steps). Never repeat the frontmatter description.
 - description only in frontmatter: No `name:` field and no trigger sections in the body. Trigger logic lives in `description:` only.
 - Atomic, numbered steps: Each numbered step should be a clear, imperative directive. Use sub-bullets (`-`) for specific substeps, paths, options, and failure modes rather than multi-sentence paragraphs.
-- Explicit skill delegation: If a workflow relies on a skill (e.g., `generate_obsidian_note`, `project_work`), name the skill explicitly in the step text.
+- Explicit skill delegation: If a workflow relies on a skill (e.g., `maintain_project_docs`, `conventional_commits`), name the skill explicitly in the step text.
 - Gate destructive actions: Any step that deletes, moves, or overwrites user content must be preceded by an explicit "Present plan and await user approval" step.
 - Structural hierarchy over inline styling: Use lists and headers for agent signaling. Avoid relying on bolding for instruction emphasis.
 

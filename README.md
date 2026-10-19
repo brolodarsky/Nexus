@@ -39,33 +39,15 @@ While the current setup relies on Obsidian for viewing and an IDE for orchestrat
 ```
 Nexus/
 ├── .agents/                    # AI agent instructions
-│   ├── rules/                  # Standing rules & coding constraints
+│   ├── rules/                  # Builder coding constraints
 │   │   └── code_commenting_standards.md # Learning-first educational commenting
-│   ├── skills/                 # Mandatory behaviors
-│   │   ├── archive_project/          # Archive completed projects
-│   │   ├── career_counselor/         # Career architecture & strategic advice
-│   │   ├── cleanup_orphans/          # Zettelkasten maintenance (links/folders)
-│   │   ├── cognitive_boundary_flush/ # Hippocampal Flush at session boundaries
+│   ├── skills/                 # Builder mandatory behaviors (repo/git/docs)
 │   │   ├── conventional_commits/     # Commit message format rules
-│   │   ├── generate_obsidian_note/   # How to create new notes
-│   │   ├── maintain_project_docs/    # Keep README & requirements.
-│   │   ├── project_work/             # Maintain active project notes
-│   │   ├── skill_creator/            # Create & improve agent skills
-│   │   └── workflow_creator/         # Create & improve agent workflows
-│   └── workflows/              # Structured procedures (slash commands)
-│       ├── add_job_requirement.md    # Job criteria extraction
-│       ├── archive_contact.md        # CRM contact & pipeline archiving
-│       ├── ask_brain.md              # Semantic vault search
-│       ├── audit_career.md           # Career document drift audit
-│       ├── audit_inbox.md            # Zettelkasten inbox sorting
-│       ├── capture_content.md        # Raw external content capture
-│       ├── create_new_note.md        # Obsidian note creation
-│       ├── create_project.md         # Project planning/tasks
-│       ├── distill_learning.md       # Atomic note synthesis
-│       ├── ingest_medical_record.md  # Parse raw medical data
-│       ├── plan_activity.md          # Itinerary generation
-│       ├── release.md                # Release compilation & changelog bump
-│       └── render_resume.md          # PDF resume rendering
+│   │   ├── maintain_project_docs/    # Keep README & changesets in sync
+│   │   ├── skill_creator/            # Create & improve Builder skills
+│   │   └── workflow_creator/         # Create & improve Builder workflows
+│   └── workflows/              # Builder procedures (slash commands)
+│       └── release.md                # Release compilation & changelog bump
 ├── .changeset/                 # Release fragments
 ├── .venv/                      # Python virtual environment (not committed)
 ├── scripts/                    # Maintenance & release utilities
@@ -190,42 +172,25 @@ To use the universal chat scraper, you must have ADB (Android Debug Bridge) inst
 
 This repository distinguishes between capabilities and constraints that define how the Brain automation works. It is critical to understand the distinction between Rules, Skills, Workflows, and Tools:
 
-1. **Rules (`.agents/rules/`)**: **Standing Constraints & Developer Guidelines**. Fundamental rules and coding standards (e.g., granular educational commenting requirements) loaded automatically across all agent sessions.
-2. **Skills (`.agents/skills/`)**: **Mandatory Behaviors (The Laws of Physics)**. These are the fundamental rules that an AI Agent *must* follow whenever a specific trigger occurs (e.g., how to format YAML for *any* note, or when to update the changelog). They run automatically in the background.
-3. **Workflows (`.agents/workflows/`)**: **Active Procedures (The Recipes)**. These are explicit, multi-step slash commands (e.g., `/create_new_note` vs `/capture_content`) that the user calls to achieve complex outcomes. **Workflows rely on Skills.** (For example, both the `/create_new_note` and `/capture_content` workflows invoke the exact same underlying `generate_obsidian_note` skill when they need to save a file).
-4. **Engine Runtime Tools (`src/nexus/shared_tools/`)**: **Deterministic Capabilities**. These are Python scripts for domain-specific automation (like MP3 generation or IMAP email parsing) used by the agents.
-5. **Meta Scripts (`scripts/`)**: **Repository Maintenance**. Dev/CI tools used for folder validation, releases, and backups.
+1. **Vault Playbooks (`Vault/Playbook.md` & `Vault/<Section>/Playbook.md`)**: **Resident Agent Constitution, Domain Laws & Vault SOPs**. Universal Vault note standards, inbox triage, augment-first distillation, project lifecycle/archiving, orphan audits, Cognitive Boundary Flushes, weekly reviews, medical record ingestion, career counseling, JD ingestion, and resume rendering live natively inside the Vault so both LangGraph runtime agents and IDE Resident agents inherit them with zero drift.
+2. **Rules (`.agents/rules/`)**: **Builder Coding Standards**. Developer guidelines (e.g., granular educational commenting requirements) loaded automatically across IDE sessions.
+3. **Builder Skills (`.agents/skills/`)**: **Developer & Repo Mandatory Behaviors**. Rules that an IDE Builder Agent must follow when modifying engine code, git history, or `.agents/` definitions.
+4. **Builder Workflows (`.agents/workflows/`)**: **Developer Release & Repo Procedures**. Explicit slash-command recipes for repository releases (`/release`).
+5. **Engine Runtime Tools (`src/nexus/shared_tools/`)**: **Deterministic Capabilities**. Python scripts for domain-specific automation (Gmail, Calendar, webpage extraction, TTS, medical XML parsing) used by agents.
+6. **Meta Scripts (`scripts/`)**: **Repository Maintenance**. Dev/CI tools used for career drift validation, releases, and backups.
 
-### Agent Skills (Mandatory Behaviors)
+### Builder Skills (`.agents/skills/`)
 
 | Skill | Trigger |
 |---|---|
-| `archive_project` | When asked to archive a project, mark it as done, or complete a project |
-| `career_counselor` | When asked for career advice, job hunt strategy, or professional optimization |
-| `cleanup_orphans` | When asked to "clean the vault" or perform maintenance |
-| `cognitive_boundary_flush` | Execute The Hippocampal Flush at session wrap-up, bedtime, or context switch |
 | `conventional_commits` | On every `git commit` |
-| `generate_obsidian_note` | When asked to create a new note or integrate new notes/thoughts into the vault |
-| `maintain_project_docs` | Keep README.md, AGENTS.md, and changesets up to date |
-| `project_work` | Keep active project notes in the Vault up to date when tasks or plans change |
-| `skill_creator` | When asked to create, edit, evaluate, or optimize a skill |
-| `workflow_creator` | When asked to create, edit, or improve a workflow |
+| `maintain_project_docs` | Keep README.md, AGENTS.md, and changesets up to date after engine/tool/skill changes |
+| `skill_creator` | When asked to create, edit, evaluate, or optimize a Builder skill |
+| `workflow_creator` | When asked to create, edit, or improve a Builder workflow |
 
-### Agentic Workflows (Slash Commands)
+### Builder Workflows (`.agents/workflows/`)
 
-- `/capture_content`: Format, move, or clean up a raw capture note to serve as an inbox item for future knowledge synthesis.
-- `/add_job_requirement`: Automates extracting skills from a job description (PDF, URL, Markdown, etc.).
-- `/audit_career`: Runs cross-document drift audit across all career strategy, resume, and portfolio documents.
-- `/audit_inbox`: Sorts raw notes and bullet points from the Brain Inbox and Quick Capture into the main Zettelkasten structure.
-- `/create_new_note`: End-to-end workflow for creating, moving, and formatting original internal thoughts into the Vault.
-- `/create_project`: Consolidates rough notes or ideas into a structured project note, complete with extracted tasks and materials.
-- `/distill_learning`: Breaks down a dense external source (article, paper, PDF, URL) into atomic, interlinked notes. Prioritizes augmenting existing Vault notes over creating duplicates to ensure knowledge synthesis.
-- `/ingest_medical_record`: Parse and ingest raw medical records (PDF, XML, Images) into the Vault.
-- `/plan_activity`: Cross-references Activities List, Date Ideas, and People Data notes to generate a structured markdown itinerary.
-- `/ask_brain`: Agentic vault search. Uses a LangGraph ReAct agent to dynamically navigate the local filesystem and returns a grounded answer with source citations. Use when you need facts from your notes without reading files manually. No indexing required.
-- `/release`: Automates the release process by compiling changesets into the changelog, bumping the version, and committing/pushing the release.
-- `/render_resume`: Renders markdown documents (resumes, cover letters) into premium PDF and DOCX. Outputs page fill metrics (fill %, verdict, room remaining) so agents can add/trim content to optimize page utilization.
-- `/weekly_review`: Generates a weekly review memory from git history and vault diffs, and prompts the user to set explicit P0 goals for the upcoming week.
+- `/release`: Automates the release process by compiling `.changeset/` fragments into the changelog, bumping the version, and committing/pushing the release.
 
 ### Deterministic Tools (Scripts)
 
@@ -239,6 +204,7 @@ This repository distinguishes between capabilities and constraints that define h
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python src/nexus/shared_tools/medical_xml_parser.py <path> <output_dir>` |
 | `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python src/nexus/shared_tools/ingest_phone.py --screens 50` |
 | `export_conversation.py` | Universal JSON/JSONL chat transcript parser and formatter (supports JSON arrays, JSONL streams, ChatGPT exports, stdin piping, and local Antigravity transcripts). | `python src/nexus/shared_tools/export_conversation.py <file_or_id> [-o out.md] [-v]` |
+| `vault_reader.py` | Deterministic Vault filesystem inspector: lists documents created or edited today (`--today`), within the last N hours (`--hours`), or since a date (`--since`), plus folder tree browsing (`--tree`), note reading (`--read`), and keyword search (`--search`). | `python -m nexus.shared_tools.vault_reader --today` / `--hours 6` / `--since YYYY-MM-DD` / `--path "<section>"` / `--tree` |
 
 ### Meta Scripts (`scripts/`)
 
@@ -254,8 +220,8 @@ This repository distinguishes between capabilities and constraints that define h
 | `src/nexus/agents/librarian/graph.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service (`api.py` entry point). | `nexus <query>` |
 | `src/nexus/agents/router/graph.py` | Content Router Agent. LangGraph classifier that fetches context via tools and routes incoming content to domain agents. | `python -m nexus.agents.router.api` |
 | `src/nexus/agents/career/graph.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python -m nexus.agents.career.api` |
-| `src/nexus/shared_tools/vault_reader.py` | Pure-Python filesystem utilities for Vault navigation (`read_toc_content`, `read_note_content`, `search_within`, `get_structure`). | N/A (library module) |
-| `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` factories (`get_read_note_tool`, `get_propose_write_tool`, `ask_librarian_escalation`, calendar tools). | N/A (library module) |
+| `src/nexus/shared_tools/vault_reader.py` | Pure-Python filesystem utilities for Vault navigation and recent modification queries (`get_recent_modifications`, `get_directory_tree`, `read_toc_content`, `read_note_content`, `search_within`). | `python -m nexus.shared_tools.vault_reader --today` |
+| `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` factories and wrappers (`get_vault_structure`, `get_recent_modifications`, `get_read_note_tool`, `get_propose_write_tool`, `ask_librarian_escalation`, calendar tools). | N/A (library module) |
 | `src/nexus/shared_tools/summarizer.py` | Shared LangGraph node function for compressing conversation history into Short-Term Recall and Deep Recall archives. | N/A (library module) |
 | `src/nexus/core/engine_constitution.py` | Hydrates `Vault/Playbook.md` placeholders (`{current_time}`, `{user_name}`, `{vault_structure}`, `{shared_tools}`). IDE Resident agents inject its stdout at boot. | `python -m nexus.core.engine_constitution` |
 | `src/nexus/core/tool_catalog.py` | Static (`ast`, no imports) catalog of `src/nexus/shared_tools/` modules for the `{shared_tools}` placeholder. | `python -m nexus.core.tool_catalog` |

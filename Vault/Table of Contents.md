@@ -14,7 +14,7 @@ type: overview
 _Systemic foundations for mental clarity, resilience, long-term vision, and daily tactical execution._
 ## 1.1. Philosophy & Personal North Star
 - **[[Goals]]**
-- **[[To Do List]]**
+- **[[Tasks]]**
 - **[[Plan]]:** 10-day sliding tactical execution envelope (`[-5, +5]`).
 - **[[Daily Schedule]]:** Unified daily core working schedule.
 - **[[Current Learning]]:** Active focus and active subjects.
@@ -124,6 +124,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **[[Operations Lessons]]:** Enduring procedural memory & strategic rules for operations, wealth, and housing.
 ## 3.1. Career Strategy & Revenue
 **[Link - Career - Google Drive](https://drive.google.com/drive/u/0/folders/1uJfG9nFqFD_BgbMY4HJ4GyRtieem-kC8)**
+- **[[3. Operations/3.1. Career Strategy & Revenue/Playbook|Career Playbook]]:** Operational guide and strategic career advisory rules.
 - **[[Job Hunt War Room]]**: Action plan and target company pipelines.
 - **[[Protocol - Career Maintenance]]:** Recurring professional cadences (daily/weekly).
 - **[[Career Lessons]]:** Enduring procedural memory & strategic rules for career execution.
@@ -149,6 +150,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **📁 Resumes**
 	- **[[Resume - Master|Resume - Master - Markdown]]:** The source-of-truth CV.
 		- **[[Resume - Master.pdf]]:** Exported PDF output.
+		- **[[Resume - Master (Active Operations)]]:** Variant with `SiliSlick Knives` dated `June 2017 – Present` for executive/family warm intros and commercial SE roles ([[Resume - Master (Active Operations).pdf|PDF]]).
 		- **[[Resume - Master (Extended)]]**
 - **📁 Cover Letters**
 	- **[[Cover Letter - Agentic AI Focus]]**
@@ -252,6 +254,7 @@ _Dedicated space for exploration, relationships, and pure interest._ Connection 
 
 ## 4.3. Culture & Inspiration
 - **[[Education Wish List]]:** Topics for voluntary study.
+- **[[Vocabulary]]:** Curated lexicon of evocative, rare, and precise words.
 - **Media Vault:** Analysis of media, film, literature.
 - **Music**
 	- **[[List - NYC Venues for Deep Tech, Minimal & Romanian-Style Microhouse]]**

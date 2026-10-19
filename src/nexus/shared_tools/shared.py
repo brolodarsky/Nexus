@@ -28,6 +28,36 @@ def get_vault_structure(path: Optional[str] = None) -> str:
 
 
 @tool
+def get_recent_modifications(
+    hours: Optional[float] = None,
+    since_date: Optional[str] = None,
+    path: Optional[str] = None,
+    limit: int = 50,
+) -> str:
+    """List Vault documents modified today (default) or within a specified time window, sorted newest-first.
+
+    Use this tool during daily plan reconciliations, session boundary flushes, or status audits
+    to deterministically see what documents were actually created or edited without guessing.
+
+    Args:
+        hours: Optional rolling lookback window in hours (e.g. 6.0 for the last 6 hours).
+               Leave omitted to list all documents modified today since 00:00:00 local time.
+        since_date: Optional ISO date 'YYYY-MM-DD' to list modifications since 00:00:00 on that date.
+        path: Optional relative folder path from Vault root to scope the query to a specific section.
+        limit: Maximum number of modified documents to return (default: 50).
+    """
+    # Delegate to the pure-Python filesystem scanner in vault_reader to keep @tool layer thin
+    from nexus.shared_tools.vault_reader import get_recent_modifications as _get_recent_modifications
+
+    return _get_recent_modifications(
+        hours=hours,
+        since_date=since_date,
+        root_path=path,
+        limit=limit,
+    )
+
+
+@tool
 def ask_librarian_escalation(query: str) -> str:
     """Escalate a cross-domain question to the Librarian Agent.
 

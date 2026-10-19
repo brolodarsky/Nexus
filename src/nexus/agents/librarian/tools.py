@@ -11,8 +11,8 @@ from nexus.shared_tools.vault_reader import (
     read_note_content,
     search_within
 )
-# Standardize on shared tool implementation for vault structure hydration across all agents
-from nexus.shared_tools.shared import get_vault_structure
+# Standardize on shared tool implementations for vault structure and modification queries across all agents
+from nexus.shared_tools.shared import get_vault_structure, get_recent_modifications
 
 @tool
 def read_toc() -> str:

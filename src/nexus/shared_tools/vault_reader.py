@@ -1,11 +1,14 @@
 """
-vault_reader.py — Pure Python filesystem operations for Vault navigation.
-No LangChain @tool decorators here. These functions can be used by any agent or HTTP route.
+vault_reader.py — Pure Python filesystem operations for Vault navigation and recent modification queries (`--today`, `--hours`, `--tree`, `--search`).
+No LangChain @tool decorators here. These functions can be used by any agent, CLI call, or HTTP route.
 """
+import argparse
+from datetime import datetime, time, timedelta
 import os
 import re
+import sys
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from nexus.core.constants import IGNORE_DIRS, VAULT_PATH
 
@@ -267,3 +270,200 @@ def search_within(keyword: str, root_path: Optional[str] = None, tags: Optional[
         output += f"...and {len(results)-20} more files."
         
     return output
+
+
+# Optional[float] / Optional[str] allow callers to filter by rolling hours, specific date, or default to today (local midnight).
+def get_recent_modifications(
+    hours: Optional[float] = None,
+    since_date: Optional[str] = None,
+    root_path: Optional[str] = None,
+    limit: int = 50,
+    markdown_only: bool = False,
+) -> str:
+    """
+    Returns a deterministic, newest-first summary of Vault documents modified within a time window.
+
+    Args:
+        hours: Optional rolling lookback window in hours (e.g. 6.0 for last 6 hours).
+               If both `hours` and `since_date` are omitted, defaults to today since 00:00:00 local time.
+        since_date: Optional ISO date string 'YYYY-MM-DD' to query modifications since 00:00:00 on that date.
+        root_path: Optional relative folder path from Vault root to scope the scan to a specific section.
+        limit: Maximum number of modified documents to return (default: 50).
+        markdown_only: If True, only include `.md` notes; otherwise include all non-hidden Vault documents (excluding `.gitkeep`).
+    """
+    if root_path:
+        search_root = VAULT_PATH / root_path
+        if not search_root.exists() or not search_root.is_dir():
+            return (
+                f"Error: Path '{root_path}' does not exist or is not a directory. "
+                f"Call get_directory_tree() to see available folders."
+            )
+    else:
+        search_root = VAULT_PATH
+
+    # Resolve the local cutoff datetime based on caller arguments (hours -> since_date -> today at midnight).
+    now_local = datetime.now()
+    if hours is not None:
+        cutoff_dt = now_local - timedelta(hours=hours)
+        window_label = f"last {hours:g} hour(s) (since {cutoff_dt.strftime('%Y-%m-%d %H:%M:%S')})"
+    elif since_date:
+        try:
+            parsed_date = datetime.strptime(since_date.strip(), "%Y-%m-%d").date()
+            cutoff_dt = datetime.combine(parsed_date, time.min)
+            window_label = f"since {since_date} 00:00:00"
+        except ValueError:
+            return f"Error: Invalid since_date '{since_date}'. Expected format: YYYY-MM-DD."
+    else:
+        # datetime.combine(date, time.min) anchors the default cutoff to 00:00:00 local time today.
+        cutoff_dt = datetime.combine(now_local.date(), time.min)
+        window_label = f"today ({now_local.strftime('%Y-%m-%d')} since 00:00:00)"
+
+    # Convert cutoff datetime to a POSIX float timestamp (seconds since epoch) for fast comparison against os.stat().
+    cutoff_ts: float = cutoff_dt.timestamp()
+
+    # Tuple holds: (mtime_ts, is_new_in_window, rel_path_str, size_bytes)
+    matched_files: List[Tuple[float, bool, str, int]] = []
+
+    for root, dirs, files in os.walk(search_root):
+        # Mutating dirs[:] in-place prunes IGNORE_DIRS (e.g. .git, .obsidian, Audio) so os.walk never descends into them.
+        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+
+        for file in files:
+            # Skip hidden dotfiles (e.g. .gitkeep, .DS_Store) that carry no user content.
+            if file.startswith("."):
+                continue
+            if markdown_only and not file.endswith(".md"):
+                continue
+
+            filepath = Path(root) / file
+            try:
+                stat_info = filepath.stat()
+            except OSError:
+                # Ignore transient lock/permission errors on individual files during walk.
+                continue
+
+            if stat_info.st_mtime >= cutoff_ts:
+                # Forward-slash relative path keeps output uniform across Windows and POSIX platforms.
+                rel_path = str(filepath.relative_to(VAULT_PATH)).replace("\\", "/")
+                # Compare creation timestamp (st_ctime) against cutoff_ts to distinguish newly created vs. edited notes.
+                is_new = stat_info.st_ctime >= cutoff_ts
+                matched_files.append((stat_info.st_mtime, is_new, rel_path, stat_info.st_size))
+
+    scope_label = f"in '{root_path}'" if root_path else "across the Vault"
+    if not matched_files:
+        return f"No documents modified {window_label} {scope_label}."
+
+    # Sort descending by modification timestamp (x[0]) so the most recently touched files appear at the top.
+    matched_files.sort(key=lambda x: x[0], reverse=True)
+
+    total_count = len(matched_files)
+    displayed = matched_files[: max(1, limit)]
+
+    lines: List[str] = [
+        f"Modified documents {window_label} {scope_label} ({total_count} found):"
+    ]
+    for mtime_ts, is_new, rel_path, size_bytes in displayed:
+        mtime_str = datetime.fromtimestamp(mtime_ts).strftime("%Y-%m-%d %H:%M:%S")
+        action_badge = "NEW" if is_new else "EDITED"
+        lines.append(f"- [{mtime_str}] [{action_badge}] {rel_path} ({size_bytes:,} bytes)")
+
+    if total_count > len(displayed):
+        lines.append(f"...and {total_count - len(displayed)} older modification(s) omitted (limit={limit}).")
+
+    return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    # Force UTF-8 stdout on Windows consoles so box-drawing characters and em-dashes do not raise UnicodeEncodeError.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    parser = argparse.ArgumentParser(
+        prog="python -m nexus.shared_tools.vault_reader",
+        description="Deterministic Vault filesystem inspector: query documents edited today, browse folder trees, read notes, or grep content.",
+    )
+    parser.add_argument(
+        "--today",
+        action="store_true",
+        help="List all Vault documents modified today (since 00:00:00 local time). Default action when no mode flag is passed.",
+    )
+    parser.add_argument(
+        "--hours",
+        type=float,
+        default=None,
+        help="List Vault documents modified within the last N hours (e.g. --hours 6).",
+    )
+    parser.add_argument(
+        "--since",
+        type=str,
+        default=None,
+        help="List Vault documents modified since YYYY-MM-DD 00:00:00 (e.g. --since 2026-10-18).",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of modified documents to display (default: 50).",
+    )
+    parser.add_argument(
+        "--md-only",
+        action="store_true",
+        help="Only include .md files in recent modification queries.",
+    )
+    parser.add_argument(
+        "--path",
+        type=str,
+        default=None,
+        help="Optional Vault-relative folder path to scope queries (e.g. '3. Operations/3.1. Career Strategy & Revenue').",
+    )
+    parser.add_argument(
+        "--tree",
+        action="store_true",
+        help="Print the Vault directory tree instead of recent modifications.",
+    )
+    parser.add_argument(
+        "--files",
+        action="store_true",
+        help="Include file names when printing --tree.",
+    )
+    parser.add_argument(
+        "--depth",
+        type=int,
+        default=None,
+        help="Maximum folder depth to expand when printing --tree.",
+    )
+    parser.add_argument(
+        "--read",
+        type=str,
+        default=None,
+        metavar="NOTE",
+        help="Read a specific note by name or Vault-relative path.",
+    )
+    parser.add_argument(
+        "--search",
+        type=str,
+        default=None,
+        metavar="KEYWORD",
+        help="Search notes for a keyword string (optionally scoped by --path).",
+    )
+
+    args = parser.parse_args()
+
+    if args.read:
+        print(read_note_content(args.read, domain_path=args.path))
+    elif args.search:
+        print(search_within(args.search, root_path=args.path))
+    elif args.tree:
+        print(get_directory_tree(path=args.path, show_files=args.files or (args.path is not None), max_depth=args.depth))
+    else:
+        # Default to get_recent_modifications (--today if neither --hours nor --since is provided).
+        print(
+            get_recent_modifications(
+                hours=args.hours,
+                since_date=args.since,
+                root_path=args.path,
+                limit=args.limit,
+                markdown_only=args.md_only,
+            )
+        )
+

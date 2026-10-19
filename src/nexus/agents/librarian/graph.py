@@ -18,7 +18,13 @@ from langchain_openai import ChatOpenAI
 
 from nexus.core.constants import AI_MODEL_LOW
 from nexus.core.trace import AgentTracer, _truncate, RESULT_TRUNCATE_LEN
-from nexus.agents.librarian.tools import read_toc, read_note, search_vault, get_vault_structure
+from nexus.agents.librarian.tools import (
+    read_toc,
+    read_note,
+    search_vault,
+    get_vault_structure,
+    get_recent_modifications,
+)
 from nexus.agents.librarian.tools import get_vault_structure as _get_vault_structure_fn
 from nexus.agents.librarian.prompts import SYSTEM_PROMPT
 
@@ -28,7 +34,7 @@ librarian_tracer = AgentTracer("Librarian", color="green")
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
-tools = [read_toc, read_note, search_vault, get_vault_structure]
+tools = [read_toc, read_note, search_vault, get_vault_structure, get_recent_modifications]
 tool_node = ToolNode(tools)
 
 llm = ChatOpenAI(model=AI_MODEL_LOW, temperature=0.0)

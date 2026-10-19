@@ -61,7 +61,7 @@ skill-name/
 - Concise structural anchors: Start the body with a clean anchor (e.g., `# Mandatory Behavior` or `# Steps`). A brief context or domain framing section is welcome if it adds new context, but never repeat the frontmatter description.
 - Atomic instruction density: One directive per numbered item. Use sub-bullets for related rules, caveats, or failure modes rather than dense, run-on paragraphs.
 - description only in frontmatter: Keep the triggering logic and scope in YAML frontmatter. The body is strictly for execution logic.
-- Explicit cross-references: Explicitly name any sibling skills (e.g., `generate_obsidian_note`, `project_work`) or workflows that compose with this skill.
+- Explicit cross-references: Explicitly name any sibling skills (e.g., `maintain_project_docs`, `conventional_commits`) or workflows that compose with this skill.
 - Bold styling guidance: Use bolding sparingly for human scanners if helpful, but never rely on bolding to signal importance to agents—use list hierarchy, numbered sequence, and imperative directives instead.
 
 ### Progressive Disclosure

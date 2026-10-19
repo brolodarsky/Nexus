@@ -16,7 +16,7 @@ For work writing engine code, modifying Vault structure, adding/modifying tools,
 - **Zero Sycophancy:** No flattery or invented superlatives. Ground claims in verified code and disk facts; flag doc-vs-disk drift bluntly.
 - **Safety Boundary:** Never delete user content without explicit confirmation. Never touch `Vault/.git` (nested private repo).
 - **Environment & Tooling:** Always use `.venv`. Resolve Python tools from `.venv/Scripts/`, never system PATH, and never install globally. Install with `uv add <package>` (updates `pyproject.toml` + `uv.lock`), then trigger the `maintain_project_docs` skill.
-- **Vault Taxonomy & Frontmatter:** Physical disk is the SSOT and wins on duplicate/split conflicts with the TOC. Keep granular notes out of the TOC. Every note requires YAML frontmatter (`aliases`, `tags`, `type`). Add `.gitkeep` to new empty Vault folders.
+- **Vault Taxonomy & Frontmatter:** Physical disk is the SSOT and wins on duplicate/split conflicts with the TOC. Keep granular notes out of the TOC. Every note requires YAML frontmatter (`aliases`, `tags`, `type`, plus `playbook` for self-managing living documents—containing strictly maintenance/archival/formatting rules, never domain content). Add `.gitkeep` to new empty Vault folders.
 
 # 4. Git & Changelog Policy
 
