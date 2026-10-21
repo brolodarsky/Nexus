@@ -1,38 +1,22 @@
 # Nexus: Agent-Integrated Knowledge OS & Cognitive Engine
 
-Nexus is a local-first, agent-orchestrated knowledge engine designed to bridge unstructured markdown notes (Zettelkasten) with autonomous agentic workflows, deterministic tools, and dynamic semantic search. Its core innovation is the **Dynamic Section Subagent Factory** — one generic LangGraph agent engine dynamically parameterized by standardized Vault directory modules, eliminating the need for hardcoded Python packages per life domain.
+Nexus is a agent-orchestrated knowledge engine designed to bridge unstructured markdown notes (Zettelkasten) with autonomous agentic workflows, deterministic tools, and dynamic subagent delegation. Its core architecture is a **Single Universal Agent (`NexusAgent`)** that boots with `Vault/Master Instructions.md`, navigates your knowledge Vault directly, reads domain-specific `Section Instructions.md` on demand, dynamically loads tools from `src/nexus/shared_tools/` based on lightweight catalog descriptions, and spawns isolated subagents hydrated for parallel or deep subtasks.
 
-Rather than a static archive or a generic note template, Nexus acts as a cognitive framework. It couples a structured knowledge vault with a backend agent engine to ingest, search, process, and output real-world information. For the definitive Single Source of Truth (SSOT) on the engine's memory architecture, section schemas, and cognitive lifecycles, see the [Concept - The Nexus Execution Lifecycle](file:///C:/Users/Willi/Documents/Projects/Nexus/Vault/6.%20Engineering/6.2.%20Library%20&%20Learning/6.2.1.%20Intelligent%20Agents%20&%20Autonomy/Concept%20-%20The%20Nexus%20Execution%20Lifecycle.md) note.
+Rather than a static archive or a generic note template, Nexus acts as a cognitive framework. It couples a structured knowledge vault with a backend agent engine to ingest, search, process, and output real-world information.
 
 ## Key Technical Pillars
 
-*   **Dynamic Section Subagent Factory (`src/nexus/`) — planned, not yet built:** The target design is a `SubagentFactory` that reads standardized Vault directory modules (`Section Profile.yaml`, `Playbook.md`, `Lessons Learned.md`) to dynamically compile domain-specialized LangGraph agents at dispatch time, with a dual-mode **Meta-Orchestrator** that classifies queries and spawns Section Subagents via sticky handoff or supervisor worker spawning. Today, all agents are hardcoded LangGraph graphs and no spawning tooling exists. Five-tier memory architecture (Working → Session → Procedural → Semantic → Episodic) with Cognitive Inheritance across parent-child sections is the target model.
-*   **Agentic File System Navigator (Librarian):** A LangGraph ReAct agent that deterministically navigates the local filesystem to locate, read, and cross-reference documents — delivering grounded answers with precise source citations without requiring pre-indexing or external vector databases. Serves as the universal cross-domain read substrate consumed by all Section Subagents.
-*   **Context-Aware Workflows (`.agents/workflows/`):** Multi-step agent instructions (exposed as slash commands) that automate complex tasks like extracting skills from job descriptions, parsing medical records, and synthesizing dense source material into atomic notes.
-*   **Enforced Agent Skills (`.agents/skills/`):** Mandatory system behaviors acting as background constraints ("laws of physics") that intercept agent actions to guarantee data integrity, formatting rules, and contextual safety guidelines.
-*   **Deterministic Automation Layer (`tools/`):** Python and Node.js integrations for phone chat screen-scraping (ADB), secure OAuth2 email retrieval, edge-TTS audio podcast generation, and automated PDF portfolio rendering.
+*   **Single Universal Agent + Dynamic Subagents (`src/nexus/`):** Instead of hardcoded domain agent packages or rigid YAML manifests per folder, one brand new universal agent boots with `Vault/Master Instructions.md` (hydrated with `{vault_structure}` and `{shared_tools}`), reads `<Section>/Section Instructions.md` when entering a domain, dynamically loads required tools on demand, and spawns subagents hydrated with subject-specific instructions and context files.
+*   **Agentic File System (AFS):** Deterministic Python filesystem utilities (`vault_reader.py`) navigate the local Vault to locate, read, and cross-reference documents without requiring pre-indexing or external vector databases.
+*   **Plain-English Instructions Hierarchy (`Master Instructions.md` $\to$ `Section Instructions.md` $\to$ YAML `instructions:`):** Universal Vault integrity gates, domain SOPs, and note-level maintenance contracts live natively inside the Vault in plain Markdown/YAML.
+*   **Deterministic Automation Layer (`src/nexus/shared_tools/`):** Python and Node.js integrations for Gmail work, Google Calendar work, webpage text extraction, YouTube transcripts, HL7 medical XML parsing, ADB phone chat scraping, edge-TTS audio podcast generation, PDF/DOCX resume rendering, etc.
 
 ## Production Case Study: Radical Transparency
 
 To demonstrate real-world utility and verify agent performance under complex, non-trivial conditions, this repository is configured as a live, production deployment. 
 
-The configuration files (`AGENTS.md`) and agent skills are mapped to actual operational scenarios—such as health tracking, professional CRM maintenance, and multi-generational caregiving logistics. 
-
 *   **Public Engine Layer:** The entire agent architecture, tools, evaluations, and directory structures are public to serve as a reference implementation.
 *   **Private Data Layer (Gitignored):** The actual markdown content, files, and personal databases are kept strictly local (synced via Syncthing and encrypted/gitignored), preserving privacy while showing the system's structural schema in action.
-
-## How It Operates & Roadmap
-
-This system currently follows a "best tool for the job" architecture:
-- **The Content UI (Obsidian):** The daily interaction with notes, thoughts, and the knowledge graph happens entirely within Obsidian. It is the best tool for visualizing links, reading, and writing markdown.
-- **The Engine UI (CLI & Agentic IDEs):** Deterministic tools and agentic queries can be executed directly via terminal. Complex agentic workflows (slash commands) are currently orchestrated using Agentic IDEs (like Cursor, Windsurf, or specialized agents) to follow the `.agents/` instructions.
-
-**Future Evolution:**
-While the current setup relies on Obsidian for viewing and an IDE for orchestrating agentic workflows, the roadmap points toward a fully unified, standalone application. Future iterations will include:
-1. A **Standalone Autonomous Orchestrator** to run the agentic engine without relying on a third-party IDE.
-2. A **Custom Content UI** to replace Obsidian, allowing tight, native integration between the knowledge graph and the agentic tools.
-
----
 
 ## Repository Structure
 
@@ -55,67 +39,6 @@ Nexus/
 │   ├── release.py              # Changeset compiler & release automation
 │   └── sync_vault.py           # Nested Vault repository git synchronization
 ├── Vault/                      # All Brain content lives here
-│   ├── .obsidian/              # Obsidian settings
-│   ├── .stfolder/              # Syncthing folder
-│   ├── 0. Inbox/               # Temp file storage for items bound for integration (includes Quick Capture)
-│   ├── 1. Core/                # Identity, governance, and foundations
-│   │   ├── 1.1. Philosophy & Personal North Star/    # Values, principles, and long-term vision
-│   │   │   └── Personal Logs/                        # Journal, Memories, and The Trophy Case
-│   │   ├── 1.2. Personal Knowledge Management (PKM)/ # Nexus.0 meta and maintenance protocols
-│   │   ├── 1.3. Security & Digital Sovereignty/      # Encryption, password strategy, and inheritance
-│   │   └── 1.4. Emergency & Survival/                # Crisis protocols and emergency contacts
-│   ├── 2. Health/                  # Physical and mental well-being
-│   │   ├── 2.1. Fitness/                             # Training logs and performance tracking
-│   │   ├── 2.2. Medical/                             # Health history, lab work, and sleep hygiene
-│   │   │   ├── Health_Logs/                          # Doctor visit notes (PCP, ENT, Pulmonology, etc.)
-│   │   │   └── Lab_Work/                             # Bloodwork results (BMP, CBC, Thyroid, etc.)
-│   │   ├── 2.3. Psych/                               # Cognitive load and mindfulness rituals
-│   │   ├── 2.4. Nutrition/                           # Recipe vault and nutrition science
-│   │   └── 2.5. Mom's Health Tracking/               # Caregiving logs, symptoms, and medical records for Mom
-│   ├── 3. Operations/              # Financial and logistical systems
-│   │   ├── 3.1. Career Strategy & Revenue/           # Job hunt, professional profile, and portfolio
-│   │   │   ├── 3.1.1. Market Research & Future of Work/
-│   │   │   ├── 3.1.2. Interview Prep & Technical Depth/
-│   │   │   ├── 3.1.3. Professional Portfolio & Evidence/
-│   │   │   ├── 3.1.4. Networking & Professional CRM/
-│   │   │   ├── 3.1.5. Income Streams & Side Revenue/
-│   │   │   └── 3.1.6. Compensation & Negotiation/
-│   │   ├── 3.2. Wealth & Asset Management/           # Investment strategy and recurring payments
-│   │   └── 3.3. Infrastructure & Logistics/          # Home lab, family estate, and auto maintenance
-│   │       ├── 3.3.1. Home Improvement & Maintenance/
-│   │       ├── 3.3.2. Family & Care/
-│   │       └── 3.3.3. Auto/
-│   ├── 4. Life/                    # Social, culture, and creativity
-│   │   ├── 4.1. Social Life & Community/             # People data, social club, and adventures
-│   │   ├── 4.2. Romance & Partnership/               # Relationship maintenance and date ideas
-│   │   ├── 4.3. Culture & Inspiration/               # Media archive, reading list, and education
-│   │   └── 4.4. Creativity/                          # Writing, jokes, and creative exploration
-│   ├── 5. Reference/               # External reference, logs & digital inventory
-│   │   ├── 5.1. The Content Log (General)/           # Web archive and YouTube history
-│   │   └── 5.2. Digital Inventory/                   # Hardware/software audits and backups
-│   ├── 6. Engineering/             # Technical projects and learning
-│   │   ├── 6.1. Projects/                            # Active development "The Lab"
-│   │   │   ├── 6.1.1. Flagship Applications/         # Primary high-importance projects
-│   │   │   ├── 6.1.2. Agentic R&D/                   # Agentic skills (mirrored), workshops, and tinkering
-│   │   │   ├── 6.1.3. Maintenance & Assets/          # Stable portfolios and meta-checklists
-│   │   │   └── 6.1.4. Script Attic/                  # Inactive tools and experiments
-│   │   └── 6.2. Library & Learning/                  # Technical archive and deep-dives
-│   │       ├── 6.2.1. Math/
-│   │       ├── 6.2.2. Programming & Software Engineering/
-│   │       ├── 6.2.3. Algorithms & Data Structures/
-│   │       ├── 6.2.4. System Design & Distributed Systems/
-│   │       ├── 6.2.5. Data Processing, Engineering & MLOps/
-│   │       ├── 6.2.6. Machine Learning/
-│   │       ├── 6.2.7. Deep Learning/
-│   │       ├── 6.2.8. NLP & Vector Search/
-│   │       ├── 6.2.9. Computer Vision/
-│   │       ├── 6.2.10. Reinforcement Learning/
-│   │       ├── 6.2.11. Intelligent Agents & Autonomy/
-│   │       ├── 6.2.12. AI for Science & Healthcare/
-│   │       ├── 6.2.13. Robotics (Hardware & Control Systems)/
-│   │       └── 6.2.14. AI Ethics, Safety & Governance/
-│   ├── Audio/                  # Gitignored
-│   └── Table of Contents.md   # Master index — source of truth for structure
 ├── AGENTS.md                   # AI agent constitution
 ├── CHANGELOG.md                # Running log of notable changes
 ├── src/nexus/                      # Agentic search & coordinator engine
@@ -128,7 +51,7 @@ Nexus/
 │   ├── core/                    # Shared engine configuration
 │   │   ├── audio.py             # Whisper transcription service
 │   │   ├── constants.py         # Global constants
-│   │   ├── engine_constitution.py # Loader for Vault/Playbook.md ({user_name}/{current_time} placeholders)
+│   │   ├── engine_constitution.py # Loader for Vault/Master Instructions.md ({user_name}/{current_time} placeholders)
 │   │   ├── google_auth.py       # Reusable OAuth2 manager
 │   │   └── hitl_queue.py        # SQLite HITL transaction queue
 │   ├── evals/                   # Benchmarking & Golden Dataset
@@ -166,20 +89,18 @@ To use the universal chat scraper, you must have ADB (Android Debug Bridge) inst
 3. **Connect**: Connect via USB (or wireless ADB) and tap "Allow" on the phone's authorization dialog.
 4. **Run**: Open the chat you want to save on your phone's screen and run `python src/nexus/shared_tools/ingest_phone.py --screens <N>`.
 
----
-
 ## The Engine (Skills, Workflows & Tools)
 
 This repository distinguishes between capabilities and constraints that define how the Brain automation works. It is critical to understand the distinction between Rules, Skills, Workflows, and Tools:
 
-1. **Vault Playbooks (`Vault/Playbook.md` & `Vault/<Section>/Playbook.md`)**: **Resident Agent Constitution, Domain Laws & Vault SOPs**. Universal Vault note standards, inbox triage, augment-first distillation, project lifecycle/archiving, orphan audits, Cognitive Boundary Flushes, weekly reviews, medical record ingestion, career counseling, JD ingestion, and resume rendering live natively inside the Vault so both LangGraph runtime agents and IDE Resident agents inherit them with zero drift.
+1. **Vault Instructions (`Vault/Master Instructions.md` & `Vault/<Section>/Section Instructions.md`)**: **Resident Agent Constitution, Domain Laws & Vault SOPs**. Universal Vault note standards, inbox triage, augment-first distillation, project lifecycle/archiving, orphan audits, Cognitive Boundary Flushes, weekly reviews, medical record ingestion, career counseling, JD ingestion, and resume rendering live natively inside the Vault so both LangGraph runtime agents and IDE Resident agents inherit them with zero drift.
 2. **Rules (`.agents/rules/`)**: **Builder Coding Standards**. Developer guidelines (e.g., granular educational commenting requirements) loaded automatically across IDE sessions.
 3. **Builder Skills (`.agents/skills/`)**: **Developer & Repo Mandatory Behaviors**. Rules that an IDE Builder Agent must follow when modifying engine code, git history, or `.agents/` definitions.
 4. **Builder Workflows (`.agents/workflows/`)**: **Developer Release & Repo Procedures**. Explicit slash-command recipes for repository releases (`/release`).
 5. **Engine Runtime Tools (`src/nexus/shared_tools/`)**: **Deterministic Capabilities**. Python scripts for domain-specific automation (Gmail, Calendar, webpage extraction, TTS, medical XML parsing) used by agents.
 6. **Meta Scripts (`scripts/`)**: **Repository Maintenance**. Dev/CI tools used for career drift validation, releases, and backups.
 
-### Builder Skills (`.agents/skills/`)
+### Builder Agent Skills (`.agents/skills/`)
 
 | Skill | Trigger |
 |---|---|
@@ -223,28 +144,13 @@ This repository distinguishes between capabilities and constraints that define h
 | `src/nexus/shared_tools/vault_reader.py` | Pure-Python filesystem utilities for Vault navigation and recent modification queries (`get_recent_modifications`, `get_directory_tree`, `read_toc_content`, `read_note_content`, `search_within`). | `python -m nexus.shared_tools.vault_reader --today` |
 | `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` factories and wrappers (`get_vault_structure`, `get_recent_modifications`, `get_read_note_tool`, `get_propose_write_tool`, `ask_librarian_escalation`, calendar tools). | N/A (library module) |
 | `src/nexus/shared_tools/summarizer.py` | Shared LangGraph node function for compressing conversation history into Short-Term Recall and Deep Recall archives. | N/A (library module) |
-| `src/nexus/core/engine_constitution.py` | Hydrates `Vault/Playbook.md` placeholders (`{current_time}`, `{user_name}`, `{vault_structure}`, `{shared_tools}`). IDE Resident agents inject its stdout at boot. | `python -m nexus.core.engine_constitution` |
+| `src/nexus/core/engine_constitution.py` | Hydrates `Vault/Master Instructions.md` placeholders (`{current_time}`, `{user_name}`, `{vault_structure}`, `{shared_tools}`). IDE Resident agents inject its stdout at boot. | `python -m nexus.core.engine_constitution` |
 | `src/nexus/core/tool_catalog.py` | Static (`ast`, no imports) catalog of `src/nexus/shared_tools/` modules for the `{shared_tools}` placeholder. | `python -m nexus.core.tool_catalog` |
 | `src/nexus/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
 | `src/nexus/core/chats_db.py` | SQLite-backed persistent UI chat history and sticky session state. | N/A (library module) |
 | `src/nexus/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve (write to disk), reject. | Via GUI or API |
 | `resume_engine/` | PDF and DOCX rendering with page fill metrics. Outputs fill %, verdict, and room remaining after every render. | `node src/nexus/shared_tools/resume_engine/render.js` |
 | `start.ps1` | Launches the full Nexus Control Panel (FastAPI + Next.js). | `.\start.ps1` |
-
-### PowerShell Integration
-
-For a more seamless experience on Windows, the following "global" commands are available once added to your PowerShell profile:
-
-| Command | Purpose |
-|---|---|
-| `ask-brain "<question>"` | Runs the semantic search engine from anywhere. |
-| `brain-voice` | Starts voice recording for hands-free semantic search querying. |
-| `brain-telegram` | Starts the Telegram bot listener. |
-| `ingest-vault` | Triggers a vault re-index from anywhere. |
-| `render-resume` | Renders the professional PDF resume. |
-| `venv` | Searches for and activates a `.venv` in the current directory. |
-
----
 
 ## Architectural Methods
 
@@ -265,10 +171,7 @@ While all vault content is intentionally gitignored so it never enters the repos
 - **Syncthing** handles the Vault content (notes, audio, large binaries) across my personal devices.
 - For example, large MP3 files generated by the podcast tools are gitignored and sync via Syncthing only, avoiding repo bloat while maintaining mobile access.
 
-### 4. Agentic Config Mirror
-I maintain a mirror of the `src/nexus/shared_tools/` directory inside `Vault/6. Forge/6.1. Projects/6.1.2. Agentic R&D/Agentic Config/`. This is an Obsidian-native development workflow that lets me tinker with scripts directly inside my Obsidian vault, using its linking and preview features, without breaking the production code at the repository root. Changes are manually promoted once tested.
-
-### 5. Learning-First Codebase (Granular Educational Commenting)
+### 4. Learning-First Codebase (Granular Educational Commenting)
 Both the Python engine (`src/nexus/`) and the TypeScript frontend (`gui/`) are maintained as learning-first codebases. AI coding agents and human contributors adhere to a strict educational commenting standard:
 - Complex signatures, generics (`<T>`, `TypeVar`), async flows (`Promise`, `async/await`, tasks), streaming buffers, and framework idioms are demystified line-by-line with concrete examples.
 - Code comments serve as first-class educational scaffolding for developers with foundational coding knowledge, eliminating cryptic syntax and preserving long-term comprehensibility across all languages in the repo.
@@ -281,22 +184,10 @@ Both the Python engine (`src/nexus/`) and the TypeScript frontend (`gui/`) are m
 If you want to use this as a starting point for your own system:
 1. **Clone the repo** (you will only get the engine and the vault skeleton).
 2. **Replace the vault content** by populating the folders with your own notes.
-3. **Adapt the Skills & Workflows** (`.agents/skills/` and `.agents/workflows/`) to match your own domain context and personal rules.
-4. **Keep the Engine** and continue building out new deterministic tools or agentic workflows.
+3. **Adapt the text instructions** to match your own domain context and personal rules.
 
 > [!tip] The "Nested Heart" (Optional Private Versioning)
 > Because the `Vault/` folder is explicitly gitignored in this main repository, your personal notes will not have version history by default. If you want to version-control your private thoughts without risking exposing them in your public engine fork, you can initialize a *second, nested* Git repository directly inside the `Vault/` directory (`cd Vault; git init`) and push it to a separate private remote. This repository includes a `scripts/sync_vault.py` script designed to help you commit to this nested private repo automatically without causing Git context-confusion.
-
----
-
-## Vault Maintenance
-Whenever the `Table of Contents.md` structure or folder taxonomy is modified:
-
-- Keep folder structure synchronized with Table of Contents H1/H2 sections.
-- Handle `.gitkeep` files: ensure empty folders contain `.gitkeep` for Git tracking.
-- Orphaned folders (no matching TOC entry) should be reported, never deleted automatically.
-
----
 
 ## Obsidian Setup
 

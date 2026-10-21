@@ -3,7 +3,7 @@
 Builds a compact markdown list of every Python module in `src/nexus/shared_tools/`
 (module path, CLI availability, first docstring line) by STATIC parsing with `ast`.
 Nothing is imported, so heavy deps (googleapiclient, langchain) never load and the
-scan stays fast and side-effect free. Injected into `Vault/Playbook.md` via `{shared_tools}`.
+scan stays fast and side-effect free. Injected into `Vault/Master Instructions.md` via `{shared_tools}`.
 """
 
 import ast

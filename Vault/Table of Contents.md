@@ -3,7 +3,7 @@ aliases: [TOC, Index, Map of Content]
 tags: [index, master]
 type: overview
 ---
-**Root Playbook:** **[[Playbook|Vault Playbook (Engine Constitution)]]**
+**Master Instructions:** **[[Master Instructions|Master Instructions (Engine Constitution)]]**
 
 # 0. Inbox
 - **Inbox:** Temp storage for incoming items bound for integration.
@@ -22,7 +22,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **Principles & Ethics:** Core values, decision-making frameworks.
 - **The 10-Year Horizon:** Strategic goals for the longer term.
 - **Legacy & Impact:** What do I want to build that lasts?
-- **[[1. Core/1.1. Philosophy & Personal North Star/Playbook|Playbook]]:** Section 1.1 operational guide and episodic life archiving rules.
+- **[[1. Core/1.1. Philosophy & Personal North Star/Section Instructions|Section Instructions]]:** Section 1.1 operational guide and episodic life archiving rules.
 - **Events:** Daily tactical execution and working set logs (`Events/YYYY/YYYY-MM-DD - <Title>.md`).
 
 ### 1.1.1. Personal Logs
@@ -40,7 +40,6 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 	- **[[Project - Section 6.2 Library Condensation]]:** Restructuring technical library for AI Engineer focus.
 - **[[Template - New Note or Thought]]**
 - **[[Template - Capture]]** Used for capturing raw content (YouTube transcripts, podcasts, articles, etc.)
-- **[[Protocol - Brain Maintenance]]**
 - **Toolbox:** Documentation for the Pixel 8 Pro, Obsidian/Logseq workflows, and local LLM setups.
 - **Archive**
 
@@ -59,7 +58,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 # 2. Health
 [Link - Health - Google Drive](https://drive.google.com/drive/u/0/folders/1h_0QTrXWrNzyXtcDiM8bbolaMKAYU8PG)
-- **[[2. Health/Playbook|Playbook]]:** Section 2 operational guide, clinical loop follow-ups, and pending visit-note ingestion rules.
+- **[[2. Health/Section Instructions|Section Instructions]]:** Section 2 operational guide, clinical loop follow-ups, and pending visit-note ingestion rules.
 - **[[2. Health/Tasks|Tasks]]:** Section 2 local task module.
 ## 2.1. Fitness
 - **[[Exercise Schedule & Planning]]:** Weekly program, exercise alternatives, and personal records.
@@ -124,7 +123,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **[[Operations Lessons]]:** Enduring procedural memory & strategic rules for operations, wealth, and housing.
 ## 3.1. Career Strategy & Revenue
 **[Link - Career - Google Drive](https://drive.google.com/drive/u/0/folders/1uJfG9nFqFD_BgbMY4HJ4GyRtieem-kC8)**
-- **[[3. Operations/3.1. Career Strategy & Revenue/Playbook|Career Playbook]]:** Operational guide and strategic career advisory rules.
+- **[[3. Operations/3.1. Career Strategy & Revenue/Section Instructions|Section Instructions]]:** Operational guide and strategic career advisory rules.
 - **[[Job Hunt War Room]]**: Action plan and target company pipelines.
 - **[[Protocol - Career Maintenance]]:** Recurring professional cadences (daily/weekly).
 - **[[Career Lessons]]:** Enduring procedural memory & strategic rules for career execution.
@@ -289,7 +288,9 @@ _The Content Log & Reference_
 
 # 6. Engineering
 *Technical Mastery*
+- **[[6. Engineering/Section Instructions|Section Instructions]]**: Section 6 operational rules, ADR discipline, and knowledge distillation standards.
 - **[[6. Engineering/Log|Engineering Log]]**: Architecture Decision Records (ADRs), technical dialogues, and engine design trade-offs.
+- **[[6. Engineering/Tasks|Tasks]]**: Section 6 local task module.
 
 ## 6.1. Projects 
 *The Lab*
@@ -305,18 +306,14 @@ _The Content Log & Reference_
 - **[Nexus Github](https://github.com/brolodarsky/Nexus)**
 
 ### 6.1.2. Agentic R&D
-- Master roadmap for LangGraph agents (/ask_brain, doctor panel, routing).
+- Master roadmap for the Nexus Agentic Engine (Single Universal Agent + Dynamic Tool Loader + Subagent Spawner).
 - **📁 [[Project - Nexus Agentic Engine|Nexus Agentic Engine]]**
-	1. **[[Project - Librarian Agent]]**
-	2. **[[Project - Basic Engine Control Panel]]**
-	3. **[[Project - Career Agent]]**
-	4. **[[Project - Content Router Agent]]**
-	5. **[[Project - Persistent Engine Hosting]]**
-	6. **[[Project - Agent Context Optimization & Changeset Automation]]**
-	7. **[[Project - Nexus Demo]]**
-	8. **[[Project - StockBot]]**
-	9. **[[Project - Health Agent]]**
+	1. **[[Project - Nexus GUI]]**
+	2. **[[Project - Nexus Persistent Hosting]]**
+	3. **[[Project - Agent Context Optimization & Changeset Automation]]**
+	4. **[[Project - Nexus Demo]]**
 	- **[[Workshop - MCP Additions]]**
+	- **[[Workshop - Sidecar Consolidation Daemons]]**
 	- **📁 Archive**
 - **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for eCommerce Silislick.com family business.
 - **Resources:**

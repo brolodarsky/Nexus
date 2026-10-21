@@ -1,7 +1,7 @@
-"""Loader for the Root Vault Playbook (Engine Constitution).
+"""Loader for the Root Master Instructions (Engine Constitution).
 
-The root playbook lives at `Vault/Playbook.md` so that:
-  - Humans can edit it on the fly in Obsidian like any other playbook in the Vault.
+The root instruction document lives at `Vault/Master Instructions.md` so that:
+  - Humans can edit it on the fly in Obsidian like any other instruction file in the Vault.
   - Internal engine agents get it injected as their static system-prompt prefix.
   - IDE agents (Antigravity, Cursor) inject the SAME hydrated output at boot by running
     `python -m nexus.core.engine_constitution` (see AGENTS.md), so they behave like internal "Resident" agents.
@@ -20,12 +20,12 @@ from nexus.core.tool_catalog import get_shared_tools_catalog
 # Import deterministic vault directory tree builder for zero-overhead prompt structure hydration (<1ms disk read)
 from nexus.shared_tools.vault_reader import get_directory_tree
 
-# Root playbook path at the top of the Vault hierarchy (`Vault/Playbook.md`)
-CONSTITUTION_PATH: Path = VAULT_PATH / "Playbook.md"
+# Root Master Instructions path at the top of the Vault hierarchy (`Vault/Master Instructions.md`)
+CONSTITUTION_PATH: Path = VAULT_PATH / "Master Instructions.md"
 
 
 def get_engine_constitution() -> str:
-    """Return the root Vault Playbook with runtime placeholders filled in.
+    """Return the root Master Instructions with runtime placeholders filled in.
 
     Placeholders in the markdown:
       {user_name}        -> settings.nexus_user_name   (e.g. "William")
