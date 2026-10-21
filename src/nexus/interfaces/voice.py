@@ -87,10 +87,10 @@ def capture_voice_query():
 if __name__ == "__main__":
     query = capture_voice_query()
     if query:
-        from nexus.agents.librarian.api import ask_librarian
-        print(f"🧠 Querying Vault Agent: {query}")
-        print("Agent is reasoning and searching the vault...\n")
-        response = ask_librarian(query)
+        from nexus.agent.api import ask_nexus
+        print(f"🧠 Querying NexusAgent: {query}")
+        print("Agent is reasoning and navigating the vault...\n")
+        response = ask_nexus(query)
         print("\n" + "="*45)
         print("🤖 Response:")
         print("="*45)

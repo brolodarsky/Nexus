@@ -43,15 +43,13 @@ Nexus/
 ├── CHANGELOG.md                # Running log of notable changes
 ├── src/nexus/                      # Agentic search & coordinator engine
 │   ├── main.py                  # Universal coordinator & mission control
-│   ├── agents/                  # Core infrastructure agents (compiled graphs)
-│   │   ├── email/               # Email Agent (I/O subgraph for IMAP fetch/search)
-│   │   ├── librarian/           # Librarian agent (cross-domain vault search substrate)
-│   │   ├── router/              # Meta-Orchestrator (SubagentFactory dispatch + dual-mode routing)
-│   │   └── career/              # Career agent (canonical SubagentFactory reference impl)
+│   ├── agent/                   # Single Universal Agent (NexusAgent)
+│   │   ├── api.py               # Public entrypoints (run_nexus_agent, route_content, execute_vault_query)
+│   │   └── graph.py             # LangGraph StateGraph (inject_root_instructions, core tools, spawn_subagent, <=5 circuit breaker)
 │   ├── core/                    # Shared engine configuration
 │   │   ├── audio.py             # Whisper transcription service
 │   │   ├── constants.py         # Global constants
-│   │   ├── engine_constitution.py # Loader for Vault/Master Instructions.md ({user_name}/{current_time} placeholders)
+│   │   ├── engine_constitution.py # Loader for Vault/Master Instructions.md (inject_root_instructions())
 │   │   ├── google_auth.py       # Reusable OAuth2 manager
 │   │   └── hitl_queue.py        # SQLite HITL transaction queue
 │   ├── evals/                   # Benchmarking & Golden Dataset
@@ -61,7 +59,7 @@ Nexus/
 │   ├── interfaces/              # Entry-point implementations (cli, voice, telegram)
 │   └── shared_tools/            # Shared engine utilities & deterministic CLI tools
 │       ├── vault_reader.py      # Pure-Python Vault navigation & search functions
-│       ├── shared.py            # Shared LangChain @tool factories (read_note, propose_write, ask_librarian)
+│       ├── shared.py            # Shared LangChain @tool wrappers (read_file, modify_file, create_file, get_directory_structure, search_vault)
 │       └── summarizer.py        # Conversation window compression & archiving node
 ├── start.ps1                   # Launches backend + frontend Control Panel
 ├── pyproject.toml              # UV dependency configuration
@@ -135,16 +133,12 @@ This repository distinguishes between capabilities and constraints that define h
 | `release.py` | Compiles `.changeset/*.md` fragments into the changelog and bumps version. | `python scripts/release.py` |
 | `sync_vault.py` | Automatically commits and pushes the nested Vault repository (The Nested Heart). | `python scripts/sync_vault.py` |
 | `src/nexus/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `nexus` |
-| `src/nexus/evals/runner.py` | Benchmarks the Librarian against the Golden Dataset. | `python -m nexus.evals.runner` |
-| `src/nexus/agents/router/evals/runner.py` | Deterministic evaluation of the Content Router agent logic. | `python src/nexus/agents/router/evals/runner.py` |
-| `src/nexus/agents/career/evals/runner.py` | LLM-as-a-judge evaluation of the Career Agent and HITL compliance. | `python src/nexus/agents/career/evals/runner.py` |
-| `src/nexus/agents/librarian/graph.py` | Core ReAct agent execution logic (LangGraph). Cross-domain search escalation service (`api.py` entry point). | `nexus <query>` |
-| `src/nexus/agents/router/graph.py` | Content Router Agent. LangGraph classifier that fetches context via tools and routes incoming content to domain agents. | `python -m nexus.agents.router.api` |
-| `src/nexus/agents/career/graph.py` | Career Agent with Deterministic Pre-flight Hydration (DPFH). Analyzes job content against live vault data. | `python -m nexus.agents.career.api` |
-| `src/nexus/shared_tools/vault_reader.py` | Pure-Python filesystem utilities for Vault navigation and recent modification queries (`get_recent_modifications`, `get_directory_tree`, `read_toc_content`, `read_note_content`, `search_within`). | `python -m nexus.shared_tools.vault_reader --today` |
-| `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` factories and wrappers (`get_vault_structure`, `get_recent_modifications`, `get_read_note_tool`, `get_propose_write_tool`, `ask_librarian_escalation`, calendar tools). | N/A (library module) |
+| `src/nexus/evals/runner.py` | Benchmarks `NexusAgent` against the Golden Dataset. | `python -m nexus.evals.runner` |
+| `src/nexus/agent/graph.py` | Single Universal Agent (`NexusAgent`). Boots with `inject_root_instructions()`, binds core Vault/HITL tools (`read_file`, `modify_file`, `create_file`, `get_directory_structure`, `search_vault`, `get_recent_modifications`), spawns isolated subagents (`spawn_subagent(task_prompt)`), and enforces the $\le 5$ tool-iteration circuit breaker. | `python -m nexus.agent.api` |
+| `src/nexus/shared_tools/vault_reader.py` | Pure-Python filesystem utilities for Vault navigation and recent modification queries (`get_recent_modifications`, `get_directory_tree`, `resolve_vault_note_path`, `read_note_content`, `search_within`). | `python -m nexus.shared_tools.vault_reader --today` |
+| `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` wrappers (`get_directory_structure`, `read_file`, `modify_file`, `create_file`, `search_vault`, `get_recent_modifications`, `fetch_emails`, calendar tools, `run_shared_tool_cli`). | N/A (library module) |
 | `src/nexus/shared_tools/summarizer.py` | Shared LangGraph node function for compressing conversation history into Short-Term Recall and Deep Recall archives. | N/A (library module) |
-| `src/nexus/core/engine_constitution.py` | Hydrates `Vault/Master Instructions.md` placeholders (`{current_time}`, `{user_name}`, `{vault_structure}`, `{shared_tools}`). IDE Resident agents inject its stdout at boot. | `python -m nexus.core.engine_constitution` |
+| `src/nexus/core/engine_constitution.py` | Hydrates `Vault/Master Instructions.md` via `inject_root_instructions()` (`{current_time}`, `{user_name}`, `{vault_structure}`, `{shared_tools}`). IDE Resident agents and `NexusAgent` inject its output at boot. | `python -m nexus.core.engine_constitution` |
 | `src/nexus/core/tool_catalog.py` | Static (`ast`, no imports) catalog of `src/nexus/shared_tools/` modules for the `{shared_tools}` placeholder. | `python -m nexus.core.tool_catalog` |
 | `src/nexus/core/hitl_queue.py` | SQLite-backed HITL transaction queue for pending agent writes. | N/A (library module) |
 | `src/nexus/core/chats_db.py` | SQLite-backed persistent UI chat history and sticky session state. | N/A (library module) |

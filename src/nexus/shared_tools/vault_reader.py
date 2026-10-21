@@ -139,77 +139,102 @@ def _parse_frontmatter_tags(content: str) -> list:
     return []
 
 
-def read_note_content(note_path: str, domain_path: Optional[str] = None) -> str:
+# Optional[int] (int | None) allows callers to optionally slice a specific 1-indexed line range (start_line..end_line) for large files.
+def read_note_content(
+    note_path: str,
+    domain_path: Optional[str] = None,
+    start_line: Optional[int] = None,
+    end_line: Optional[int] = None,
+) -> str:
     """Reads the contents of a specific note or file in the Vault.
     
     Args:
         note_path: The file name or relative path.
         domain_path: Optional path relative to Vault to restrict search and resolution.
+        start_line: Optional 1-indexed starting line number (inclusive).
+        end_line: Optional 1-indexed ending line number (inclusive).
+    """
+    resolved_path, err = resolve_vault_note_path(note_path, domain_path=domain_path)
+    if err:
+        return err
+
+    try:
+        content = resolved_path.read_text(encoding="utf-8")
+        try:
+            rel_path = resolved_path.relative_to(VAULT_PATH)
+        except ValueError:
+            rel_path = resolved_path
+
+        # If line bounds are specified, slice the lines array (converting 1-indexed to 0-indexed Python slices)
+        if start_line is not None or end_line is not None:
+            all_lines = content.splitlines()
+            total_lines = len(all_lines)
+            s_idx = max(0, (start_line - 1) if start_line and start_line > 0 else 0)
+            e_idx = min(total_lines, end_line if end_line is not None else total_lines)
+            selected = "\n".join(all_lines[s_idx:e_idx])
+            return f"--- File: {rel_path} (lines {s_idx + 1}-{e_idx} of {total_lines}) ---\n\n{selected}"
+
+        return f"--- File: {rel_path} ---\n\n" + content
+    except Exception as e:
+        return f"Error reading file {note_path}: {str(e)}"
+
+
+# Tuple[Optional[Path], Optional[str]] returns (resolved_path, None) on success or (None, error_message) on failure.
+def resolve_vault_note_path(note_path: str, domain_path: Optional[str] = None) -> Tuple[Optional[Path], Optional[str]]:
+    """Deterministically resolves a note path or filename to an exact Path inside VAULT_PATH.
+
+    Supports exact relative paths (e.g. '3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md'),
+    paths omitting '.md', or unique base filenames (e.g. 'Job Hunt War Room').
     """
     search_root = (VAULT_PATH / domain_path) if domain_path else VAULT_PATH
-    
-    if os.path.isabs(note_path):
+    clean_input = note_path.strip().lstrip("/\\")
+
+    if os.path.isabs(note_path) and not note_path.startswith(("/", "\\")):
         target_path = Path(note_path)
     else:
-        # If domain_path is provided, try relative to domain first
-        target_path = search_root / note_path
-        if not target_path.exists() and not target_path.with_suffix('.md').exists() and domain_path:
-            # Fall back to relative to VAULT_PATH in case agent gave vault-relative path
-            vault_target = VAULT_PATH / note_path
-            if vault_target.exists() or vault_target.with_suffix('.md').exists():
+        # Try relative to search_root first
+        target_path = search_root / clean_input
+        if not target_path.exists() and not target_path.with_suffix(".md").exists() and domain_path:
+            # Fall back to relative to VAULT_PATH in case caller provided a full vault-relative path
+            vault_target = VAULT_PATH / clean_input
+            if vault_target.exists() or vault_target.with_suffix(".md").exists():
                 target_path = vault_target
 
-        if not target_path.exists():
-            if not target_path.name.endswith('.md'):
-                target_path = target_path.with_suffix('.md')
-            
+        if not target_path.exists() and not target_path.name.endswith(".md"):
+            target_path = target_path.with_suffix(".md")
+
     if target_path.exists() and target_path.is_file():
-        # Boundary check if domain_path is provided
         if domain_path:
             try:
                 resolved_target = target_path.resolve()
                 resolved_domain = search_root.resolve()
                 if not resolved_target.is_relative_to(resolved_domain):
-                    return f"Error: Cannot read {note_path}. Restricted to the {domain_path} domain."
+                    return None, f"Error: Cannot read {note_path}. Restricted to the {domain_path} domain."
             except Exception:
                 pass
-                
-        try:
-            with open(target_path, 'r', encoding='utf-8') as f:
-                try:
-                    rel_path = target_path.relative_to(VAULT_PATH)
-                except ValueError:
-                    rel_path = target_path
-                return f"--- File: {rel_path} ---\n\n" + f.read()
-        except Exception as e:
-            return f"Error reading file {note_path}: {str(e)}"
-    
-    base_name = os.path.basename(note_path)
-    if not base_name.endswith('.md'):
-        base_name += '.md'
-        
-    found_paths = []
+        return target_path, None
+
+    # Fallback: search by base filename across search_root
+    base_name = os.path.basename(clean_input)
+    if not base_name.endswith(".md"):
+        base_name += ".md"
+
+    found_paths: List[Path] = []
     for root, dirs, files in os.walk(search_root):
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
-            
         for file in files:
-            if file == base_name or file == os.path.basename(note_path):
+            if file == base_name or file == os.path.basename(clean_input):
                 found_paths.append(Path(root) / file)
-                
+
     if not found_paths:
         scope = f" in {domain_path}" if domain_path else ""
-        return f"File not found{scope}: {note_path}. Try using search to find the correct path."
+        return None, f"File not found{scope}: {note_path}. Try using search to find the correct path."
     elif len(found_paths) == 1:
-        try:
-            with open(found_paths[0], 'r', encoding='utf-8') as f:
-                rel_path = found_paths[0].relative_to(VAULT_PATH)
-                return f"--- File: {rel_path} ---\n\n" + f.read()
-        except Exception as e:
-            return f"Error reading file {found_paths[0]}: {str(e)}"
+        return found_paths[0], None
     else:
         rel_paths = [str(p.relative_to(VAULT_PATH)) for p in found_paths]
         scope = f" in {domain_path}" if domain_path else ""
-        return f"Multiple files found for {note_path}{scope}. Please be more specific. Matches:\n" + "\n".join(rel_paths)
+        return None, f"Multiple files found for {note_path}{scope}. Please be more specific. Matches:\n" + "\n".join(rel_paths)
 
 
 def search_within(keyword: str, root_path: Optional[str] = None, tags: Optional[List[str]] = None) -> str:

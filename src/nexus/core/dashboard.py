@@ -59,11 +59,8 @@ def get_dashboard_summary() -> Dict[str, Any]:
 
     # 4. Agent Last Run Metadata Map
     agent_status_map = {
-        "content_router": {"display_name": "Content Router", "status": "active", "last_run": None},
-        "career": {"display_name": "Career Agent", "status": "active", "last_run": None},
-        "librarian": {"display_name": "Librarian Agent", "status": "active", "last_run": None},
-        "email": {"display_name": "Email Subgraph", "status": "active", "last_run": None},
-        "health": {"display_name": "Health Agent", "status": "planned", "last_run": None},
+        "nexus": {"display_name": "NexusAgent", "status": "active", "last_run": None},
+        "subagent": {"display_name": "Dynamic Subagents", "status": "active", "last_run": None},
     }
 
     # Populate latest run timestamp per agent from structured runs
@@ -71,6 +68,8 @@ def get_dashboard_summary() -> Dict[str, Any]:
         agent_key = run.get("agent_name", "").lower()
         if agent_key in agent_status_map and agent_status_map[agent_key]["last_run"] is None:
             agent_status_map[agent_key]["last_run"] = run.get("timestamp")
+        elif agent_status_map["nexus"]["last_run"] is None:
+            agent_status_map["nexus"]["last_run"] = run.get("timestamp")
 
     return {
         "timestamp": now_iso,

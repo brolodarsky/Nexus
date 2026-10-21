@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 
 # Add engine to sys.path if running as script
 
-from nexus.agents.librarian.api import execute_vault_query
+from nexus.agent.api import execute_vault_query
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from nexus.core.constants import AI_MODEL_LOW
@@ -76,11 +76,11 @@ class EvalRunner:
                 for msg in messages:
                     if hasattr(msg, 'tool_calls') and msg.tool_calls:
                         for tc in msg.tool_calls:
-                            if tc['name'] == 'read_note':
-                                files_read.append(tc['args'].get('note_path'))
+                            if tc['name'] in ('read_file', 'read_note'):
+                                files_read.append(tc['args'].get('file_path') or tc['args'].get('note_path'))
                             elif tc['name'] == 'read_toc':
                                 files_read.append("Table of Contents.md")
-                            elif tc['name'] == 'get_vault_structure':
+                            elif tc['name'] in ('get_directory_structure', 'get_vault_structure'):
                                 vs_path = tc['args'].get('path')
                                 files_read.append(f"[structure] {vs_path or 'root'}")
                 

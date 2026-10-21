@@ -1,8 +1,8 @@
-"""Loader for the Root Master Instructions (Engine Constitution).
+"""Loader for the Root Master Instructions (`Vault/Master Instructions.md`).
 
 The root instruction document lives at `Vault/Master Instructions.md` so that:
   - Humans can edit it on the fly in Obsidian like any other instruction file in the Vault.
-  - Internal engine agents get it injected as their static system-prompt prefix.
+  - Internal engine agents (`NexusAgent` and spawned subagents) get it injected via `inject_root_instructions()`.
   - IDE agents (Antigravity, Cursor) inject the SAME hydrated output at boot by running
     `python -m nexus.core.engine_constitution` (see AGENTS.md), so they behave like internal "Resident" agents.
 One file => zero drift between the two agent populations.
@@ -21,20 +21,23 @@ from nexus.core.tool_catalog import get_shared_tools_catalog
 from nexus.shared_tools.vault_reader import get_directory_tree
 
 # Root Master Instructions path at the top of the Vault hierarchy (`Vault/Master Instructions.md`)
-CONSTITUTION_PATH: Path = VAULT_PATH / "Master Instructions.md"
+ROOT_INSTRUCTIONS_PATH: Path = VAULT_PATH / "Master Instructions.md"
+# Backward-compatible constant alias for external callers referencing CONSTITUTION_PATH
+CONSTITUTION_PATH: Path = ROOT_INSTRUCTIONS_PATH
 
 
-def get_engine_constitution() -> str:
-    """Return the root Master Instructions with runtime placeholders filled in.
+# `-> str` type annotation indicates this function returns a hydrated UTF-8 Markdown string ready for SystemMessage injection.
+def inject_root_instructions() -> str:
+    """Return the root Master Instructions (`Vault/Master Instructions.md`) with runtime placeholders filled in.
 
     Placeholders in the markdown:
       {user_name}        -> settings.nexus_user_name   (e.g. "William")
-      {current_time}     -> local timestamp            (e.g. "2026-10-13 17:30:00")
+      {current_time}     -> local timestamp            (e.g. "2026-10-21 10:05:00")
       {vault_structure}  -> live directory tree string (deterministic folder hierarchy)
       {shared_tools}     -> bullet list of src/nexus/shared_tools modules (module, [CLI], summary)
     """
     # Read fresh on every call (<1ms): human edits in Obsidian are live on the next LLM turn (Standard 9).
-    template = CONSTITUTION_PATH.read_text(encoding="utf-8")
+    template = ROOT_INSTRUCTIONS_PATH.read_text(encoding="utf-8")
 
     # Strip Obsidian YAML frontmatter (`--- ... ---`) and top `**Back to:**` navigation bar to save prompt tokens.
     template = re.sub(r"^---\s*\r?\n.*?\r?\n---\s*\r?\n?", "", template, count=1, flags=re.DOTALL)
@@ -55,8 +58,12 @@ def get_engine_constitution() -> str:
     )
 
 
+# Backward-compatible alias so legacy callers or scripts referencing get_engine_constitution() continue working seamlessly.
+get_engine_constitution = inject_root_instructions
+
+
 if __name__ == "__main__":
-    # UTF-8 reconfigure: the Playbook contains em dashes/emoji that crash Windows' default cp1252 console.
+    # UTF-8 reconfigure: the instructions file contains em dashes/emoji that crash Windows' default cp1252 console.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    print(get_engine_constitution())
+    print(inject_root_instructions())

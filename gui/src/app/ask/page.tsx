@@ -409,7 +409,11 @@ export default function AskBrainPage() {
               {msg.role === "assistant" && msg.agent && (
                 <span className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-0.5 rounded-full text-[0.65rem] font-medium bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan">
                   <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan" />
-                  {msg.agent === "career" ? "Career Agent" : "Librarian"}
+                  {msg.agent === "career"
+                    ? "Career Agent"
+                    : msg.agent === "librarian"
+                      ? "Librarian"
+                      : "NexusAgent"}
                   {msg.domain && <span className="text-text-muted">• {msg.domain}</span>}
                   {msg.confidence != null && <span className="text-text-muted">• {Math.round(msg.confidence * 100)}%</span>}
                 </span>

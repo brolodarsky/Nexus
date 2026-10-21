@@ -67,56 +67,23 @@ class AgentStatusEntry(BaseModel):
 
 
 # ── Agent Registry ────────────────────────────────────────────
-# Static registry of all planned swarm agents. Populates the dashboard table
-# so the full architecture is visible even if specific agents are still in development.
+# Registry reflecting the Single Universal Agent architecture (`NexusAgent`) + dynamic subagents.
 AGENT_REGISTRY = [
     {
-        "name": "librarian",
-        "display_name": "Librarian",
+        "name": "nexus",
+        "display_name": "NexusAgent",
         "status": "idle",
         "last_run": None,
         "error_count": 0,
-        "description": "Cross-domain vault search & file navigation agent.",
+        "description": "Single Universal Agent hydrated with Master Instructions, Section Instructions, and shared tools.",
     },
     {
-        "name": "career",
-        "display_name": "Career Agent",
+        "name": "subagent",
+        "display_name": "Dynamic Subagents",
         "status": "idle",
         "last_run": None,
         "error_count": 0,
-        "description": "Job tracking, resume updates, and career strategy.",
-    },
-    {
-        "name": "medical",
-        "display_name": "Medical Team",
-        "status": "not_built",
-        "last_run": None,
-        "error_count": 0,
-        "description": "Longitudinal clinical reasoning & health tracking.",
-    },
-    {
-        "name": "content_router",
-        "display_name": "Content Router",
-        "status": "idle",
-        "last_run": None,
-        "error_count": 0,
-        "description": "Universal content classification & agent dispatch.",
-    },
-    {
-        "name": "weekly_review",
-        "display_name": "Weekly Review",
-        "status": "not_built",
-        "last_run": None,
-        "error_count": 0,
-        "description": "Automated weekly checklist with HITL interrupts.",
-    },
-    {
-        "name": "engine_architect",
-        "display_name": "Engine Architect",
-        "status": "not_built",
-        "last_run": None,
-        "error_count": 0,
-        "description": "System health audits, eval benchmarks, engine rot prevention.",
+        "description": "Ephemeral isolated workers spawned on demand via spawn_subagent(task_prompt).",
     },
 ]
 
@@ -195,33 +162,14 @@ async def ask_brain(request: AskRequest):
         # Phase 1: Persist user message to SQLite chats.db before running agents
         log_message(role="user", content=request.query, conversation_id=conversation_id)
         
-        # Phase 2: Check for Sticky Session — if locked, bypass Router and call agent directly
-        active_agent = get_active_agent(conversation_id)
-        if active_agent == "career":
-            from nexus.agents.career.api import run_career_agent
-            response = run_career_agent(content=request.query, thread_id=conversation_id)
-            result = {"domain": "career", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
-        elif active_agent == "librarian":
-            from nexus.agents.librarian.api import ask_librarian
-            response = ask_librarian(query=request.query, thread_id=conversation_id)
-            result = {"domain": "general", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
-        else:
-            # No sticky lock: run universal Content Router to classify and dispatch
-            from nexus.agents.router.api import route_content
-            result = route_content(request.query, thread_id=conversation_id)
+        # Phase 2: Invoke the unified NexusAgent directly (no legacy multi-agent routing hop)
+        from nexus.agent.api import run_nexus_agent_with_trace
+        result = run_nexus_agent_with_trace(query=request.query, thread_id=conversation_id)
 
-        # Determine which downstream agent actually handled the query
-        routed_domain = result.get("domain", "general")
-        agent_name = "career" if routed_domain == "career" else "librarian"
+        routed_domain = result.get("domain")
+        agent_name = "nexus"
         elapsed_sec = time.time() - t0
-        
-        # Phase 3: Check for [HANDOFF] token — allows agents to relinquish sticky lock
         response_text = result.get("response", "")
-        if "[HANDOFF]" in response_text:
-            set_active_agent(None, conversation_id)
-            response_text = response_text.replace("[HANDOFF]", "").strip()
-        else:
-            set_active_agent(agent_name, conversation_id) # Lock sticky session to this agent
 
         # Phase 4: Persist assistant response to SQLite chats.db
         log_message(
@@ -243,15 +191,16 @@ async def ask_brain(request: AskRequest):
             domain=routed_domain,
             confidence=result.get("confidence"),
             reasoning=result.get("reasoning"),
+            tool_calls=result.get("tool_calls"),
             latency_seconds=elapsed_sec,
         )
 
         # Update last_run timestamps in the static registry
         now = datetime.now(timezone.utc).isoformat()
         for agent in AGENT_REGISTRY:
-            if agent["name"] == "content_router":
+            if agent["name"] == "nexus":
                 agent["last_run"] = now
-            if agent["name"] == agent_name:
+            if any(tc.get("name") == "spawn_subagent" for tc in (result.get("tool_calls") or [])) and agent["name"] == "subagent":
                 agent["last_run"] = now
 
         return AskResponse(
@@ -288,37 +237,20 @@ def _run_pipeline(query: str, conversation_id: str, event_queue: queue.Queue):
     unsub = trace_bus.subscribe(_on_trace)
 
     try:
-        # Check for sticky session routing vs universal content routing
-        active_agent = get_active_agent(conversation_id)
-        if active_agent == "career":
-            from nexus.agents.career.api import run_career_agent
-            response = run_career_agent(content=query, thread_id=conversation_id)
-            result = {"domain": "career", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
-        elif active_agent == "librarian":
-            from nexus.agents.librarian.api import ask_librarian
-            response = ask_librarian(query=query, thread_id=conversation_id)
-            result = {"domain": "general", "response": response, "confidence": 1.0, "reasoning": "Sticky session"}
-        else:
-            from nexus.agents.router.api import route_content
-            result = route_content(query, thread_id=conversation_id)
+        # Invoke the unified NexusAgent directly
+        from nexus.agent.api import run_nexus_agent_with_trace
+        result = run_nexus_agent_with_trace(query=query, thread_id=conversation_id)
 
-        routed_domain = result.get("domain", "general")
-        agent_name = "career" if routed_domain == "career" else "librarian"
+        routed_domain = result.get("domain")
+        agent_name = "nexus"
         elapsed_sec = time.time() - t0
-        
-        # Check for agent-initiated [HANDOFF] signal
         response_text = result.get("response", "")
-        if "[HANDOFF]" in response_text:
-            set_active_agent(None, conversation_id)
-            response_text = response_text.replace("[HANDOFF]", "").strip()
-        else:
-            set_active_agent(agent_name, conversation_id)
 
         now = datetime.now(timezone.utc).isoformat()
         for agent in AGENT_REGISTRY:
-            if agent["name"] == "content_router":
+            if agent["name"] == "nexus":
                 agent["last_run"] = now
-            if agent["name"] == agent_name:
+            if any(tc.get("name") == "spawn_subagent" for tc in (result.get("tool_calls") or [])) and agent["name"] == "subagent":
                 agent["last_run"] = now
                 
         # Persist assistant message along with full trace array to chats.db
@@ -341,6 +273,7 @@ def _run_pipeline(query: str, conversation_id: str, event_queue: queue.Queue):
             domain=routed_domain,
             confidence=result.get("confidence"),
             reasoning=result.get("reasoning"),
+            tool_calls=result.get("tool_calls"),
             trace_events=trace_events,
             latency_seconds=elapsed_sec,
         )

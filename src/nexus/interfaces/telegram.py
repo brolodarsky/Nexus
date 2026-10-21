@@ -11,10 +11,9 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
-from nexus.agents.router.api import route_content
+from nexus.agent.api import route_content
 from nexus.core.audio import transcribe_audio
-
-from src.nexus.core.config import settings
+from nexus.core.config import settings
 
 TELEGRAM_BOT_TOKEN = settings.telegram_bot_token
 ALLOWED_USER_IDS_STR = settings.allowed_user_ids

@@ -26,6 +26,8 @@ const STATUS_CONFIG: Record<
 };
 
 const AGENT_ICONS: Record<string, string> = {
+  nexus: "🧠",
+  subagent: "⚡",
   librarian: "📚",
   career: "💼",
   medical: "🏥",
