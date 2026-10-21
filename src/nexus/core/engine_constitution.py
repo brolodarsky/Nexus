@@ -26,13 +26,16 @@ ROOT_INSTRUCTIONS_PATH: Path = VAULT_PATH / "Master Instructions.md"
 CONSTITUTION_PATH: Path = ROOT_INSTRUCTIONS_PATH
 
 
+# `cache_stable: bool = True` rounds `{current_time}` to the current hour (`YYYY-MM-DD HH:00`) so the ~5,000-token
+# SystemMessage prefix stays 100% byte-identical across multi-step tool loops and consecutive turns, enabling
+# automatic provider KV prompt caching (50-80% input token discount + faster Time-To-First-Token).
 # `-> str` type annotation indicates this function returns a hydrated UTF-8 Markdown string ready for SystemMessage injection.
-def inject_root_instructions() -> str:
+def inject_root_instructions(cache_stable: bool = True) -> str:
     """Return the root Master Instructions (`Vault/Master Instructions.md`) with runtime placeholders filled in.
 
     Placeholders in the markdown:
       {user_name}        -> settings.nexus_user_name   (e.g. "William")
-      {current_time}     -> local timestamp            (e.g. "2026-10-21 10:05:00")
+      {current_time}     -> hour-aligned timestamp     (e.g. "2026-10-21 14:00") for prompt-cache stability
       {vault_structure}  -> live directory tree string (deterministic folder hierarchy)
       {shared_tools}     -> bullet list of src/nexus/shared_tools modules (module, [CLI], summary)
     """
@@ -47,12 +50,20 @@ def inject_root_instructions() -> str:
     # to compress the directory tree from ~100 lines to ~28 lines while preserving all 3rd-level section names.
     vault_structure_tree = get_directory_tree(path=None, show_files=False, max_depth=2)
 
+    # Format timestamp to the hour boundary when `cache_stable=True` so second-by-second ticks never bust the
+    # provider's left-to-right KV prompt cache across multi-step tool iterations or follow-up turns.
+    timestamp_str = (
+        datetime.now().strftime("%Y-%m-%d %H:00")
+        if cache_stable
+        else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    )
+
     # str.replace (not str.format): markdown may legitimately contain other {braces},
     # e.g. "{domain_files}" examples. .format() would raise KeyError on those.
     return (
         template
         .replace("{user_name}", settings.nexus_user_name)
-        .replace("{current_time}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        .replace("{current_time}", timestamp_str)
         .replace("{vault_structure}", vault_structure_tree)
         .replace("{shared_tools}", get_shared_tools_catalog())
     )

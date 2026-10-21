@@ -13,6 +13,19 @@ class EngineSettings(BaseSettings):
     # AI & Search
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini-2024-07-18"
+    # Gemini API credentials & provider routing:
+    # - gemini_api_key / google_api_key: Optional API key from Google AI Studio (`GEMINI_API_KEY` or `GOOGLE_API_KEY` in `.env`)
+    # - ai_provider: `"auto"` (uses Gemini if a Gemini key is configured, else OpenAI), `"gemini"`, or `"openai"`
+    gemini_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    ai_provider: str = "auto"
+    # Default Gemini model identifiers mapped to the 3 capability tiers when running on the Gemini provider
+    gemini_model_low: str = "gemini-3.8-flash"
+    gemini_model_medium: str = "gemini-3.8-flash"
+    gemini_model_strong: str = "gemini-3.8-flash"
+    # Default tier selection (`"low"`, `"medium"`, or `"strong"`) for the parent NexusAgent vs. spawned subagents
+    nexus_primary_tier: str = "medium"
+    nexus_subagent_tier: str = "low"
     tavily_api_key: Optional[str] = None
     
     # Telegram Interface

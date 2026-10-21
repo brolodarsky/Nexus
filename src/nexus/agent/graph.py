@@ -41,10 +41,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 # ToolNode: Prebuilt LangGraph node that executes tool calls emitted by an `AIMessage`
 from langgraph.prebuilt import ToolNode
-# ChatOpenAI: LangChain wrapper for OpenAI chat models
+# ChatOpenAI: LangChain wrapper for OpenAI and OpenAI-compatible (e.g. Gemini) chat models
 from langchain_openai import ChatOpenAI
 
-from nexus.core.constants import AI_MODEL_LOW, AI_MODEL_MEDIUM, VAULT_PATH
+from nexus.core.config import settings
+from nexus.core.constants import AI_MODEL_LOW, AI_MODEL_MEDIUM, VAULT_PATH, ModelTier, get_chat_model
 # inject_root_instructions: Dynamically loads and hydrates `Vault/Master Instructions.md` (<1ms disk read)
 from nexus.core.engine_constitution import inject_root_instructions
 from nexus.core.trace import RESULT_TRUNCATE_LEN, AgentTracer, _truncate
@@ -106,11 +107,32 @@ CORE_TOOLS = [
 ]
 
 
+# ── Helper: Telemetry for Token Usage & Prompt Cache Hits ────────────────────
+
+def _log_token_usage(tracer: AgentTracer, ai_msg: BaseMessage) -> None:
+    """Extracts and logs prompt token counts, cached token hits (`cache_read`), and output tokens from an AIMessage."""
+    usage = getattr(ai_msg, "usage_metadata", None)
+    if not isinstance(usage, dict):
+        return
+    in_tok = usage.get("input_tokens", 0)
+    out_tok = usage.get("output_tokens", 0)
+    details = usage.get("input_token_details") or {}
+    cached_tok = details.get("cache_read", 0) if isinstance(details, dict) else 0
+    if in_tok or out_tok:
+        cache_pct = int((cached_tok / in_tok) * 100) if in_tok > 0 else 0
+        tracer.info(f"Tokens: {in_tok:,} in ({cached_tok:,} cached, {cache_pct}%) | {out_tok:,} out")
+
+
 # ── Dynamic Subagent Spawner (`spawn_subagent`) ──────────────────────────────
 
 @tool
-def spawn_subagent(task_prompt: str) -> str:
+def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
     """Spawn an isolated subagent to execute a focused research, audit, or synthesis subtask.
+
+    PARALLEL SWARMING: Emitting multiple `spawn_subagent` tool calls in a single turn executes all
+    subagents concurrently in parallel via the runtime thread pool (`ToolNode`). Use parallel fan-out
+    whenever inspecting multiple files, auditing multiple sections, or running independent subtasks so
+    raw file contents stay out of your primary context window.
 
     The subagent boots automatically with `inject_root_instructions()` (`Master Instructions.md` +
     `{vault_structure}` + `{shared_tools}`) and has full access to all Vault navigation, reading,
@@ -122,11 +144,15 @@ def spawn_subagent(task_prompt: str) -> str:
 
     Args:
         task_prompt: A clear, self-contained, actionable prompt instructing the subagent what to do and return.
+        model_tier: Capability/cost tier (`"low"`, `"medium"`, or `"strong"`). Defaults to `"low"` for fast,
+                    cost-efficient execution; pass `"medium"` or `"strong"` only for complex synthesis subtasks.
     """
-    subagent_tracer.agent_start(f"Subtask: {task_prompt[:90]}")
+    effective_tier: ModelTier = model_tier if model_tier in ("low", "medium", "strong") else "low"
+    subagent_tracer.agent_start(f"Subtask ({effective_tier}): {task_prompt[:85]}")
 
-    # Build an ephemeral, stateless subagent graph (no checkpointer needed; lives only for this subtask)
-    sub_llm = ChatOpenAI(model=AI_MODEL_MEDIUM, temperature=0.0, reasoning_effort="none").bind_tools(CORE_TOOLS)
+    # Build an ephemeral, stateless subagent client (no checkpointer needed; lives only for this subtask)
+    sub_base_llm = get_chat_model(tier=effective_tier, temperature=0.0)
+    sub_llm = sub_base_llm.bind_tools(CORE_TOOLS)
     sub_tool_node = ToolNode(CORE_TOOLS)
 
     sub_sys_content = (
@@ -146,6 +172,7 @@ def spawn_subagent(task_prompt: str) -> str:
     for step in range(MAX_TOOL_ITERATIONS_PER_TURN + 1):
         subagent_tracer.llm_call()
         ai_msg = sub_llm.invoke(sub_messages)
+        _log_token_usage(subagent_tracer, ai_msg)
         sub_messages.append(ai_msg)
 
         if not getattr(ai_msg, "tool_calls", None):
@@ -162,7 +189,8 @@ def spawn_subagent(task_prompt: str) -> str:
                     content="Tool iteration limit reached. Synthesize your findings from the data gathered so far without calling additional tools."
                 )
             )
-            final_ai = ChatOpenAI(model=AI_MODEL_MEDIUM, temperature=0.0, reasoning_effort="none").invoke(sub_messages)
+            final_ai = sub_base_llm.invoke(sub_messages)
+            _log_token_usage(subagent_tracer, final_ai)
             final_text = final_ai.content if isinstance(final_ai.content, str) else str(final_ai.content)
             subagent_tracer.llm_response(final_text)
             subagent_tracer.agent_end()
@@ -188,8 +216,11 @@ def spawn_subagent(task_prompt: str) -> str:
 TOOLS = CORE_TOOLS + [spawn_subagent]
 tool_node = ToolNode(TOOLS)
 
-# AI_MODEL_MEDIUM: Primary reasoning model for universal Vault navigation, synthesis, and tool orchestration
-llm = ChatOpenAI(model=AI_MODEL_MEDIUM, temperature=0.0, reasoning_effort="none")
+# Primary reasoning model resolved via `get_chat_model` (uses Gemini 3.8 Flash when GEMINI_API_KEY is set, else OpenAI tier)
+_primary_tier: ModelTier = (
+    settings.nexus_primary_tier if settings.nexus_primary_tier in ("low", "medium", "strong") else "medium"
+)
+llm = get_chat_model(tier=_primary_tier, temperature=0.0)
 llm_with_tools = llm.bind_tools(TOOLS)
 
 
@@ -265,6 +296,9 @@ def call_model(state: NexusAgentState) -> dict:
     else:
         response = llm_with_tools.invoke(messages_for_llm)
 
+    # Log input tokens, cached prompt tokens (`cache_read`), and output tokens to console and SSE trace bus
+    _log_token_usage(nexus_tracer, response)
+
     # 3. Emit trace telemetry for either tool invocations or final conversational text
     if hasattr(response, "tool_calls") and response.tool_calls:
         for tc in response.tool_calls:
@@ -305,7 +339,7 @@ def summarizer_node(state: NexusAgentState) -> dict:
     if len(messages) <= 30:
         return {}
 
-    fast_llm = ChatOpenAI(model=AI_MODEL_LOW, temperature=0.0)
+    fast_llm = get_chat_model(tier="low", temperature=0.0)
     archive_path = VAULT_PATH.parent / "logs" / "conversation_archive.md"
 
     nexus_tracer.info("Compressing long conversation history...")
