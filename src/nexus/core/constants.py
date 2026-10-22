@@ -7,7 +7,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 # ChatOpenAI: LangChain client for OpenAI chat models
 from langchain_openai import ChatOpenAI
-from nexus.core.config import settings
+from nexus.core.config import EngineSettings, settings
 
 # Paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -30,31 +30,36 @@ GEMINI_MODEL_STRONG = settings.gemini_model_strong
 ModelTier = Literal["low", "medium", "strong"]
 
 
-# `tier: ModelTier` selects the capability/cost level (`"low"`, `"medium"`, or `"strong"`).
+# `tier: ModelTier | None` selects the capability/cost level (`"low"`, `"medium"`, or `"strong"`). If `None`, reads `nexus_primary_tier` fresh from `.env`.
 # `-> BaseChatModel` returns a configured LangChain chat model (`ChatGoogleGenerativeAI` or `ChatOpenAI`) ready for `.invoke()` or `.bind_tools()`.
-def get_chat_model(tier: ModelTier = "medium", temperature: float = 0.0) -> BaseChatModel:
+def get_chat_model(tier: ModelTier | None = None, temperature: float = 0.0) -> BaseChatModel:
     """Instantiate a tiered chat model routed to either native Gemini (`ChatGoogleGenerativeAI`) or OpenAI (`ChatOpenAI`).
 
-    Why native `ChatGoogleGenerativeAI` instead of `ChatOpenAI` over `/v1beta/openai/`:
-      Gemini 3+ thinking models attach encrypted `thought_signature` tokens to `functionCall` and text parts.
-      `ChatOpenAI` strips `extra_content.google.thought_signature` when serializing tool-call history, causing
-      HTTP 400 `INVALID_ARGUMENT` on step 2 of tool loops. `ChatGoogleGenerativeAI` natively stores and replays
-      `__gemini_function_call_thought_signatures__` in `AIMessage.additional_kwargs` and handles cross-model history.
+    Re-reads `EngineSettings()` dynamically so `.env` model/tier edits take effect on the very next turn without
+    needing to edit `.py` files (which would cause `uvicorn --reload` to kill in-flight HTTP/SSE streams).
     """
-    provider = settings.ai_provider.strip().lower()
-    use_gemini = provider == "gemini" or (provider == "auto" and bool(GEMINI_API_KEY))
+    live_settings = EngineSettings()
+    effective_tier: str = tier or live_settings.nexus_primary_tier
+    if effective_tier not in ("low", "medium", "strong"):
+        effective_tier = "medium"
 
-    if use_gemini and GEMINI_API_KEY:
+    provider = live_settings.ai_provider.strip().lower()
+    gemini_key = live_settings.gemini_api_key or live_settings.google_api_key or GEMINI_API_KEY
+    use_gemini = provider == "gemini" or (provider == "auto" and bool(gemini_key))
+
+    if use_gemini and gemini_key:
         gemini_tier_map: dict[str, str] = {
-            "low": GEMINI_MODEL_LOW,
-            "medium": GEMINI_MODEL_MEDIUM,
-            "strong": GEMINI_MODEL_STRONG,
+            "low": live_settings.gemini_model_low,
+            "medium": live_settings.gemini_model_medium,
+            "strong": live_settings.gemini_model_strong,
         }
-        model_name = gemini_tier_map.get(tier, GEMINI_MODEL_MEDIUM)
+        model_name = gemini_tier_map.get(effective_tier, live_settings.gemini_model_medium)
         return ChatGoogleGenerativeAI(
             model=model_name,
-            google_api_key=GEMINI_API_KEY,
+            google_api_key=gemini_key,
             temperature=temperature,
+            timeout=90,
+            max_retries=2,
         )
 
     # OpenAI tier map: `"low"` uses mini for fast/cheap subagent & summarizer work; `"medium"` / `"strong"` for synthesis
@@ -63,11 +68,11 @@ def get_chat_model(tier: ModelTier = "medium", temperature: float = 0.0) -> Base
         "medium": AI_MODEL_MEDIUM,
         "strong": AI_MODEL_STRONG,
     }
-    model_name = openai_tier_map.get(tier, AI_MODEL_MEDIUM)
+    model_name = openai_tier_map.get(effective_tier, AI_MODEL_MEDIUM)
     # `gpt-5.6-*` models accept `reasoning_effort="none"` for deterministic low-latency tool calling
-    if tier in ("medium", "strong"):
-        return ChatOpenAI(model=model_name, temperature=temperature, reasoning_effort="none")
-    return ChatOpenAI(model=model_name, temperature=temperature)
+    if effective_tier in ("medium", "strong"):
+        return ChatOpenAI(model=model_name, temperature=temperature, reasoning_effort="none", timeout=90, max_retries=2)
+    return ChatOpenAI(model=model_name, temperature=temperature, timeout=90, max_retries=2)
 
 
 # Shared Config

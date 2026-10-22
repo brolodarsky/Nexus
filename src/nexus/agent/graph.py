@@ -209,12 +209,14 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
         # If the subagent hit the tool-iteration cap, ask for final synthesis without further tool calls
         if step >= MAX_TOOL_ITERATIONS_PER_TURN:
             subagent_tracer.info("Subagent reached max tool iterations; synthesizing current findings...")
+            # Use HumanMessage + `tool_choice="none"` so SystemMessage stays 100% prompt-cached and Gemini's
+            # functionResponse state machine cleanly transitions to a final text synthesis without stalling.
             sub_messages.append(
-                SystemMessage(
-                    content="Tool iteration limit reached. Synthesize your findings from the data gathered so far without calling additional tools."
+                HumanMessage(
+                    content="[CIRCUIT BREAKER: Tool iteration limit reached. Synthesize your findings from the data gathered so far without calling additional tools.]"
                 )
             )
-            final_ai = sub_base_llm.invoke(sub_messages)
+            final_ai = sub_base_llm.bind_tools(CORE_TOOLS, tool_choice="none").invoke(sub_messages)
             _log_token_usage(subagent_tracer, final_ai)
             final_text = extract_message_text(final_ai)
             subagent_tracer.llm_response(final_text)
@@ -305,21 +307,27 @@ def call_model(state: NexusAgentState) -> dict:
     iterations_used = _count_tool_iterations_since_last_human(cleaned_messages)
     nexus_tracer.llm_call()
 
+    # Resolve `get_chat_model()` dynamically on each turn so `.env` tier/model switches apply immediately
+    active_llm = get_chat_model(temperature=0.0)
+
     if iterations_used >= MAX_TOOL_ITERATIONS_PER_TURN:
         nexus_tracer.info(
             f"Circuit breaker reached ({iterations_used}/{MAX_TOOL_ITERATIONS_PER_TURN} tool iterations). Converging turn..."
         )
-        circuit_breaker_msg = SystemMessage(
+        # Use HumanMessage + `tool_choice="none"` instead of SystemMessage without tools:
+        # 1. Keeps SystemMessage at index 0 untouched so 97%+ of accumulated tokens hit the provider prompt cache.
+        # 2. Preserves tool declarations while forcing text output (`tool_choice="none"`), preventing Gemini from
+        #    stalling or returning an empty string after a `ToolMessage`.
+        circuit_breaker_msg = HumanMessage(
             content=(
-                f"CIRCUIT BREAKER: You have reached the maximum of {MAX_TOOL_ITERATIONS_PER_TURN} tool iterations "
+                f"[CIRCUIT BREAKER: You have reached the maximum of {MAX_TOOL_ITERATIONS_PER_TURN} tool iterations "
                 f"for this turn. Do NOT call any more tools. Synthesize what you have found so far and ask the user "
-                f"how they would like to proceed."
+                f"how they would like to proceed.]"
             )
         )
-        # Invoke `llm` (without tools bound) to guarantee a text response that closes the turn cleanly
-        response = llm.invoke(messages_for_llm + [circuit_breaker_msg])
+        response = active_llm.bind_tools(TOOLS, tool_choice="none").invoke(messages_for_llm + [circuit_breaker_msg])
     else:
-        response = llm_with_tools.invoke(messages_for_llm)
+        response = active_llm.bind_tools(TOOLS).invoke(messages_for_llm)
 
     # Log input tokens, cached prompt tokens (`cache_read`), and output tokens to console and SSE trace bus
     _log_token_usage(nexus_tracer, response)
