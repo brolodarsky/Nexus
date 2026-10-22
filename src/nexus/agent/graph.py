@@ -72,8 +72,8 @@ nexus_tracer = AgentTracer("NexusAgent", color="cyan")
 # Magenta console logger and SSE event emitter for dynamically spawned subagents
 subagent_tracer = AgentTracer("Subagent", color="magenta")
 
-# Hard limit on consecutive tool-calling iterations within a single turn (`Master Instructions.md` Integrity Gate)
-MAX_TOOL_ITERATIONS_PER_TURN: int = 5
+# High runaway-loop safety ceiling on consecutive tool-calling iterations within a single turn
+MAX_TOOL_ITERATIONS_PER_TURN: int = 15
 
 
 # ── State Schema ─────────────────────────────────────────────────────────────
