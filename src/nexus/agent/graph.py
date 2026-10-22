@@ -228,11 +228,33 @@ llm = get_chat_model(tier=_primary_tier, temperature=0.0)
 llm_with_tools = llm.bind_tools(TOOLS)
 
 
-# ── Helper: Sanitize Dangling Tool Calls ─────────────────────────────────────
+# ── Helper: Sanitize Dangling Tool Calls & Mid-Turn Pruned History ───────────
 
 def _sanitize_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
-    """Replaces any orphaned AIMessage tool_calls (from prior interrupted runs) so the model API does not return HTTP 400."""
+    """Ensures message history obeys strict `HumanMessage -> AIMessage(tool_calls) -> ToolMessage` ordering.
+
+    Self-heals two edge cases that otherwise cause HTTP 400 `INVALID_ARGUMENT` on Gemini / OpenAI:
+      1. Mid-turn history pruning: If an older summarizer pass sliced history inside a tool loop, strips leading
+         `ToolMessage` and `AIMessage(tool_calls)` fragments that lack a preceding `HumanMessage`, and prepends a
+         lightweight `HumanMessage` anchor if the history begins with a standalone conversational `AIMessage`.
+      2. Interrupted tool calls: Replaces any `AIMessage(tool_calls)` missing its `ToolMessage` responses with a
+         plain-text `AIMessage` and drops any partial orphaned `ToolMessage`s.
+    """
     cleaned = list(messages)
+
+    # 1. Strip leading mid-turn tool fragments (`ToolMessage` or `AIMessage` with tool_calls) before the first `HumanMessage`
+    while cleaned and (
+        isinstance(cleaned[0], ToolMessage)
+        or (isinstance(cleaned[0], AIMessage) and bool(getattr(cleaned[0], "tool_calls", None)))
+    ):
+        cleaned.pop(0)
+
+    # If the slice begins with a final conversational `AIMessage` from the prior turn, anchor it with a `HumanMessage`
+    if cleaned and isinstance(cleaned[0], AIMessage):
+        cleaned.insert(0, HumanMessage(content="[Prior turn context summarized in SystemMessage]"))
+
+    # 2. Sanitize any interrupted `AIMessage(tool_calls)` missing matching `ToolMessage` responses
+    dropped_tc_ids: set[str] = set()
     for i, msg in enumerate(cleaned):
         if hasattr(msg, "tool_calls") and msg.tool_calls:
             has_all_responses = True
@@ -242,7 +264,17 @@ def _sanitize_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
                     has_all_responses = False
                     break
             if not has_all_responses:
+                for tc in msg.tool_calls:
+                    if tc.get("id"):
+                        dropped_tc_ids.add(tc["id"])
                 cleaned[i] = AIMessage(content=extract_message_text(msg) or "(tool calls dropped due to prior interruption)")
+
+    if dropped_tc_ids:
+        cleaned = [
+            m for m in cleaned
+            if not (isinstance(m, ToolMessage) and getattr(m, "tool_call_id", None) in dropped_tc_ids)
+        ]
+
     return cleaned
 
 

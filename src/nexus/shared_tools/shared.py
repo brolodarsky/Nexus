@@ -310,24 +310,30 @@ def fetch_emails(query: str = "in:inbox", count: int = 5, account: str = "all") 
 
 
 @tool
-def get_calendar_schedule(days_ahead: int = 1) -> str:
-    """Fetch live schedule from Google Calendar for today (and optionally upcoming days).
+def get_calendar_schedule(days_ahead: int = 1, days_back: int = 0) -> str:
+    """Fetch live schedule from Google Calendar for today, past days, and/or upcoming days.
 
-    Use this tool to inspect the user's real-time schedule, detect shifted time blocks,
-    and ground daily planning or evening reviews without guessing.
+    Use this tool to inspect the user's real-time schedule, audit yesterday's completed blocks
+    for daily event receipts (`days_back=1`), detect shifted time blocks, and ground daily planning.
 
     Args:
-        days_ahead: Number of days forward to inspect (default: 1 for today only).
+        days_ahead: Number of days forward to inspect (default: 1 for today; set to 0 when only inspecting past days).
+        days_back: Number of days backward to include (default: 0; pass `days_back=1` to inspect yesterday's calendar).
     """
     from datetime import datetime, time, timedelta
     from nexus.shared_tools.calendar_engine import format_events_as_markdown, list_events
 
     now_local = datetime.now().astimezone()
-    start_dt = datetime.combine(now_local.date(), time.min).astimezone()
-    end_dt = datetime.combine(now_local.date() + timedelta(days=days_ahead - 1), time.max).astimezone()
+    start_dt = datetime.combine(now_local.date() - timedelta(days=max(0, days_back)), time.min).astimezone()
+    end_offset = max(-days_back, days_ahead - 1)
+    end_dt = datetime.combine(now_local.date() + timedelta(days=end_offset), time.max).astimezone()
 
     events = list_events(start_iso=start_dt.isoformat(), end_iso=end_dt.isoformat())
-    return format_events_as_markdown(events, title=f"Schedule ({start_dt.strftime('%A, %b %d')})")
+    if start_dt.date() == end_dt.date():
+        title = f"Schedule ({start_dt.strftime('%A, %b %d')})"
+    else:
+        title = f"Schedule ({start_dt.strftime('%a, %b %d')} – {end_dt.strftime('%a, %b %d')})"
+    return format_events_as_markdown(events, title=title)
 
 
 @tool

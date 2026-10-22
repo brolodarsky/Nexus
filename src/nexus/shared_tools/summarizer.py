@@ -24,9 +24,23 @@ def summarize_conversation(
     if len(messages) <= max_messages:
         return {}
     
-    # Prune oldest messages
-    num_to_remove = len(messages) - keep_messages
-    messages_to_prune = messages[:num_to_remove]
+    # Prune oldest messages while snapping the cut point to a HumanMessage boundary so the retained
+    # slice never starts mid-turn with an orphaned ToolMessage or AIMessage(tool_calls).
+    target_cut = len(messages) - keep_messages
+    cut_idx = target_cut
+    # Walk forward from target_cut to find the next HumanMessage boundary
+    while cut_idx < len(messages) and not isinstance(messages[cut_idx], HumanMessage):
+        cut_idx += 1
+    # If no HumanMessage was found after target_cut (e.g. a single massive 30-step turn), walk backward
+    # to the start of the current turn's HumanMessage so we keep the active turn intact.
+    if cut_idx >= len(messages):
+        cut_idx = target_cut
+        while cut_idx > 0 and not isinstance(messages[cut_idx], HumanMessage):
+            cut_idx -= 1
+    if cut_idx <= 0:
+        return {}
+
+    messages_to_prune = messages[:cut_idx]
     
     # Format messages for the archive
     archive_lines = []
