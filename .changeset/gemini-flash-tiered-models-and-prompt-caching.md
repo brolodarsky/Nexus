@@ -13,6 +13,7 @@ type: minor
 - **Dynamic Per-Turn Model Resolution:** `get_chat_model()` and `call_model()` now re-read `EngineSettings()` dynamically on every turn (with `timeout=90, max_retries=2`), allowing `.env` model/tier edits without editing `.py` files or triggering a `uvicorn --reload` worker kill mid-request.
 
 ### Removed
+- **Mid-Session Message Pruning (`summarizer_node`):** Removed `summarizer_node` (and `SystemMessage` summary mutation) from `src/nexus/agent/graph.py` so `route_after_agent` routes directly to `END` when tool calls finish. Preserves 100% lossless conversation history within event-bounded threads and prevents `RemoveMessage` from invalidating the left-to-right provider KV prompt cache across multi-turn sessions.
 - **Custom Tool-Iteration Circuit Breaker (`MAX_TOOL_ITERATIONS_PER_TURN`):** Removed the custom step-counting circuit breaker from `src/nexus/agent/graph.py` and `Vault/Master Instructions.md`, allowing multi-file Vault workflows to converge naturally while relying on LangGraph's built-in `recursion_limit` for infinite-loop protection.
 
 ### Fixed
