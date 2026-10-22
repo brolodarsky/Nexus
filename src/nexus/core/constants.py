@@ -1,7 +1,11 @@
 from pathlib import Path
 # Literal: Constrains string arguments to an explicit compile-time set of allowed values
 from typing import Literal
-# ChatOpenAI: LangChain client supporting both native OpenAI endpoints and Gemini's OpenAI-compatible REST gateway
+# BaseChatModel: Abstract base class shared by ChatGoogleGenerativeAI and ChatOpenAI
+from langchain_core.language_models.chat_models import BaseChatModel
+# ChatGoogleGenerativeAI: Official Google GenAI LangChain client that natively preserves Gemini 3+ `thought_signature`s
+from langchain_google_genai import ChatGoogleGenerativeAI
+# ChatOpenAI: LangChain client for OpenAI chat models
 from langchain_openai import ChatOpenAI
 from nexus.core.config import settings
 
@@ -15,11 +19,9 @@ AI_MODEL_LOW = "gpt-5.4-mini"
 AI_MODEL_MEDIUM = "gpt-5.6-terra"
 AI_MODEL_STRONG = "gpt-5.6-sol"
 
-# AI Config — Google Gemini OpenAI-Compatible Gateway & Model Tiers
+# AI Config — Google Gemini Native Client & Model Tiers
 # Resolves either `GEMINI_API_KEY` or `GOOGLE_API_KEY` from `.env`
 GEMINI_API_KEY = settings.gemini_api_key or settings.google_api_key
-# Google's official OpenAI-compatible chat completions endpoint (zero extra SDK dependencies required)
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GEMINI_MODEL_LOW = settings.gemini_model_low
 GEMINI_MODEL_MEDIUM = settings.gemini_model_medium
 GEMINI_MODEL_STRONG = settings.gemini_model_strong
@@ -29,15 +31,15 @@ ModelTier = Literal["low", "medium", "strong"]
 
 
 # `tier: ModelTier` selects the capability/cost level (`"low"`, `"medium"`, or `"strong"`).
-# `-> ChatOpenAI` returns a configured LangChain chat model ready for `.invoke()` or `.bind_tools()`.
-def get_chat_model(tier: ModelTier = "medium", temperature: float = 0.0) -> ChatOpenAI:
-    """Instantiate a tiered ChatOpenAI client routed to either Gemini Flash or OpenAI based on `.env` settings.
+# `-> BaseChatModel` returns a configured LangChain chat model (`ChatGoogleGenerativeAI` or `ChatOpenAI`) ready for `.invoke()` or `.bind_tools()`.
+def get_chat_model(tier: ModelTier = "medium", temperature: float = 0.0) -> BaseChatModel:
+    """Instantiate a tiered chat model routed to either native Gemini (`ChatGoogleGenerativeAI`) or OpenAI (`ChatOpenAI`).
 
-    Provider resolution (`settings.ai_provider`):
-      - `"gemini"` (or `"auto"` when `GEMINI_API_KEY` / `GOOGLE_API_KEY` is present): Routes to Google's
-        OpenAI-compatible endpoint (`GEMINI_BASE_URL`) using the configured Gemini model tier.
-      - `"openai"` (or `"auto"` fallback when no Gemini key is set): Routes to OpenAI using `AI_MODEL_LOW`,
-        `AI_MODEL_MEDIUM`, or `AI_MODEL_STRONG`.
+    Why native `ChatGoogleGenerativeAI` instead of `ChatOpenAI` over `/v1beta/openai/`:
+      Gemini 3+ thinking models attach encrypted `thought_signature` tokens to `functionCall` and text parts.
+      `ChatOpenAI` strips `extra_content.google.thought_signature` when serializing tool-call history, causing
+      HTTP 400 `INVALID_ARGUMENT` on step 2 of tool loops. `ChatGoogleGenerativeAI` natively stores and replays
+      `__gemini_function_call_thought_signatures__` in `AIMessage.additional_kwargs` and handles cross-model history.
     """
     provider = settings.ai_provider.strip().lower()
     use_gemini = provider == "gemini" or (provider == "auto" and bool(GEMINI_API_KEY))
@@ -49,10 +51,9 @@ def get_chat_model(tier: ModelTier = "medium", temperature: float = 0.0) -> Chat
             "strong": GEMINI_MODEL_STRONG,
         }
         model_name = gemini_tier_map.get(tier, GEMINI_MODEL_MEDIUM)
-        return ChatOpenAI(
+        return ChatGoogleGenerativeAI(
             model=model_name,
-            api_key=GEMINI_API_KEY,
-            base_url=GEMINI_BASE_URL,
+            google_api_key=GEMINI_API_KEY,
             temperature=temperature,
         )
 

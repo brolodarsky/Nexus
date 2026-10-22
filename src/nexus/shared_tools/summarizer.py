@@ -40,7 +40,7 @@ def summarize_conversation(
         else:
             role = type(m).__name__
             
-        content = m.content if isinstance(m.content, str) else str(m.content)
+        content = m.text if hasattr(m, "text") and isinstance(m.text, str) else (m.content if isinstance(m.content, str) else str(m.content))
         archive_lines.append(f"**{role}**: {content}")
         
     archive_text = "\n\n".join(archive_lines)
@@ -64,7 +64,7 @@ def summarize_conversation(
     prompt += f"\n\nConversation to summarize:\n{archive_text}"
     
     response = llm.invoke([HumanMessage(content=prompt)])
-    new_summary = response.content
+    new_summary = response.text if hasattr(response, "text") and isinstance(response.text, str) else str(response.content)
     
     return {
         "summary": new_summary,

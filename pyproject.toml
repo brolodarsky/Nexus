@@ -75,6 +75,7 @@ dependencies = [
     "langchain-classic==1.0.4",
     "langchain-community==0.4.1",
     "langchain-core==1.2.31",
+    "langchain-google-genai>=4.2.2",
     "langchain-openai==1.1.12",
     "langchain-tavily==0.2.18",
     "langchain-text-splitters==1.1.2",

@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage
 
-from nexus.agent.graph import nexus_graph, nexus_tracer
+from nexus.agent.graph import extract_message_text, nexus_graph, nexus_tracer
 
 
 # Optional[dict] and Optional[str] allow callers to omit metadata filters or explicit thread IDs.
@@ -63,7 +63,7 @@ def run_nexus_agent_with_trace(
                     })
 
         last_message = final_state["messages"][-1] if final_state.get("messages") else None
-        response_text = last_message.content if last_message and hasattr(last_message, "content") else ""
+        response_text = extract_message_text(last_message)
 
         nexus_tracer.agent_end()
         nexus_tracer.info(f"Completed in {elapsed:.1f}s")

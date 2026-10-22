@@ -22,7 +22,7 @@ class EngineSettings(BaseSettings):
     # Default Gemini model identifiers mapped to the 3 capability tiers when running on the Gemini provider
     gemini_model_low: str = "gemini-3.8-flash"
     gemini_model_medium: str = "gemini-3.8-flash"
-    gemini_model_strong: str = "gemini-3.8-flash"
+    gemini_model_strong: str = "gemini-4-argon"
     # Default tier selection (`"low"`, `"medium"`, or `"strong"`) for the parent NexusAgent vs. spawned subagents
     nexus_primary_tier: str = "medium"
     nexus_subagent_tier: str = "low"

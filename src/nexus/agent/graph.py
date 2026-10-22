@@ -107,7 +107,32 @@ CORE_TOOLS = [
 ]
 
 
-# ── Helper: Telemetry for Token Usage & Prompt Cache Hits ────────────────────
+# ── Helper: Telemetry & Structured Content Block Text Extraction ─────────────
+
+def extract_message_text(msg: BaseMessage | None) -> str:
+    """Extracts plain-text markdown from a LangChain BaseMessage across both string and Gemini block-list formats.
+
+    Gemini 3+ thinking models return structured content blocks (`[{'type': 'text', 'text': '...', 'extras': {'signature': '...'}}]`)
+    to preserve reasoning signatures in checkpointer state. This helper extracts the clean text string for UI/CLI display
+    without mutating the underlying message's signature blocks.
+    """
+    if msg is None:
+        return ""
+    if hasattr(msg, "text") and isinstance(msg.text, str):
+        return msg.text
+    raw_content = getattr(msg, "content", "")
+    if isinstance(raw_content, str):
+        return raw_content
+    if isinstance(raw_content, list):
+        parts: list[str] = []
+        for block in raw_content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+        return "\n".join(parts)
+    return str(raw_content)
+
 
 def _log_token_usage(tracer: AgentTracer, ai_msg: BaseMessage) -> None:
     """Extracts and logs prompt token counts, cached token hits (`cache_read`), and output tokens from an AIMessage."""
@@ -176,7 +201,7 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
         sub_messages.append(ai_msg)
 
         if not getattr(ai_msg, "tool_calls", None):
-            final_text = ai_msg.content if isinstance(ai_msg.content, str) else str(ai_msg.content)
+            final_text = extract_message_text(ai_msg)
             subagent_tracer.llm_response(final_text)
             subagent_tracer.agent_end()
             return final_text
@@ -191,7 +216,7 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
             )
             final_ai = sub_base_llm.invoke(sub_messages)
             _log_token_usage(subagent_tracer, final_ai)
-            final_text = final_ai.content if isinstance(final_ai.content, str) else str(final_ai.content)
+            final_text = extract_message_text(final_ai)
             subagent_tracer.llm_response(final_text)
             subagent_tracer.agent_end()
             return final_text
@@ -202,7 +227,7 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
         tool_res = sub_tool_node.invoke({"messages": sub_messages})
         for t_msg in tool_res.get("messages", []):
             t_name = getattr(t_msg, "name", "unknown")
-            t_content = t_msg.content if hasattr(t_msg, "content") else str(t_msg)
+            t_content = extract_message_text(t_msg)
             subagent_tracer.tool_result(t_name, _truncate(t_content, RESULT_TRUNCATE_LEN))
             sub_messages.append(t_msg)
 
@@ -227,7 +252,7 @@ llm_with_tools = llm.bind_tools(TOOLS)
 # ── Helper: Sanitize Dangling Tool Calls & Count Current Turn Iterations ─────
 
 def _sanitize_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
-    """Replaces any orphaned AIMessage tool_calls (from prior interrupted runs) so OpenAI does not return HTTP 400."""
+    """Replaces any orphaned AIMessage tool_calls (from prior interrupted runs) so the model API does not return HTTP 400."""
     cleaned = list(messages)
     for i, msg in enumerate(cleaned):
         if hasattr(msg, "tool_calls") and msg.tool_calls:
@@ -238,7 +263,7 @@ def _sanitize_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
                     has_all_responses = False
                     break
             if not has_all_responses:
-                cleaned[i] = AIMessage(content=msg.content or "(tool calls dropped due to prior interruption)")
+                cleaned[i] = AIMessage(content=extract_message_text(msg) or "(tool calls dropped due to prior interruption)")
     return cleaned
 
 
@@ -304,7 +329,7 @@ def call_model(state: NexusAgentState) -> dict:
         for tc in response.tool_calls:
             nexus_tracer.tool_call(tc.get("name", "unknown"), tc.get("args", {}))
     else:
-        nexus_tracer.llm_response(response.content if response.content else "")
+        nexus_tracer.llm_response(extract_message_text(response))
 
     return {"messages": [response]}
 
@@ -314,7 +339,7 @@ def traced_tool_node(state: NexusAgentState) -> dict:
     result = tool_node.invoke(state)
     for msg in result.get("messages", []):
         tool_name = getattr(msg, "name", "unknown")
-        content = msg.content if hasattr(msg, "content") else str(msg)
+        content = extract_message_text(msg)
         nexus_tracer.tool_result(tool_name, _truncate(content, RESULT_TRUNCATE_LEN))
     return result
 

@@ -391,24 +391,24 @@ def update_calendar_event(
 # ── 5. On-Demand Shared CLI Tool Runner ──────────────────────────────────────
 
 @tool
-def run_shared_tool_cli(module: str, args: Optional[List[str]] = None) -> str:
+def run_shared_tool_cli(module: str, cli_args: Optional[List[str]] = None) -> str:
     """Invoke any `[CLI]` module listed in the `Shared Tools` catalog on demand via `.venv` Python.
 
     Use this for specialized tools not bound as primary tools (e.g. `nexus.shared_tools.read_webpage`,
     `nexus.shared_tools.youtube_transcript`, `nexus.shared_tools.generate_podcast`,
     `nexus.shared_tools.resume_engine.render_docx`, `nexus.shared_tools.gmail_engine`).
-    Pass `args=["--help"]` first if you need to inspect a module's CLI flags.
+    Pass `cli_args=["--help"]` first if you need to inspect a module's CLI flags.
 
     Args:
         module: Dotted Python module path starting with `nexus.shared_tools.` (e.g. "nexus.shared_tools.read_webpage").
-        args: Optional list of CLI argument strings (e.g. ["https://example.com"] or ["--help"]).
+        cli_args: Optional list of CLI argument strings (e.g. ["https://example.com"] or ["--help"]).
     """
     clean_mod = module.strip()
     # Security boundary: restrict execution strictly to modules inside `nexus.shared_tools.`
     if not clean_mod.startswith("nexus.shared_tools."):
         return "Error: Only `nexus.shared_tools.<module>` modules may be invoked via `run_shared_tool_cli`."
 
-    cmd = [sys.executable, "-m", clean_mod] + (args or [])
+    cmd = [sys.executable, "-m", clean_mod] + (cli_args or [])
     try:
         proc = subprocess.run(
             cmd,
