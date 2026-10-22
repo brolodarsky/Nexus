@@ -12,7 +12,7 @@ class EngineSettings(BaseSettings):
     
     # AI & Search
     openai_api_key: Optional[str] = None
-    openai_model: str = "gpt-4o-mini-2024-07-18"
+    openai_model: str = "gpt-6-luna"
     # Gemini API credentials & provider routing:
     # - gemini_api_key / google_api_key: Optional API key from Google AI Studio (`GEMINI_API_KEY` or `GOOGLE_API_KEY` in `.env`)
     # - ai_provider: `"auto"` (uses Gemini if a Gemini key is configured, else OpenAI), `"gemini"`, or `"openai"`
