@@ -182,3 +182,8 @@ dependencies = [
 
 [project.scripts]
 nexus = "nexus.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

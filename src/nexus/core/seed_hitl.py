@@ -1,4 +1,4 @@
-from engine.core.hitl_queue import add_transaction
+from nexus.core.hitl_queue import add_transaction
 
 def seed():
     add_transaction(

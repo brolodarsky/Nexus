@@ -80,6 +80,18 @@ export interface VaultEntry {
 
 // ── Helpers ───────────────────────────────────────────────────
 
+// Error subclass carrying the HTTP status + parsed FastAPI `detail`, so callers can branch on codes
+// (e.g. HITL 409 `stale_base`) instead of string-matching messages. `extends Error` keeps `instanceof Error` true.
+export class ApiError extends Error {
+  status: number;   // HTTP status code (e.g. 404, 409)
+  detail: unknown;  // Parsed `detail` field (string or structured object); `unknown` forces callers to narrow first
+  constructor(status: number, detail: unknown, rawText: string) {
+    super(`API ${status}: ${rawText}`); // Same message format as before, so existing error banners are unchanged
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 // Generic fetch wrapper providing uniform error handling, JSON serialization, and typing
 // <T>: Generic type parameter representing the expected shape of the response JSON (e.g., AgentStatus[], Conversation)
 // RequestInit: Built-in TypeScript interface for fetch options (method, headers, body, signal)
@@ -98,7 +110,10 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   // res.ok: Returns true if HTTP status code is in the 200-299 range
   if (!res.ok) {
     const detail = await res.text(); // Read raw server error text (FastAPI error detail)
-    throw new Error(`API ${res.status}: ${detail}`);
+    let parsed: unknown = detail;
+    // FastAPI errors are JSON `{"detail": ...}`; fall back to raw text if the body isn't JSON (e.g. proxy HTML)
+    try { parsed = JSON.parse(detail)?.detail ?? detail; } catch { /* non-JSON body: keep raw text */ }
+    throw new ApiError(res.status, parsed, detail);
   }
 
   // Type assertion 'as Promise<T>' casts the generic JSON result to the caller's expected interface
@@ -310,8 +325,42 @@ export interface Transaction {
   original_content: string | null; // Previous file content (for pre-commit diff preview)
   proposed_content: string;   // New content drafted by the agent
   reasoning: string | null;   // Plain-English explanation of why change is needed
-  status: string;             // "pending" | "approved" | "rejected"
+  status: string;             // "pending" | "approved" | "rejected" | "rolled_back" | "superseded"
   created_at: string;         // ISO-8601 creation timestamp
+}
+
+// Structured 409 body returned when approve/rollback/rebase hits a commit-integrity conflict
+export interface HitlConflictDetail {
+  code: "stale_base" | "merge_conflict"; // stale_base = disk drifted; merge_conflict = rebase edits overlap
+  message: string;                       // Human-readable explanation from the engine
+  current_content?: string | null;       // Current disk text (stale_base only); null if the note was deleted
+}
+
+// Type guard: narrows an unknown `ApiError.detail` to HitlConflictDetail (`detail is X` tells TS the check's meaning)
+export function isHitlConflict(detail: unknown): detail is HitlConflictDetail {
+  return typeof detail === "object" && detail !== null && "code" in detail;
+}
+
+// Lightweight row from the `revisions` snapshot ledger, used for the Undo list
+export interface HitlRevision {
+  id: number;                 // Revision primary key
+  tx_id: number;              // Transaction that produced this write
+  target_file: string;        // Vault-relative path that was written
+  rolled_back: number;        // 0 = live, 1 = already undone (SQLite has no boolean type)
+  created_at: string;         // When the approval was applied
+  rolled_back_at: string | null;
+  agent_name: string;
+  action_type: string;
+  reasoning: string | null;
+}
+
+// Result returned by approve / rollback
+interface HitlCommitResult {
+  status: string;
+  message: string;
+  revision_id: number;
+  target_file: string;
+  forced: boolean;            // True only if a real conflict was overridden with force
 }
 
 // Loads full note content for display in the Vault Browser
@@ -327,13 +376,29 @@ export async function getPendingHitl(): Promise<Transaction[]> {
 }
 
 // Commits a pending transaction to disk (Phase 2 of Two-Phase Commit)
-export async function approveHitl(id: number): Promise<{ status: string, message: string }> {
-  return apiFetch<{ status: string, message: string }>(`/api/hitl/${id}/approve`, { method: "POST" });
+// force=true overrides a 409 stale_base conflict (prior disk content is still snapshotted for Undo)
+export async function approveHitl(id: number, force = false): Promise<HitlCommitResult> {
+  return apiFetch<HitlCommitResult>(`/api/hitl/${id}/approve${force ? "?force=true" : ""}`, { method: "POST" });
 }
 
 // Discards a pending transaction without applying changes to disk
 export async function rejectHitl(id: number): Promise<{ status: string, message: string }> {
   return apiFetch<{ status: string, message: string }>(`/api/hitl/${id}/reject`, { method: "POST" });
+}
+
+// Restores an approved note to its pre-approval snapshot (409 if edited since approval unless force=true)
+export async function rollbackHitl(id: number, force = false): Promise<HitlCommitResult> {
+  return apiFetch<HitlCommitResult>(`/api/hitl/${id}/rollback${force ? "?force=true" : ""}`, { method: "POST" });
+}
+
+// Re-stages a stale pending edit on top of the current disk text via 3-way merge (409 merge_conflict on overlap)
+export async function rebaseHitl(id: number): Promise<{ status: string; rebased: boolean; message: string }> {
+  return apiFetch<{ status: string; rebased: boolean; message: string }>(`/api/hitl/${id}/rebase`, { method: "POST" });
+}
+
+// Lists recently applied revisions (newest first) for the Undo list
+export async function getRecentRevisions(limit = 10): Promise<HitlRevision[]> {
+  return apiFetch<HitlRevision[]>(`/api/hitl/revisions/recent?limit=${limit}`);
 }
 
 // Lists files and subfolders within a specific vault directory path
