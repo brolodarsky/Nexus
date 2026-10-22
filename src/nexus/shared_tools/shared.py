@@ -275,26 +275,29 @@ _BODY_CHAR_LIMIT = 4000
 
 
 @tool
-def fetch_emails(query: str = "in:inbox", count: int = 5) -> str:
-    """Search and fetch emails from Gmail using native Gmail search syntax.
+def fetch_emails(query: str = "in:inbox", count: int = 5, account: str = "all") -> str:
+    """Search and fetch emails from Gmail using native Gmail search syntax across accounts.
 
     Read-only operation. Use this when the user asks to check their email, find recruiter outreach,
-    or look up a message thread.
+    or look up a message thread. Supports multi-account Gmail ('all' to aggregate across all connected
+    inboxes, or a specific account alias like 'default' or 'work').
 
     Args:
         query: Gmail search syntax (e.g. 'in:inbox', 'from:recruiter newer_than:7d', 'subject:interview').
         count: Maximum number of emails to return (default: 5).
+        account: Account alias ('all' for all configured accounts, 'default', or custom name).
     """
     from nexus.shared_tools import gmail_engine
 
     try:
-        service = gmail_engine.get_gmail_service()
-        summaries = gmail_engine.list_messages(query=query, max_results=count, service=service)
+        summaries = gmail_engine.list_messages(query=query, max_results=count, account=account)
         emails = []
         for s in summaries:
-            msg = gmail_engine.get_message(s["id"], service=service)
+            msg_acc = s.get("account", account if account != "all" else "default")
+            msg = gmail_engine.get_message(s["id"], account=msg_acc)
             emails.append({
                 "id": msg["id"],
+                "account": msg.get("account", msg_acc),
                 "thread_id": msg["thread_id"],
                 "subject": msg["subject"],
                 "sender": msg["sender"],

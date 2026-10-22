@@ -2,21 +2,23 @@
 gmail_engine.py — Core Gmail REST API (v1) integration for Nexus Engine.
 
 Provides deterministic Python functions to search, read, thread, label, archive, trash,
-and draft Gmail messages using local OAuth credentials stored in .secrets/.
+and draft Gmail messages across one or multiple Gmail accounts using local OAuth credentials stored in .secrets/.
 
 Standing Architectural Directives:
-- Pure data access layer (No LangChain @tool decorators here; see agents/router/tools.py for an LLM wrapper).
-- Uses token_gmail.json to isolate Gmail OAuth tokens from calendar tokens.
+- Pure data access layer (No LangChain @tool decorators here; see shared.py for LLM wrappers).
+- Uses token_gmail.json (default) and token_gmail_<account>.json to isolate accounts and calendar tokens.
 - Search uses native Gmail query syntax (e.g. 'from:recruiter newer_than:7d is:unread').
+- Supports --account <alias> and --account all for multi-account querying and aggregation.
 - No send function by design: outbound mail is drafted, then sent by a human (Playbook HITL).
 
 Usage:
-    python -m nexus.shared_tools.gmail_engine --auth
-    python -m nexus.shared_tools.gmail_engine --list 10
-    python -m nexus.shared_tools.gmail_engine --search "from:greenhouse.io newer_than:14d"
-    python -m nexus.shared_tools.gmail_engine --read <MESSAGE_ID> [-o Vault/0. Inbox/email.md]
-    python -m nexus.shared_tools.gmail_engine --thread <THREAD_ID>
-    python -m nexus.shared_tools.gmail_engine --draft "to@x.com" "Subject" "Body" [--reply-to <MESSAGE_ID>]
+    python -m nexus.shared_tools.gmail_engine --accounts
+    python -m nexus.shared_tools.gmail_engine --auth [--account <ALIAS>]
+    python -m nexus.shared_tools.gmail_engine --list 10 [--account <ALIAS|all>]
+    python -m nexus.shared_tools.gmail_engine --search "from:greenhouse.io newer_than:14d" [--account <ALIAS|all>]
+    python -m nexus.shared_tools.gmail_engine --read <MESSAGE_ID> [--account <ALIAS>] [-o Vault/0. Inbox/email.md]
+    python -m nexus.shared_tools.gmail_engine --thread <THREAD_ID> [--account <ALIAS>]
+    python -m nexus.shared_tools.gmail_engine --draft "to@x.com" "Subject" "Body" [--reply-to <MESSAGE_ID>] [--account <ALIAS>]
 """
 
 import argparse
@@ -25,6 +27,7 @@ import email as email_lib
 import email.header
 import html
 import json
+import os
 import re
 import sys
 from datetime import datetime
@@ -49,8 +52,48 @@ from nexus.core.google_auth import get_google_credentials
 # gmail.modify = read + labels + archive + trash + drafts. Excludes permanent delete (needs full mail.google.com scope).
 GMAIL_SCOPES: list[str] = ["https://www.googleapis.com/auth/gmail.modify"]
 SECRETS_DIR: str = str(PROJECT_ROOT / ".secrets")
-TOKEN_FILENAME: str = "token_gmail.json"  # Separate cache: changing Gmail scopes never invalidates calendar auth
+DEFAULT_TOKEN_FILENAME: str = "token_gmail.json"  # Primary cache; custom accounts use token_gmail_<alias>.json
 USER_ID: str = "me"  # Gmail API alias for "the authenticated account" (no EMAIL_ADDRESS env var needed)
+
+
+# ── Multi-Account Token Management ─────────────────────────────────────────────
+def get_token_filename(account: Optional[str] = "default") -> str:
+    """
+    Resolve the token cache filename for a given account alias.
+
+    // account: str | None representing user-defined account handle (e.g. 'work', 'personal', 'default').
+    // Maps 'default', 'primary', or None/empty to 'token_gmail.json' for seamless backward compatibility.
+    // Maps custom aliases to 'token_gmail_<sanitized_alias>.json'.
+    """
+    if not account or account.strip().lower() in ("default", "primary"):
+        return DEFAULT_TOKEN_FILENAME
+    # Sanitize alias to ensure safe alphanumeric filename without path traversal risks
+    clean_alias = re.sub(r"[^a-zA-Z0-9_\-]", "_", account.strip().lower())
+    return f"token_gmail_{clean_alias}.json"
+
+
+def list_available_accounts(secrets_dir: str = SECRETS_DIR) -> list[str]:
+    """
+    Scan secrets directory and return all configured Gmail account aliases.
+
+    // Inspects .secrets/ for token_gmail.json ('default') and token_gmail_<alias>.json files.
+    // Returns a sorted list of unique alias strings (e.g. ['default', 'work']).
+    """
+    if not os.path.exists(secrets_dir):
+        return []
+
+    accounts: list[str] = []
+    for fname in os.listdir(secrets_dir):
+        if fname == "token_gmail.json":
+            if "default" not in accounts:
+                accounts.append("default")
+        elif fname.startswith("token_gmail_") and fname.endswith(".json"):
+            # Extract alias string between 'token_gmail_' and '.json'
+            alias = fname[len("token_gmail_") : -len(".json")]
+            if alias and alias not in accounts:
+                accounts.append(alias)
+    accounts.sort()
+    return accounts
 
 
 # ── HTML → Markdown Stream Parser ─────────────────────────────────────────────
@@ -305,18 +348,19 @@ def _summarize(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 # ── Service ───────────────────────────────────────────────────────────────────
-def get_gmail_service() -> Resource:
+def get_gmail_service(account: str = "default") -> Resource:
     """
-    Authenticate and build the Gmail API v1 Resource client.
+    Authenticate and build the Gmail API v1 Resource client for a specific account.
 
-    Returns:
-        googleapiclient.discovery.Resource: Authorized Gmail API v1 service instance.
+    // account: str specifying which account token cache to load/refresh (e.g. 'default', 'work').
+    // Returns: googleapiclient.discovery.Resource authorized service client instance.
     """
+    token_file = get_token_filename(account)
     # 1. Retrieve or refresh credentials via isolated token file (browser consent on first run)
     creds = get_google_credentials(
         scopes=GMAIL_SCOPES,
         secrets_dir=SECRETS_DIR,
-        token_filename=TOKEN_FILENAME,
+        token_filename=token_file,
     )
     # 2. Build the discovery client; cache_discovery=False silences the oauth2client file-cache warning
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
@@ -326,21 +370,44 @@ def get_gmail_service() -> Resource:
 def list_messages(
     query: str = "in:inbox",
     max_results: int = 10,
+    account: str = "default",
     service: Optional[Resource] = None,
 ) -> list[dict[str, Any]]:
     """
     Search messages with native Gmail query syntax and return lightweight summaries (newest first).
 
-    Args:
-        query: Gmail search string, identical to the Gmail search bar
-               (e.g. 'from:openai.com', 'subject:interview newer_than:30d', 'is:unread label:Jobs').
-        max_results: Max messages to return (clamped 1–100).
-        service: Optional pre-built client (reuse across calls to skip re-auth).
+    // query: Gmail search string, identical to the Gmail search bar
+    //        (e.g. 'from:openai.com', 'subject:interview newer_than:30d', 'is:unread label:Jobs').
+    // max_results: Max messages to return (clamped 1–100).
+    // account: Target account alias ('default', 'work', etc.) or 'all' to aggregate across accounts.
+    // service: Optional pre-built client (reuse across calls to skip re-auth).
 
     Returns:
-        list[dict]: Summaries with id, thread_id, date, sender, to, subject, snippet, labels.
+        list[dict]: Summaries with id, account, thread_id, date, sender, to, subject, snippet, labels.
     """
-    service = service or get_gmail_service()
+    # Multi-account aggregation branch: query all discovered accounts and merge results
+    if account.lower() == "all" and service is None:
+        available = list_available_accounts()
+        if not available:
+            available = ["default"]
+
+        combined: list[dict[str, Any]] = []
+        for acc in available:
+            try:
+                acc_msgs = list_messages(
+                    query=query,
+                    max_results=max_results,
+                    account=acc,
+                )
+                combined.extend(acc_msgs)
+            except Exception as e:
+                print(f"[Nexus] Warning: failed to fetch messages for account '{acc}': {e}", file=sys.stderr)
+
+        # Sort combined results descending by ISO date string (newest first)
+        combined.sort(key=lambda m: m.get("date", ""), reverse=True)
+        return combined[:max_results]
+
+    service = service or get_gmail_service(account=account)
     max_results = max(1, min(max_results, 100))
 
     # Step 1: messages.list returns ONLY {id, threadId} stubs, never headers
@@ -355,7 +422,9 @@ def list_messages(
     def _on_response(request_id: str, response: dict, exception: Exception | None) -> None:
         # Batch callback signature fixed by googleapiclient: (request_id, response, exception)
         if exception is None and response:
-            results_by_id[response["id"]] = _summarize(response)
+            item = _summarize(response)
+            item["account"] = account
+            results_by_id[response["id"]] = item
 
     batch = service.new_batch_http_request(callback=_on_response)
     for stub in stubs:
@@ -373,23 +442,44 @@ def list_messages(
     return [results_by_id[s["id"]] for s in stubs if s["id"] in results_by_id]
 
 
-def get_message(message_id: str, service: Optional[Resource] = None) -> dict[str, Any]:
+def get_message(
+    message_id: str,
+    account: str = "default",
+    service: Optional[Resource] = None,
+) -> dict[str, Any]:
     """
     Fetch a full message and convert its body into clean markdown.
 
-    Args:
-        message_id: Gmail message ID (hex string from list_messages, e.g. '18f2a9c3d4e5b6a7').
+    // message_id: Gmail message ID (hex string from list_messages, e.g. '18f2a9c3d4e5b6a7').
+    // account: Account alias owning this message (or 'all' to probe all configured accounts).
+    // service: Optional pre-built Resource client.
 
     Returns:
-        dict: id, thread_id, date, sender, to, cc, subject, labels, attachments, body (markdown).
+        dict: id, account, thread_id, date, sender, to, cc, subject, labels, attachments, body (markdown).
     """
-    service = service or get_gmail_service()
+    if service is None:
+        if account.lower() == "all":
+            # Probe each configured account until the message is found
+            available = list_available_accounts() or ["default"]
+            last_exc = None
+            for acc in available:
+                try:
+                    svc = get_gmail_service(account=acc)
+                    return get_message(message_id, account=acc, service=svc)
+                except Exception as exc:
+                    last_exc = exc
+            if last_exc:
+                raise last_exc
+        else:
+            service = get_gmail_service(account=account)
+
     # format='raw' returns the entire RFC 822 message as base64url, so stdlib `email` can parse any MIME tree
     raw = service.users().messages().get(userId=USER_ID, id=message_id, format="raw").execute()
     msg = email_lib.message_from_bytes(base64.urlsafe_b64decode(raw["raw"]))
 
     return {
         "id": raw.get("id"),
+        "account": account,
         "thread_id": raw.get("threadId"),
         "date": _internal_date_iso(raw.get("internalDate")),
         "sender": _decode_header(msg.get("From", "(Unknown)")),
@@ -403,30 +493,56 @@ def get_message(message_id: str, service: Optional[Resource] = None) -> dict[str
     }
 
 
-def get_thread(thread_id: str, service: Optional[Resource] = None) -> list[dict[str, Any]]:
+def get_thread(
+    thread_id: str,
+    account: str = "default",
+    service: Optional[Resource] = None,
+) -> list[dict[str, Any]]:
     """
     Fetch every message in a conversation thread (oldest first), each with a markdown body.
 
-    Args:
-        thread_id: Gmail thread ID (the 'thread_id' field from list_messages/get_message).
+    // thread_id: Gmail thread ID (the 'thread_id' field from list_messages/get_message).
+    // account: Account alias owning this thread (or 'all' to probe configured accounts).
+    // service: Optional pre-built Resource client.
     """
-    service = service or get_gmail_service()
+    if service is None:
+        if account.lower() == "all":
+            available = list_available_accounts() or ["default"]
+            last_exc = None
+            for acc in available:
+                try:
+                    svc = get_gmail_service(account=acc)
+                    return get_thread(thread_id, account=acc, service=svc)
+                except Exception as exc:
+                    last_exc = exc
+            if last_exc:
+                raise last_exc
+        else:
+            service = get_gmail_service(account=account)
+
     # threads.get has no 'raw' format, so grab IDs cheaply ('minimal') then reuse get_message's MIME parser
     thread = service.users().threads().get(userId=USER_ID, id=thread_id, format="minimal").execute()
-    return [get_message(m["id"], service=service) for m in thread.get("messages", [])]
+    return [get_message(m["id"], account=account, service=service) for m in thread.get("messages", [])]
 
 
-def list_labels(service: Optional[Resource] = None) -> list[dict[str, str]]:
+def list_labels(
+    account: str = "default",
+    service: Optional[Resource] = None,
+) -> list[dict[str, str]]:
     """Return all labels as [{'id': 'Label_12', 'name': 'Jobs', 'type': 'user'}, ...]."""
-    service = service or get_gmail_service()
+    service = service or get_gmail_service(account=account)
     labels = service.users().labels().list(userId=USER_ID).execute().get("labels", [])
     return [{"id": l["id"], "name": l["name"], "type": l.get("type", "")} for l in labels]
 
 
 # ── Write Operations (HITL: confirm with the user before calling) ─────────────
-def _resolve_label_ids(names: list[str], service: Resource) -> list[str]:
+def _resolve_label_ids(
+    names: list[str],
+    service: Resource,
+    account: str = "default",
+) -> list[str]:
     """Map human label names ('Jobs', 'UNREAD') to Gmail label IDs ('Label_12', 'UNREAD')."""
-    lookup = {l["name"].lower(): l["id"] for l in list_labels(service)}
+    lookup = {l["name"].lower(): l["id"] for l in list_labels(account=account, service=service)}
     resolved: list[str] = []
     for name in names:
         label_id = lookup.get(name.lower())
@@ -440,6 +556,7 @@ def modify_labels(
     message_id: str,
     add: Optional[list[str]] = None,
     remove: Optional[list[str]] = None,
+    account: str = "default",
     service: Optional[Resource] = None,
 ) -> list[str]:
     """
@@ -449,28 +566,40 @@ def modify_labels(
     Returns:
         list[str]: The message's label IDs after modification.
     """
-    service = service or get_gmail_service()
+    service = service or get_gmail_service(account=account)
     body = {
-        "addLabelIds": _resolve_label_ids(add or [], service),
-        "removeLabelIds": _resolve_label_ids(remove or [], service),
+        "addLabelIds": _resolve_label_ids(add or [], service=service, account=account),
+        "removeLabelIds": _resolve_label_ids(remove or [], service=service, account=account),
     }
     res = service.users().messages().modify(userId=USER_ID, id=message_id, body=body).execute()
     return res.get("labelIds", [])
 
 
-def archive_message(message_id: str, service: Optional[Resource] = None) -> list[str]:
+def archive_message(
+    message_id: str,
+    account: str = "default",
+    service: Optional[Resource] = None,
+) -> list[str]:
     """Archive = remove the INBOX label (message stays searchable under All Mail)."""
-    return modify_labels(message_id, remove=["INBOX"], service=service)
+    return modify_labels(message_id, remove=["INBOX"], account=account, service=service)
 
 
-def mark_read(message_id: str, service: Optional[Resource] = None) -> list[str]:
+def mark_read(
+    message_id: str,
+    account: str = "default",
+    service: Optional[Resource] = None,
+) -> list[str]:
     """Mark as read = remove the UNREAD system label."""
-    return modify_labels(message_id, remove=["UNREAD"], service=service)
+    return modify_labels(message_id, remove=["UNREAD"], account=account, service=service)
 
 
-def trash_message(message_id: str, service: Optional[Resource] = None) -> bool:
+def trash_message(
+    message_id: str,
+    account: str = "default",
+    service: Optional[Resource] = None,
+) -> bool:
     """Move a message to Trash (Gmail auto-purges after 30 days; recoverable until then)."""
-    service = service or get_gmail_service()
+    service = service or get_gmail_service(account=account)
     service.users().messages().trash(userId=USER_ID, id=message_id).execute()
     return True
 
@@ -480,6 +609,7 @@ def create_draft(
     subject: str,
     body: str,
     reply_to_message_id: Optional[str] = None,
+    account: str = "default",
     service: Optional[Resource] = None,
 ) -> dict[str, Any]:
     """
@@ -490,11 +620,13 @@ def create_draft(
         subject: Subject line ('Re: ' is auto-prefixed for replies if missing).
         body: Plain-text body.
         reply_to_message_id: Optional Gmail message ID to reply to; threads the draft into that conversation.
+        account: Account alias from which to draft.
+        service: Optional pre-built Resource client.
 
     Returns:
-        dict: draft_id, message_id, thread_id.
+        dict: account, draft_id, message_id, thread_id.
     """
-    service = service or get_gmail_service()
+    service = service or get_gmail_service(account=account)
     mime = EmailMessage()  # Modern stdlib MIME builder (handles UTF-8 headers/body encoding for us)
     mime["To"] = to
     mime.set_content(body)
@@ -502,7 +634,7 @@ def create_draft(
     thread_id: Optional[str] = None
     if reply_to_message_id:
         # Reply threading needs BOTH Gmail's threadId AND RFC 5322 In-Reply-To/References headers
-        original = get_message(reply_to_message_id, service=service)
+        original = get_message(reply_to_message_id, account=account, service=service)
         thread_id = original["thread_id"]
         if original["message_id_header"]:
             mime["In-Reply-To"] = original["message_id_header"]
@@ -518,6 +650,7 @@ def create_draft(
 
     draft = service.users().drafts().create(userId=USER_ID, body={"message": message_body}).execute()
     return {
+        "account": account,
         "draft_id": draft.get("id"),
         "message_id": draft.get("message", {}).get("id"),
         "thread_id": draft.get("message", {}).get("threadId"),
@@ -528,11 +661,13 @@ def create_draft(
 def message_to_markdown(msg: dict[str, Any]) -> str:
     """Render a get_message() dict as a Vault-ready markdown block."""
     attachments = ", ".join(msg.get("attachments", [])) or "None"
+    account_line = f"**Account:** {msg['account']}  \n" if msg.get("account") else ""
     cc_line = f"**Cc:** {msg['cc']}  \n" if msg.get("cc") else ""
     return (
         f"# {msg['subject']}\n\n"
         f"**From:** {msg['sender']}  \n"
         f"**To:** {msg['to']}  \n"
+        f"{account_line}"
         f"{cc_line}"
         f"**Date:** {msg['date']}  \n"
         f"**Gmail ID:** {msg['id']} (thread {msg['thread_id']})  \n"
@@ -546,33 +681,55 @@ def format_messages_table(messages: list[dict[str, Any]]) -> str:
     """Fixed-width terminal table of message summaries."""
     if not messages:
         return "No messages found."
-    col_sender_w, col_subj_w = 32, 60
-    lines = [f"{'ID':<18} {'Date':<26} {'From':<{col_sender_w}} Subject", "-" * 140]
-    for m in messages:
-        # Truncate long fields with an ellipsis so columns stay aligned
-        sender = m["sender"][:col_sender_w] + ("…" if len(m["sender"]) > col_sender_w else "")
-        subject = m["subject"][:col_subj_w] + ("…" if len(m["subject"]) > col_subj_w else "")
-        lines.append(f"{m['id']:<18} {m['date']:<26} {sender:<{col_sender_w}} {subject}")
+    has_account = any("account" in m for m in messages)
+    col_acc_w, col_sender_w, col_subj_w = 12, 32, 60
+    if has_account:
+        header = f"{'Account':<{col_acc_w}} {'ID':<18} {'Date':<26} {'From':<{col_sender_w}} Subject"
+        lines = [header, "-" * (col_acc_w + 18 + 26 + col_sender_w + col_subj_w + 4)]
+        for m in messages:
+            acc = (m.get("account") or "default")[:col_acc_w]
+            sender = m["sender"][:col_sender_w] + ("…" if len(m["sender"]) > col_sender_w else "")
+            subject = m["subject"][:col_subj_w] + ("…" if len(m["subject"]) > col_subj_w else "")
+            lines.append(f"{acc:<{col_acc_w}} {m['id']:<18} {m['date']:<26} {sender:<{col_sender_w}} {subject}")
+    else:
+        lines = [f"{'ID':<18} {'Date':<26} {'From':<{col_sender_w}} Subject", "-" * 140]
+        for m in messages:
+            sender = m["sender"][:col_sender_w] + ("…" if len(m["sender"]) > col_sender_w else "")
+            subject = m["subject"][:col_subj_w] + ("…" if len(m["subject"]) > col_subj_w else "")
+            lines.append(f"{m['id']:<18} {m['date']:<26} {sender:<{col_sender_w}} {subject}")
     return "\n".join(lines)
 
 
 # ── Interactive CLI Entrypoint ────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
-        description="Gmail REST API (v1) CLI for Nexus Engine.",
+        description="Gmail REST API (v1) CLI for Nexus Engine with multi-account support.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python -m nexus.shared_tools.gmail_engine --auth\n"
-            "  python -m nexus.shared_tools.gmail_engine --list 10\n"
-            "  python -m nexus.shared_tools.gmail_engine --search \"from:greenhouse.io newer_than:14d\" --json\n"
-            "  python -m nexus.shared_tools.gmail_engine --read 18f2a9c3d4e5b6a7 -o \"Vault/0. Inbox/lead.md\"\n"
-            "  python -m nexus.shared_tools.gmail_engine --draft \"a@b.com\" \"Hello\" \"Body\" --reply-to 18f2a9c3d4e5b6a7\n"
-            "  python -m nexus.shared_tools.gmail_engine --modify 18f2a9c3d4e5b6a7 --add Jobs --remove INBOX\n"
+            "  python -m nexus.shared_tools.gmail_engine --accounts\n"
+            "  python -m nexus.shared_tools.gmail_engine --auth --account work\n"
+            "  python -m nexus.shared_tools.gmail_engine --list 10 --account all\n"
+            "  python -m nexus.shared_tools.gmail_engine --search \"from:greenhouse.io newer_than:14d\" --account work --json\n"
+            "  python -m nexus.shared_tools.gmail_engine --read 18f2a9c3d4e5b6a7 --account work -o \"Vault/0. Inbox/lead.md\"\n"
+            "  python -m nexus.shared_tools.gmail_engine --draft \"a@b.com\" \"Hello\" \"Body\" --account work --reply-to 18f2a9c3d4e5b6a7\n"
+            "  python -m nexus.shared_tools.gmail_engine --modify 18f2a9c3d4e5b6a7 --account work --add Jobs --remove INBOX\n"
         ),
     )
+    # Account targeting
+    parser.add_argument(
+        "--account",
+        metavar="ACCOUNT",
+        default="default",
+        help="Account alias to target (e.g. 'default', 'work', 'personal', or 'all' for queries). Default: 'default'"
+    )
+    parser.add_argument(
+        "--accounts",
+        action="store_true",
+        help="List all configured/authenticated Gmail account aliases in .secrets/"
+    )
     # Read
-    parser.add_argument("--auth", action="store_true", help="Run the one-time OAuth browser consent")
+    parser.add_argument("--auth", action="store_true", help="Run the one-time OAuth browser consent for --account")
     parser.add_argument("--list", metavar="N", type=int, help="List the N most recent inbox messages")
     parser.add_argument("--search", metavar="QUERY", help="Search with Gmail syntax (from:, subject:, newer_than:, is:unread)")
     parser.add_argument("--max", type=int, default=10, help="Max results for --search (default: 10)")
@@ -601,25 +758,37 @@ def main():
         else:
             print(text)
 
+    if args.accounts:
+        accs = list_available_accounts()
+        if not accs:
+            print("No Gmail accounts currently configured in .secrets/. Run --auth to connect an account.")
+        else:
+            print(f"Configured Gmail Accounts ({len(accs)}):")
+            for acc in accs:
+                token_name = get_token_filename(acc)
+                print(f"  - {acc:<12} (.secrets/{token_name})")
+        return
+
     if args.auth:
-        get_gmail_service()
-        print(f"[Nexus] Gmail authentication successful. Token stored at .secrets/{TOKEN_FILENAME}")
+        get_gmail_service(account=args.account)
+        token_file = get_token_filename(args.account)
+        print(f"[Nexus] Gmail authentication successful for account '{args.account}'. Token stored at .secrets/{token_file}")
         return
 
     if args.list or args.search:
         query = args.search or "in:inbox"
         count = args.list or args.max
-        msgs = list_messages(query=query, max_results=count)
+        msgs = list_messages(query=query, max_results=count, account=args.account)
         print(json.dumps(msgs, indent=2, ensure_ascii=False) if args.json else format_messages_table(msgs))
         return
 
     if args.read:
-        msg = get_message(args.read)
+        msg = get_message(args.read, account=args.account)
         _emit(json.dumps(msg, indent=2, ensure_ascii=False) if args.json else message_to_markdown(msg))
         return
 
     if args.thread:
-        msgs = get_thread(args.thread)
+        msgs = get_thread(args.thread, account=args.account)
         if args.json:
             _emit(json.dumps(msgs, indent=2, ensure_ascii=False))
         else:
@@ -627,34 +796,34 @@ def main():
         return
 
     if args.labels:
-        for l in list_labels():
+        for l in list_labels(account=args.account):
             print(f"{l['id']:<24} {l['type']:<8} {l['name']}")
         return
 
     if args.draft:
         to, subject, body = args.draft
-        res = create_draft(to=to, subject=subject, body=body, reply_to_message_id=args.reply_to)
-        print(f"[Nexus] Draft created (draft {res['draft_id']}, thread {res['thread_id']}). Review and send in Gmail.")
+        res = create_draft(to=to, subject=subject, body=body, reply_to_message_id=args.reply_to, account=args.account)
+        print(f"[Nexus] Draft created for account '{res.get('account', args.account)}' (draft {res['draft_id']}, thread {res['thread_id']}). Review and send in Gmail.")
         return
 
     if args.modify:
-        labels = modify_labels(args.modify, add=args.add, remove=args.remove)
-        print(f"[Nexus] Labels now: {', '.join(labels)}")
+        labels = modify_labels(args.modify, add=args.add, remove=args.remove, account=args.account)
+        print(f"[Nexus] Labels now for {args.modify} ({args.account}): {', '.join(labels)}")
         return
 
     if args.archive:
-        archive_message(args.archive)
-        print(f"[Nexus] Archived {args.archive}.")
+        archive_message(args.archive, account=args.account)
+        print(f"[Nexus] Archived {args.archive} on account '{args.account}'.")
         return
 
     if args.mark_read:
-        mark_read(args.mark_read)
-        print(f"[Nexus] Marked {args.mark_read} as read.")
+        mark_read(args.mark_read, account=args.account)
+        print(f"[Nexus] Marked {args.mark_read} as read on account '{args.account}'.")
         return
 
     if args.trash:
-        trash_message(args.trash)
-        print(f"[Nexus] Moved {args.trash} to Trash (recoverable for 30 days).")
+        trash_message(args.trash, account=args.account)
+        print(f"[Nexus] Moved {args.trash} to Trash on account '{args.account}' (recoverable for 30 days).")
         return
 
     parser.print_help()

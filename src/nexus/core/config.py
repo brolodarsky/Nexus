@@ -32,7 +32,7 @@ class EngineSettings(BaseSettings):
     telegram_bot_token: Optional[str] = None
     allowed_user_ids: str = ""
     
-    # Gmail: auth lives in .secrets/token_gmail.json (see shared_tools/gmail_engine.py); no env config needed.
+    # Gmail: auth lives in .secrets/token_gmail*.json (see shared_tools/gmail_engine.py); supports multiple accounts.
 
     # LangSmith Tracing
     langchain_tracing_v2: Optional[str] = None
