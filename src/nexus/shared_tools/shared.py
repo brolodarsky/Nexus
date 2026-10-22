@@ -63,7 +63,7 @@ def read_file(
     start_line: Optional[int] = None,
     end_line: Optional[int] = None,
 ) -> str:
-    """Read the contents of a note or file in the Vault.
+    """Read the contents of a note or file in the Vault (automatically reflects any pending staged HITL edits).
 
     You can pass a full Vault-relative path (e.g. "3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md")
     or a unique note title (e.g. "Job Hunt War Room" or "Health Summary.md").
@@ -74,8 +74,35 @@ def read_file(
         start_line: Optional 1-indexed starting line number (inclusive).
         end_line: Optional 1-indexed ending line number (inclusive).
     """
-    from nexus.shared_tools.vault_reader import read_note_content
+    from nexus.core.hitl_queue import get_pending_for_file
+    from nexus.shared_tools.vault_reader import read_note_content, resolve_vault_note_path
 
+    # 1. Check if this file has a pending transaction in the HITL queue (`hitl.db`).
+    # First resolve on disk if it exists so short filenames ("Plan.md") map to their canonical `Vault/...` path.
+    resolved_path, _ = resolve_vault_note_path(file_path)
+    lookup_target = (
+        f"Vault/{str(resolved_path.relative_to(VAULT_PATH)).replace(chr(92), '/')}"
+        if resolved_path is not None
+        else file_path
+    )
+    pending_tx = get_pending_for_file(lookup_target)
+    if pending_tx and pending_tx.get("proposed_content") is not None:
+        staged_text: str = pending_tx["proposed_content"]
+        tx_id = pending_tx.get("id")
+        target_name = pending_tx.get("target_file", lookup_target)
+        banner = (
+            f"[STAGED IN HITL QUEUE (Tx #{tx_id} on `{target_name}`) — "
+            f"Showing cumulative pending content awaiting human approval]\n\n"
+        )
+        if start_line is not None or end_line is not None:
+            lines = staged_text.splitlines()
+            s_idx = max(0, (start_line or 1) - 1)
+            e_idx = min(len(lines), end_line or len(lines))
+            sliced = "\n".join(f"{i + 1}: {lines[i]}" for i in range(s_idx, e_idx))
+            return f"{banner}--- {target_name} (Lines {s_idx + 1}-{e_idx} of {len(lines)}) ---\n{sliced}"
+        return f"{banner}--- {target_name} ---\n{staged_text}"
+
+    # 2. Otherwise read directly from disk
     return read_note_content(
         note_path=file_path,
         domain_path=None,
@@ -141,6 +168,20 @@ def _normalize_line_endings(text: str) -> str:
     return text.replace("\r\n", "\n")
 
 
+def _apply_surgical_replacement(source_text: str, target: str, replacement: str) -> Optional[str]:
+    """Applies exact `target -> replacement` matching (with CRLF/LF normalization fallback). Returns None if not found."""
+    if target in source_text:
+        return source_text.replace(target, replacement)
+    norm_source = _normalize_line_endings(source_text)
+    norm_target = _normalize_line_endings(target)
+    norm_replacement = _normalize_line_endings(replacement)
+    if norm_target in norm_source:
+        uses_crlf = "\r\n" in source_text
+        patched_lf = norm_source.replace(norm_target, norm_replacement)
+        return patched_lf.replace("\n", "\r\n") if uses_crlf else patched_lf
+    return None
+
+
 @tool
 def modify_file(
     file_path: str,
@@ -148,64 +189,92 @@ def modify_file(
     replacement: str,
     reasoning: str,
 ) -> str:
-    """Surgically modify an existing Vault note by replacing an exact `target` block with `replacement` (staged to HITL queue).
+    """Surgically modify an existing (or pending staged) Vault note by replacing an exact `target` block with `replacement`.
+
+    CUMULATIVE OVERLAY STACKING: If this note already has a pending transaction in the HITL queue (`hitl.db`),
+    `modify_file` automatically applies your `target -> replacement` edit on top of the pending `proposed_content`
+    and updates the single HITL card in place (preserving the true on-disk baseline and appending your reasoning).
 
     NEVER regenerate an entire existing file just to edit a section or bullet. Instead:
-    1. Call `read_file` first so you know the exact existing text.
+    1. Call `read_file` first so you know the exact current text (including any staged pending edits).
     2. Set `target` to the exact contiguous character sequence (including whitespace/indentation) you want to replace.
     3. Set `replacement` to the drop-in replacement text (or empty string "" to delete `target`).
-    4. Python patches only that block into the full file and stages the complete diff to the HITL review queue (`hitl.db`).
+    4. Python patches only that block into the file and stages/updates the single cumulative diff in `hitl.db`.
 
     Args:
-        file_path: Vault-relative path or unique filename of the existing note to edit.
-        target: The exact contiguous string in the existing file to be replaced (must match existing text).
+        file_path: Vault-relative path or unique filename of the note to edit.
+        target: The exact contiguous string in the file to be replaced (must match current/staged text).
         replacement: The new text to substitute in place of `target`.
         reasoning: Concise explanation of WHY this edit is being proposed for human HITL review.
     """
-    from nexus.core.hitl_queue import add_transaction
+    from nexus.core.hitl_queue import add_transaction, get_pending_for_file
     from nexus.shared_tools.vault_reader import resolve_vault_note_path
 
     if not target:
         return "Error: `target` cannot be empty in `modify_file`. Read the file first and pass the exact text block to replace, or use `create_file` for new files."
 
     resolved_path, err = resolve_vault_note_path(file_path)
-    if err or resolved_path is None:
-        return err or f"Error: Could not resolve existing file '{file_path}'."
-
-    try:
-        original_content = resolved_path.read_text(encoding="utf-8")
-    except Exception as e:
-        return f"Error reading existing file '{file_path}': {e}"
-
-    # Match directly first; if Windows CRLF vs LF line endings differ, fall back to LF-normalized replacement.
-    if target in original_content:
-        proposed_content = original_content.replace(target, replacement)
+    if resolved_path is not None:
+        rel_vault_path = str(resolved_path.relative_to(VAULT_PATH)).replace("\\", "/")
+        hitl_target_file = f"Vault/{rel_vault_path}"
+        try:
+            disk_content: Optional[str] = resolved_path.read_text(encoding="utf-8")
+        except Exception as e:
+            return f"Error reading existing file '{file_path}': {e}"
     else:
-        norm_original = _normalize_line_endings(original_content)
-        norm_target = _normalize_line_endings(target)
-        norm_replacement = _normalize_line_endings(replacement)
-        if norm_target in norm_original:
-            # Preserve the file's original line-ending style (CRLF vs LF) when writing the patched output.
-            uses_crlf = "\r\n" in original_content
-            patched_lf = norm_original.replace(norm_target, norm_replacement)
-            proposed_content = patched_lf.replace("\n", "\r\n") if uses_crlf else patched_lf
-        else:
-            return (
-                f"Error: `target` text was not found in '{resolved_path.relative_to(VAULT_PATH)}'. "
-                f"Call `read_file` to inspect the exact current lines and whitespace before calling `modify_file`."
-            )
+        # File may not exist on disk yet because it was staged via `create_file` earlier in this session!
+        pending_new = get_pending_for_file(file_path)
+        if pending_new is None:
+            return err or f"Error: Could not resolve existing or pending staged file '{file_path}'."
+        hitl_target_file = pending_new["target_file"]
+        disk_content = pending_new.get("original_content")
 
-    rel_vault_path = str(resolved_path.relative_to(VAULT_PATH)).replace("\\", "/")
-    hitl_target_file = f"Vault/{rel_vault_path}"
+    # Check if there is already a pending HITL edit for this file so we stack on top of `proposed_content`
+    pending_tx = get_pending_for_file(hitl_target_file)
+    working_base = (
+        pending_tx["proposed_content"]
+        if (pending_tx and pending_tx.get("proposed_content") is not None)
+        else (disk_content or "")
+    )
+    baseline_original = (
+        pending_tx.get("original_content")
+        if (pending_tx and pending_tx.get("original_content") is not None)
+        else disk_content
+    )
+    action_type = (
+        "create"
+        if (pending_tx and pending_tx.get("action_type") == "create" and baseline_original is None)
+        else "modify"
+    )
+
+    # Apply replacement onto the active working base (staged content first; fallback to disk if agent matched pre-stage text)
+    proposed_content = _apply_surgical_replacement(working_base, target, replacement)
+    if proposed_content is None and disk_content is not None and working_base != disk_content:
+        # Agent matched against raw disk text; apply to disk_content only if `target` is also patched into `working_base`
+        return (
+            f"Error: `target` text was not found in the active staged version of `{hitl_target_file}` "
+            f"(Pending HITL Tx #{pending_tx['id']}). Call `read_file(\"{file_path}\")` to see the current staged text "
+            f"and apply your surgical edit on top of it."
+        )
+    if proposed_content is None:
+        return (
+            f"Error: `target` text was not found in `{hitl_target_file}`. "
+            f"Call `read_file` to inspect the exact current lines and whitespace before calling `modify_file`."
+        )
 
     tx_id = add_transaction(
         agent_name="nexus_agent",
-        action_type="modify",
+        action_type=action_type,
         target_file=hitl_target_file,
         proposed_content=proposed_content,
-        original_content=original_content,
+        original_content=baseline_original,
         reasoning=reasoning,
     )
+    if pending_tx:
+        return (
+            f"✅ Surgical modification stacked onto existing pending HITL Transaction #{tx_id} on `{hitl_target_file}` "
+            f"(cumulative diff updated in place). Awaiting human approval."
+        )
     return (
         f"✅ Surgical modification staged to HITL queue (Transaction #{tx_id} on `{hitl_target_file}`). "
         f"Awaiting human approval."
@@ -435,6 +504,62 @@ def run_shared_tool_cli(module: str, cli_args: Optional[List[str]] = None) -> st
         return output or f"(exit code {proc.returncode}, no output)"
     except Exception as e:
         return f"Error running `{clean_mod}`: {e}"
+
+
+# ── 6. Shared Inter-Agent Blackboard / Message Board Tools ───────────────────
+
+@tool
+def post_to_board(
+    title: str,
+    content: str,
+    channel: str = "general",
+    author: str = "Subagent",
+    pinned: bool = False,
+) -> str:
+    """Post a structured situational bulletin onto the Shared Agent Blackboard (`blackboard.db`).
+
+    Use this tool in subagents and multi-step missions to broadcast distilled findings
+    (e.g. Gmail inbox sweep takeaways, Google Calendar schedule audits, Vault status discoveries,
+    or mission progress) so the primary orchestrator (`NexusAgent` / Astra), peer subagents,
+    and the GUI Bulletin Feed have live shared situational awareness without redundant API sweeps.
+
+    Args:
+        title: Concise headline for the bulletin (e.g. "Oct 22 Multi-Inbox Gmail Triage" or "Wed Oct 21 Calendar Audit").
+        content: Markdown summary of findings, actionable items, and key metadata.
+        channel: Board channel tag — one of `"email"`, `"calendar"`, `"vault"`, `"mission"`, or `"general"`.
+        author: Identifier for the agent posting (e.g. `"Flash: Gmail Sweep"`, `"Flash: Calendar Audit"`, `"Astra"`).
+        pinned: Set True to pin high-priority standing bulletins to the top of the board.
+    """
+    from nexus.core.blackboard import post_bulletin
+
+    bulletin_id = post_bulletin(
+        author=author,
+        title=title,
+        content=content,
+        channel=channel,
+        pinned=pinned,
+    )
+    return f"📋 Bulletin #{bulletin_id} posted to Shared Blackboard [`{channel}`]: '{title}'."
+
+
+@tool
+def read_board(
+    channel: Optional[str] = None,
+    limit: int = 12,
+) -> str:
+    """Read recent bulletins from the Shared Agent Blackboard (`blackboard.db`).
+
+    Call this to inspect recent findings already gathered by Flash subagents (`email`, `calendar`,
+    `vault`, `mission`) before launching duplicate external API sweeps.
+
+    Args:
+        channel: Optional channel filter (`"email"`, `"calendar"`, `"vault"`, `"mission"`, `"general"`).
+                 Leave omitted or pass `"all"` to view bulletins across all channels.
+        limit: Maximum number of recent bulletins to return (default: 12).
+    """
+    from nexus.core.blackboard import format_board_digest
+
+    return format_board_digest(channel=channel, limit=limit)
 
 
 # ── Backward-Compatible Factories (for any legacy callers) ───────────────────

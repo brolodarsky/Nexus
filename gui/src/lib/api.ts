@@ -354,3 +354,39 @@ export async function generatePodcast(path: string, force: boolean = false): Pro
 export function getPodcastAudioUrl(path: string): string {
   return `${API_BASE}/api/vault/podcast/download?path=${encodeURIComponent(path)}`;
 }
+
+// ── Shared Inter-Agent Blackboard / Bulletin Board (`/api/board`) ───────
+
+// Interface representing a single bulletin posted by a Flash subagent or Astra on `blackboard.db`
+export interface BoardBulletin {
+  id: number;                 // Auto-incrementing primary key in `blackboard.db`
+  author: string;             // Originating agent label (e.g. "Subagent (low)", "Flash: Gmail Sweep", "Astra")
+  channel: string;            // Semantic channel tag ("email", "calendar", "vault", "mission", "general")
+  title: string;              // Concise summary headline
+  content: string;            // Full Markdown findings payload
+  pinned: number;             // 1 if pinned to top of board, else 0
+  created_at: string;         // SQLite UTC/local timestamp string
+}
+
+// Fetches recent bulletins from the Shared Agent Blackboard, optionally filtered by channel
+export async function getBoardBulletins(channel?: string, limit: number = 25): Promise<{ bulletins: BoardBulletin[]; count: number }> {
+  const params = new URLSearchParams();
+  if (channel && channel !== "all") params.set("channel", channel);
+  params.set("limit", String(limit));
+  return apiFetch<{ bulletins: BoardBulletin[]; count: number }>(`/api/board?${params.toString()}`);
+}
+
+// Deletes a single bulletin by ID
+export async function deleteBoardBulletin(bulletinId: number): Promise<{ status: string; deleted_id: number }> {
+  return apiFetch<{ status: string; deleted_id: number }>(`/api/board/${bulletinId}`, {
+    method: "DELETE",
+  });
+}
+
+// Clears unpinned bulletins (or all bulletins in a specific channel)
+export async function clearBoardBulletins(channel?: string): Promise<{ status: string; deleted_count: number }> {
+  const query = channel && channel !== "all" ? `?channel=${encodeURIComponent(channel)}` : "";
+  return apiFetch<{ status: string; deleted_count: number }>(`/api/board${query}`, {
+    method: "DELETE",
+  });
+}

@@ -48,6 +48,7 @@ from langchain_openai import ChatOpenAI
 from nexus.core.config import settings
 from nexus.core.constants import AI_MODEL_LOW, AI_MODEL_MEDIUM, VAULT_PATH, ModelTier, get_chat_model
 # inject_root_instructions: Dynamically loads and hydrates `Vault/Master Instructions.md` (<1ms disk read)
+from nexus.core.blackboard import infer_channel, post_bulletin
 from nexus.core.engine_constitution import inject_root_instructions
 from nexus.core.trace import RESULT_TRUNCATE_LEN, AgentTracer, _truncate
 from nexus.shared_tools.shared import (
@@ -59,6 +60,8 @@ from nexus.shared_tools.shared import (
     get_recent_modifications,
     get_vault_structure,
     modify_file,
+    post_to_board,
+    read_board,
     read_file,
     run_shared_tool_cli,
     search_vault,
@@ -86,7 +89,8 @@ class NexusAgentState(TypedDict):
 # ── Core Tool Set (Shared by Parent NexusAgent and Subagents) ────────────────
 
 # Most-used deterministic tools bound directly so the agent can navigate, read, surgically edit,
-# check recent modifications, inspect emails/calendar, or invoke any other `[CLI]` tool on demand.
+# check recent modifications, inspect emails/calendar, post/read bulletins on the Shared Blackboard,
+# or invoke any other `[CLI]` tool on demand.
 CORE_TOOLS = [
     read_file,
     modify_file,
@@ -99,6 +103,8 @@ CORE_TOOLS = [
     get_calendar_schedule,
     create_calendar_event,
     update_calendar_event,
+    post_to_board,
+    read_board,
     run_shared_tool_cli,
 ]
 
@@ -179,9 +185,11 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
     sub_sys_content = (
         inject_root_instructions()
         + "\n\n# Subagent Execution Mode\n"
-        + "You are an isolated subagent spawned by the parent NexusAgent to execute the specific task below. "
+        + "You are an isolated Flash subagent spawned by the parent NexusAgent (Astra) to execute the specific task below. "
         + "Read any relevant `Section Instructions.md` and Vault notes needed, execute the task thoroughly, "
-        + "and return a concise, high-signal, grounded synthesis to the parent agent."
+        + "and return a concise, high-signal, grounded synthesis to the parent agent. "
+        + "Your final synthesis will automatically be published to the Shared Agent Blackboard (`blackboard.db`), "
+        + "or you may explicitly call `post_to_board(title, content, channel, author)` to post structured bulletins."
     )
 
     # Run ReAct loop until the subagent finishes tool calls and returns its synthesis
@@ -189,6 +197,7 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
         SystemMessage(content=sub_sys_content),
         HumanMessage(content=task_prompt),
     ]
+    posted_to_board = False
 
     while True:
         subagent_tracer.llm_call()
@@ -198,12 +207,26 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
 
         if not getattr(ai_msg, "tool_calls", None):
             final_text = extract_message_text(ai_msg)
+            # Automatically publish the subagent's distilled report onto the Shared Blackboard if not already posted
+            if final_text.strip() and not posted_to_board:
+                auto_channel = infer_channel(task_prompt)
+                first_line = task_prompt.strip().splitlines()[0][:85]
+                bulletin_id = post_bulletin(
+                    author=f"Subagent ({effective_tier})",
+                    title=first_line,
+                    content=final_text,
+                    channel=auto_channel,
+                )
+                subagent_tracer.info(f"📋 Posted Bulletin #{bulletin_id} to Blackboard [{auto_channel}]")
             subagent_tracer.llm_response(final_text)
             subagent_tracer.agent_end()
             return final_text
 
         for tc in ai_msg.tool_calls:
-            subagent_tracer.tool_call(tc.get("name", "unknown"), tc.get("args", {}))
+            tc_name = tc.get("name", "unknown")
+            if tc_name == "post_to_board":
+                posted_to_board = True
+            subagent_tracer.tool_call(tc_name, tc.get("args", {}))
 
         tool_res = sub_tool_node.invoke({"messages": sub_messages})
         for t_msg in tool_res.get("messages", []):

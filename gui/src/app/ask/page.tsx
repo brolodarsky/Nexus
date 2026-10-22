@@ -12,8 +12,12 @@ import {
   createConversation, 
   deleteConversation, 
   resetConversationRouting,
+  getBoardBulletins,
+  clearBoardBulletins,
+  deleteBoardBulletin,
   type Conversation,
-  type TraceEvent 
+  type TraceEvent,
+  type BoardBulletin,
 } from "@/lib/api";
 
 // ── Types ────────────────────────────────────────────────────
@@ -276,13 +280,26 @@ export default function AskBrainPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [liveTrace, setLiveTrace] = useState<TraceEvent[]>([]);
+  // Shared Agent Blackboard state: live bulletins posted by Flash subagents and Astra
+  const [bulletins, setBulletins] = useState<BoardBulletin[]>([]);
+  const [boardChannel, setBoardChannel] = useState<string>("all");
+  const [showBoard, setShowBoard] = useState<boolean>(true);
+  const [expandedBulletinIds, setExpandedBulletinIds] = useState<Record<number, boolean>>({});
   
   const liveTraceRef = useRef<TraceEvent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<(() => void) | null>(null);
 
-  // Fetch conversations on mount
+  // Helper to fetch recent bulletins from `/api/board`
+  const refreshBoard = useCallback((channelFilter?: string) => {
+    const ch = channelFilter ?? boardChannel;
+    getBoardBulletins(ch, 25)
+      .then((res) => setBulletins(res.bulletins))
+      .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
+  }, [boardChannel]);
+
+  // Fetch conversations and initial Blackboard bulletins on mount
   useEffect(() => {
     getConversations().then((convos) => {
       setConversations(convos);
@@ -290,7 +307,13 @@ export default function AskBrainPage() {
         setActiveConvId(convos[0].id);
       }
     });
-  }, []);
+    refreshBoard("all");
+  }, [refreshBoard]);
+
+  // Re-fetch bulletins when the user switches channel filter tabs
+  useEffect(() => {
+    refreshBoard(boardChannel);
+  }, [boardChannel, refreshBoard]);
 
   // Fetch messages when active conversation changes
   useEffect(() => {
@@ -393,6 +416,14 @@ export default function AskBrainPage() {
             liveTraceRef.current = newTrace;
             return newTrace;
           });
+          // Live-refresh the Blackboard whenever a subagent posts a bulletin or completes
+          if (
+            event.message?.includes("Blackboard") ||
+            event.data?.tool === "post_to_board" ||
+            (event.agent === "Subagent" && event.type === "agent_end")
+          ) {
+            refreshBoard();
+          }
         },
         onDone: (event) => {
           // Build the final message with the full trace attached
@@ -415,6 +446,7 @@ export default function AskBrainPage() {
           abortRef.current = null;
           inputRef.current?.focus();
           getConversations().then(setConversations); // refresh to update active agent status
+          refreshBoard();
         },
         onError: (errorMessage) => {
           const errorMsg: Message = {
@@ -487,19 +519,34 @@ export default function AskBrainPage() {
               <span className="gradient-text">{activeConv?.title || "Ask Brain"}</span>
             </h1>
             <p className="text-text-secondary mt-0.5 text-xs">
-              {activeConv?.active_agent 
-                ? `Locked into ${activeConv.active_agent} domain.` 
-                : "Queries route through the Content Router to the right domain agent."}
+              Astra Primary Orchestrator • Flash Subagent Swarm • Shared Blackboard
             </p>
           </div>
-          {activeConv?.active_agent && (
+          <div className="flex items-center gap-2">
+            {activeConv?.active_agent && (
+              <button
+                onClick={handleResetRouting}
+                className="text-xs px-3 py-1.5 rounded-lg bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+              >
+                Reset Routing
+              </button>
+            )}
             <button
-              onClick={handleResetRouting}
-              className="text-xs px-3 py-1.5 rounded-lg bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
+              onClick={() => setShowBoard((prev) => !prev)}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 ${
+                showBoard
+                  ? "bg-accent-cyan/15 border-accent-cyan/30 text-accent-cyan"
+                  : "bg-bg-tertiary border-border-subtle text-text-secondary hover:text-text-primary"
+              }`}
+              title="Toggle Shared Subagent Blackboard"
             >
-              Reset Routing
+              <span>📋</span>
+              <span>Subagent Board</span>
+              <span className="px-1.5 py-0.2 rounded-full bg-bg-primary/60 text-[0.65rem] font-mono">
+                {bulletins.length}
+              </span>
             </button>
-          )}
+          </div>
         </header>
 
         {/* ── Message Thread ────────────────────────────────── */}
@@ -643,6 +690,127 @@ export default function AskBrainPage() {
         </div>
       </form>
       </div>
+
+      {/* ── Right Drawer: Shared Subagent Blackboard (`blackboard.db`) ───────── */}
+      {showBoard && (
+        <aside className="w-80 xl:w-96 border-l border-border-subtle bg-bg-secondary flex flex-col shrink-0 max-h-screen">
+          <div className="p-4 border-b border-border-subtle flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
+                <span>📋</span>
+                <span>Shared Agent Blackboard</span>
+              </h2>
+              <p className="text-[0.68rem] text-text-muted mt-0.5">
+                Live findings from Flash subagents &amp; Astra
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => refreshBoard()}
+                className="text-xs px-2 py-1 rounded-md bg-bg-tertiary text-text-secondary hover:text-accent-cyan transition-colors"
+                title="Refresh Blackboard"
+              >
+                ↻
+              </button>
+              {bulletins.length > 0 && (
+                <button
+                  onClick={async () => {
+                    await clearBoardBulletins(boardChannel);
+                    refreshBoard();
+                  }}
+                  className="text-[0.68rem] px-2 py-1 rounded-md bg-bg-tertiary text-text-muted hover:text-red-400 transition-colors"
+                  title="Clear unpinned bulletins"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Channel filter tabs */}
+          <div className="px-3 py-2 border-b border-border-subtle flex items-center gap-1 overflow-x-auto">
+            {["all", "email", "calendar", "vault", "mission"].map((ch) => (
+              <button
+                key={ch}
+                onClick={() => setBoardChannel(ch)}
+                className={`px-2.5 py-1 rounded-md text-[0.68rem] font-medium capitalize transition-colors ${
+                  boardChannel === ch
+                    ? "bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/30"
+                    : "text-text-muted hover:text-text-secondary hover:bg-bg-tertiary/60"
+                }`}
+              >
+                {ch}
+              </button>
+            ))}
+          </div>
+
+          {/* Bulletin Feed */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+            {bulletins.length === 0 ? (
+              <div className="text-center py-12 px-4 opacity-60">
+                <div className="text-2xl mb-2">⚡</div>
+                <p className="text-xs text-text-secondary">
+                  No bulletins posted yet. When Astra dispatches Flash subagents for email, calendar, or Vault sweeps, their distilled reports land here automatically.
+                </p>
+              </div>
+            ) : (
+              bulletins.map((b) => {
+                const isExpanded = expandedBulletinIds[b.id] ?? true;
+                return (
+                  <div
+                    key={b.id}
+                    className="rounded-xl border border-border-subtle bg-bg-tertiary/40 p-3 text-xs space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedBulletinIds((prev) => ({
+                            ...prev,
+                            [b.id]: !isExpanded,
+                          }))
+                        }
+                        className="text-left flex-1 min-w-0"
+                      >
+                        <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                          <span className="px-1.5 py-0.5 rounded bg-accent-cyan/15 text-accent-cyan font-mono text-[0.6rem] uppercase">
+                            {b.channel}
+                          </span>
+                          <span className="text-[0.65rem] text-purple-300 font-medium truncate">
+                            {b.author}
+                          </span>
+                          <span className="text-[0.6rem] text-text-muted ml-auto">
+                            #{b.id}
+                          </span>
+                        </div>
+                        <div className="font-semibold text-text-primary leading-snug line-clamp-2">
+                          {b.title}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await deleteBoardBulletin(b.id);
+                          refreshBoard();
+                        }}
+                        className="text-text-muted hover:text-red-400 text-[0.65rem] px-1"
+                        title="Dismiss bulletin"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {isExpanded && (
+                      <div className="pt-1.5 border-t border-border-subtle/60 text-xs max-h-64 overflow-y-auto">
+                        <MarkdownMessage content={b.content} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

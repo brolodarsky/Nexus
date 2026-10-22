@@ -24,7 +24,8 @@ class EngineSettings(BaseSettings):
     gemini_model_medium: str = "gemini-3.8-flash"
     gemini_model_strong: str = "gemini-4-argon"
     # Default tier selection (`"low"`, `"medium"`, or `"strong"`) for the parent NexusAgent vs. spawned subagents
-    nexus_primary_tier: str = "medium"
+    # Primary agent defaults to `"strong"` (Astra / `gemini-4-argon`) while subagents default to `"low"` (`gemini-3.8-flash`)
+    nexus_primary_tier: str = "strong"
     nexus_subagent_tier: str = "low"
     tavily_api_key: Optional[str] = None
     
