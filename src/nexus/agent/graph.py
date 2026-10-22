@@ -65,15 +65,12 @@ from nexus.shared_tools.shared import (
 )
 from nexus.shared_tools.summarizer import summarize_conversation
 
-# ── Tracer & Circuit Breaker Constants ───────────────────────────────────────
+# ── Agent Tracers ────────────────────────────────────────────────────────────
 
 # Cyan console logger and SSE event emitter for the primary NexusAgent
 nexus_tracer = AgentTracer("NexusAgent", color="cyan")
 # Magenta console logger and SSE event emitter for dynamically spawned subagents
 subagent_tracer = AgentTracer("Subagent", color="magenta")
-
-# High runaway-loop safety ceiling on consecutive tool-calling iterations within a single turn
-MAX_TOOL_ITERATIONS_PER_TURN: int = 15
 
 
 # ── State Schema ─────────────────────────────────────────────────────────────
@@ -188,13 +185,13 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
         + "and return a concise, high-signal, grounded synthesis to the parent agent."
     )
 
-    # Run bounded ReAct loop (up to MAX_TOOL_ITERATIONS_PER_TURN tool rounds)
+    # Run ReAct loop until the subagent finishes tool calls and returns its synthesis
     sub_messages: list[BaseMessage] = [
         SystemMessage(content=sub_sys_content),
         HumanMessage(content=task_prompt),
     ]
 
-    for step in range(MAX_TOOL_ITERATIONS_PER_TURN + 1):
+    while True:
         subagent_tracer.llm_call()
         ai_msg = sub_llm.invoke(sub_messages)
         _log_token_usage(subagent_tracer, ai_msg)
@@ -202,23 +199,6 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
 
         if not getattr(ai_msg, "tool_calls", None):
             final_text = extract_message_text(ai_msg)
-            subagent_tracer.llm_response(final_text)
-            subagent_tracer.agent_end()
-            return final_text
-
-        # If the subagent hit the tool-iteration cap, ask for final synthesis without further tool calls
-        if step >= MAX_TOOL_ITERATIONS_PER_TURN:
-            subagent_tracer.info("Subagent reached max tool iterations; synthesizing current findings...")
-            # Use HumanMessage + `tool_choice="none"` so SystemMessage stays 100% prompt-cached and Gemini's
-            # functionResponse state machine cleanly transitions to a final text synthesis without stalling.
-            sub_messages.append(
-                HumanMessage(
-                    content="[CIRCUIT BREAKER: Tool iteration limit reached. Synthesize your findings from the data gathered so far without calling additional tools.]"
-                )
-            )
-            final_ai = sub_base_llm.bind_tools(CORE_TOOLS, tool_choice="none").invoke(sub_messages)
-            _log_token_usage(subagent_tracer, final_ai)
-            final_text = extract_message_text(final_ai)
             subagent_tracer.llm_response(final_text)
             subagent_tracer.agent_end()
             return final_text
@@ -232,9 +212,6 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
             t_content = extract_message_text(t_msg)
             subagent_tracer.tool_result(t_name, _truncate(t_content, RESULT_TRUNCATE_LEN))
             sub_messages.append(t_msg)
-
-    subagent_tracer.agent_end()
-    return "(Subagent completed without text output)"
 
 
 # ── Parent Agent Tool & Model Binding ────────────────────────────────────────
@@ -251,7 +228,7 @@ llm = get_chat_model(tier=_primary_tier, temperature=0.0)
 llm_with_tools = llm.bind_tools(TOOLS)
 
 
-# ── Helper: Sanitize Dangling Tool Calls & Count Current Turn Iterations ─────
+# ── Helper: Sanitize Dangling Tool Calls ─────────────────────────────────────
 
 def _sanitize_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
     """Replaces any orphaned AIMessage tool_calls (from prior interrupted runs) so the model API does not return HTTP 400."""
@@ -269,28 +246,13 @@ def _sanitize_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
     return cleaned
 
 
-def _count_tool_iterations_since_last_human(messages: Sequence[BaseMessage]) -> int:
-    """Counts how many AI tool-calling steps have occurred since the latest `HumanMessage` in this turn."""
-    count = 0
-    # Iterate backward from the end of the message list until we hit the current turn's HumanMessage
-    for msg in reversed(messages):
-        if isinstance(msg, HumanMessage):
-            break
-        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
-            count += 1
-    return count
-
-
 # ── Graph Nodes ──────────────────────────────────────────────────────────────
 
 def call_model(state: NexusAgentState) -> dict:
     """
     Node: Invokes the LLM with the ephemeral root instructions (`inject_root_instructions()`) and thread history.
-    Enforces:
-      1. Ephemeral System Prompt Injection (Standard 9): `Master Instructions.md` is read fresh from disk
-         on every call (<1ms) and never persisted into the SQLite checkpointer.
-      2. Circuit Breaker (`MAX_TOOL_ITERATIONS_PER_TURN` = 5): If the agent has already executed 5 tool
-         rounds in the current turn, forces convergence with an explanation rather than looping infinitely.
+    Enforces Ephemeral System Prompt Injection (Standard 9): `Master Instructions.md` is read fresh from disk
+    on every call (<1ms) and never persisted into the SQLite checkpointer.
     """
     raw_messages = state.get("messages", [])
     cleaned_messages = _sanitize_messages(raw_messages)
@@ -303,31 +265,10 @@ def call_model(state: NexusAgentState) -> dict:
     ephemeral_sys_msg = SystemMessage(content=system_prompt_content)
     messages_for_llm: list[BaseMessage] = [ephemeral_sys_msg] + cleaned_messages
 
-    # 2. Check the <= 5 tool-iteration circuit breaker for the current turn
-    iterations_used = _count_tool_iterations_since_last_human(cleaned_messages)
+    # 2. Resolve `get_chat_model()` dynamically on each turn so `.env` tier/model switches apply immediately
     nexus_tracer.llm_call()
-
-    # Resolve `get_chat_model()` dynamically on each turn so `.env` tier/model switches apply immediately
     active_llm = get_chat_model(temperature=0.0)
-
-    if iterations_used >= MAX_TOOL_ITERATIONS_PER_TURN:
-        nexus_tracer.info(
-            f"Circuit breaker reached ({iterations_used}/{MAX_TOOL_ITERATIONS_PER_TURN} tool iterations). Converging turn..."
-        )
-        # Use HumanMessage + `tool_choice="none"` instead of SystemMessage without tools:
-        # 1. Keeps SystemMessage at index 0 untouched so 97%+ of accumulated tokens hit the provider prompt cache.
-        # 2. Preserves tool declarations while forcing text output (`tool_choice="none"`), preventing Gemini from
-        #    stalling or returning an empty string after a `ToolMessage`.
-        circuit_breaker_msg = HumanMessage(
-            content=(
-                f"[CIRCUIT BREAKER: You have reached the maximum of {MAX_TOOL_ITERATIONS_PER_TURN} tool iterations "
-                f"for this turn. Do NOT call any more tools. Synthesize what you have found so far and ask the user "
-                f"how they would like to proceed.]"
-            )
-        )
-        response = active_llm.bind_tools(TOOLS, tool_choice="none").invoke(messages_for_llm + [circuit_breaker_msg])
-    else:
-        response = active_llm.bind_tools(TOOLS).invoke(messages_for_llm)
+    response = active_llm.bind_tools(TOOLS).invoke(messages_for_llm)
 
     # Log input tokens, cached prompt tokens (`cache_read`), and output tokens to console and SSE trace bus
     _log_token_usage(nexus_tracer, response)
