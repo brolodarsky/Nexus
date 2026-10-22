@@ -52,48 +52,166 @@ from nexus.core.google_auth import get_google_credentials
 # gmail.modify = read + labels + archive + trash + drafts. Excludes permanent delete (needs full mail.google.com scope).
 GMAIL_SCOPES: list[str] = ["https://www.googleapis.com/auth/gmail.modify"]
 SECRETS_DIR: str = str(PROJECT_ROOT / ".secrets")
-DEFAULT_TOKEN_FILENAME: str = "token_gmail.json"  # Primary cache; custom accounts use token_gmail_<alias>.json
+DEFAULT_TOKEN_FILENAME: str = "token_gmail.json"  # Primary cache; custom accounts use token_gmail_<email>.json
+ACCOUNTS_MAP_FILE: str = os.path.join(SECRETS_DIR, "gmail_accounts.json")
 USER_ID: str = "me"  # Gmail API alias for "the authenticated account" (no EMAIL_ADDRESS env var needed)
 
 
-# ── Multi-Account Token Management ─────────────────────────────────────────────
+# ── Multi-Account & Email Address Mapping ─────────────────────────────────────
+def load_accounts_map() -> dict[str, str]:
+    """
+    Load the email/alias -> token_filename mapping from .secrets/gmail_accounts.json.
+    
+    // Reads JSON dictionary mapping email addresses and aliases to token filenames.
+    // Scans .secrets/ for any unmapped token_gmail*.json files to ensure auto-discovery.
+    """
+    mapping: dict[str, str] = {}
+    if os.path.exists(ACCOUNTS_MAP_FILE):
+        try:
+            with open(ACCOUNTS_MAP_FILE, "r", encoding="utf-8") as f:
+                mapping = json.load(f)
+        except Exception:
+            mapping = {}
+
+    # Scan SECRETS_DIR for any token_gmail files on disk that aren't registered yet
+    if os.path.exists(SECRETS_DIR):
+        for fname in os.listdir(SECRETS_DIR):
+            if fname == DEFAULT_TOKEN_FILENAME:
+                # If primary token exists and no mapping has it, provide default entry
+                if not any(v == DEFAULT_TOKEN_FILENAME for v in mapping.values()):
+                    mapping["default"] = DEFAULT_TOKEN_FILENAME
+            elif fname.startswith("token_gmail_") and fname.endswith(".json"):
+                identifier = fname[len("token_gmail_") : -len(".json")]
+                if identifier and identifier not in mapping and fname not in mapping.values():
+                    mapping[identifier] = fname
+    return mapping
+
+
+def save_accounts_map(mapping: dict[str, str]) -> None:
+    """Persist email/alias -> token_filename mapping to disk."""
+    os.makedirs(SECRETS_DIR, exist_ok=True)
+    with open(ACCOUNTS_MAP_FILE, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, indent=2)
+
+
 def get_token_filename(account: Optional[str] = "default") -> str:
     """
-    Resolve the token cache filename for a given account alias.
+    Resolve the token cache filename for a given account identifier (email address or alias).
 
-    // account: str | None representing user-defined account handle (e.g. 'work', 'personal', 'default').
-    // Maps 'default', 'primary', or None/empty to 'token_gmail.json' for seamless backward compatibility.
-    // Maps custom aliases to 'token_gmail_<sanitized_alias>.json'.
+    // account: str | None representing user-provided email address, alias, or 'default'.
+    // 1. Matches exact email or alias in registered accounts map (case-insensitive).
+    // 2. Matches substring across registered email addresses (e.g. 'william' -> 'williamvolodarsky@gmail.com').
+    // 3. Fallback: generates sanitized filename token_gmail_<identifier>.json.
     """
     if not account or account.strip().lower() in ("default", "primary"):
+        # Check if mapping specifies a default token file
+        mapping = load_accounts_map()
+        for k, v in mapping.items():
+            if k.lower() in ("default", "primary"):
+                return v
         return DEFAULT_TOKEN_FILENAME
-    # Sanitize alias to ensure safe alphanumeric filename without path traversal risks
-    clean_alias = re.sub(r"[^a-zA-Z0-9_\-]", "_", account.strip().lower())
-    return f"token_gmail_{clean_alias}.json"
+
+    query = account.strip().lower()
+    mapping = load_accounts_map()
+
+    # 1. Exact match against registered keys
+    for registered_id, token_file in mapping.items():
+        if registered_id.lower() == query:
+            return token_file
+
+    # 2. Substring match across registered email addresses (e.g. 'william' matches 'williamvolodarsky@gmail.com')
+    for registered_id, token_file in mapping.items():
+        if query in registered_id.lower():
+            return token_file
+
+    # 3. Direct filename check in SECRETS_DIR
+    clean_query = re.sub(r"[^\w@.\-]", "_", query)
+    direct_name = f"token_gmail_{clean_query}.json"
+    if os.path.exists(os.path.join(SECRETS_DIR, direct_name)):
+        return direct_name
+
+    # 4. New account file template for auth
+    return direct_name
+
+
+def resolve_account_display_name(account: str, token_filename: str) -> str:
+    """Determine the best display name (verified email or alias) for a given account and token."""
+    mapping = load_accounts_map()
+    # Prefer actual email address key matching this token file
+    for key, val in mapping.items():
+        if val == token_filename and "@" in key:
+            return key
+    return account
 
 
 def list_available_accounts(secrets_dir: str = SECRETS_DIR) -> list[str]:
     """
-    Scan secrets directory and return all configured Gmail account aliases.
+    Scan secrets directory and return all configured Gmail accounts (email addresses preferred).
 
-    // Inspects .secrets/ for token_gmail.json ('default') and token_gmail_<alias>.json files.
-    // Returns a sorted list of unique alias strings (e.g. ['default', 'work']).
+    // Returns a sorted list of unique identifiers (emails if known, otherwise aliases/default).
     """
-    if not os.path.exists(secrets_dir):
-        return []
-
+    mapping = load_accounts_map()
     accounts: list[str] = []
-    for fname in os.listdir(secrets_dir):
-        if fname == "token_gmail.json":
-            if "default" not in accounts:
-                accounts.append("default")
-        elif fname.startswith("token_gmail_") and fname.endswith(".json"):
-            # Extract alias string between 'token_gmail_' and '.json'
-            alias = fname[len("token_gmail_") : -len(".json")]
-            if alias and alias not in accounts:
-                accounts.append(alias)
-    accounts.sort()
-    return accounts
+
+    # Map each existing token file to its primary email key if available
+    token_to_email: dict[str, str] = {}
+    for key, token_name in mapping.items():
+        if os.path.exists(os.path.join(secrets_dir, token_name)):
+            # If key contains '@', it takes precedence over aliases
+            if "@" in key or token_name not in token_to_email:
+                token_to_email[token_name] = key
+
+    for token_name, display_key in token_to_email.items():
+        accounts.append(display_key)
+
+    # Ensure default token_gmail.json is included if present on disk
+    if os.path.exists(os.path.join(secrets_dir, DEFAULT_TOKEN_FILENAME)):
+        if DEFAULT_TOKEN_FILENAME not in token_to_email:
+            accounts.append("default")
+
+    return sorted(list(set(accounts)))
+
+
+def authenticate_account(account: Optional[str] = None) -> tuple[str, str]:
+    """
+    Run browser OAuth2 flow, inspect the authenticated Google Profile to get the verified
+    email address, register the mapping in gmail_accounts.json, and return (email, token_filename).
+
+    // account: Optional email address or alias specified by user.
+    // Returns: tuple of (verified_email_address, token_filename).
+    """
+    target = account.strip() if account and account.strip() else None
+    
+    # 1. Determine token filename to write
+    if target and "@" in target:
+        clean_email = re.sub(r"[^\w@.\-]", "_", target.lower())
+        token_file = f"token_gmail_{clean_email}.json"
+    elif target and target.lower() not in ("default", "primary"):
+        token_file = get_token_filename(target)
+    else:
+        # Default target
+        token_file = DEFAULT_TOKEN_FILENAME
+
+    # 2. Run OAuth flow via Google auth module
+    creds = get_google_credentials(
+        scopes=GMAIL_SCOPES,
+        secrets_dir=SECRETS_DIR,
+        token_filename=token_file,
+    )
+    service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+    # 3. Retrieve verified email address directly from Google Profile
+    profile = service.users().getProfile(userId=USER_ID).execute()
+    detected_email = profile.get("emailAddress", target or "default").lower()
+
+    # 4. Persist email -> token file mapping
+    mapping = load_accounts_map()
+    mapping[detected_email] = token_file
+    if target and target.lower() != detected_email:
+        mapping[target.lower()] = token_file
+    save_accounts_map(mapping)
+
+    return detected_email, token_file
 
 
 # ── HTML → Markdown Stream Parser ─────────────────────────────────────────────
@@ -408,6 +526,8 @@ def list_messages(
         return combined[:max_results]
 
     service = service or get_gmail_service(account=account)
+    token_file = get_token_filename(account)
+    display_acc = resolve_account_display_name(account, token_file)
     max_results = max(1, min(max_results, 100))
 
     # Step 1: messages.list returns ONLY {id, threadId} stubs, never headers
@@ -423,7 +543,7 @@ def list_messages(
         # Batch callback signature fixed by googleapiclient: (request_id, response, exception)
         if exception is None and response:
             item = _summarize(response)
-            item["account"] = account
+            item["account"] = display_acc
             results_by_id[response["id"]] = item
 
     batch = service.new_batch_http_request(callback=_on_response)
@@ -451,7 +571,7 @@ def get_message(
     Fetch a full message and convert its body into clean markdown.
 
     // message_id: Gmail message ID (hex string from list_messages, e.g. '18f2a9c3d4e5b6a7').
-    // account: Account alias owning this message (or 'all' to probe all configured accounts).
+    // account: Account email or alias owning this message (or 'all' to probe all configured accounts).
     // service: Optional pre-built Resource client.
 
     Returns:
@@ -473,13 +593,16 @@ def get_message(
         else:
             service = get_gmail_service(account=account)
 
+    token_file = get_token_filename(account)
+    display_acc = resolve_account_display_name(account, token_file)
+
     # format='raw' returns the entire RFC 822 message as base64url, so stdlib `email` can parse any MIME tree
     raw = service.users().messages().get(userId=USER_ID, id=message_id, format="raw").execute()
     msg = email_lib.message_from_bytes(base64.urlsafe_b64decode(raw["raw"]))
 
     return {
         "id": raw.get("id"),
-        "account": account,
+        "account": display_acc,
         "thread_id": raw.get("threadId"),
         "date": _internal_date_iso(raw.get("internalDate")),
         "sender": _decode_header(msg.get("From", "(Unknown)")),
@@ -502,7 +625,7 @@ def get_thread(
     Fetch every message in a conversation thread (oldest first), each with a markdown body.
 
     // thread_id: Gmail thread ID (the 'thread_id' field from list_messages/get_message).
-    // account: Account alias owning this thread (or 'all' to probe configured accounts).
+    // account: Account email or alias owning this thread (or 'all' to probe configured accounts).
     // service: Optional pre-built Resource client.
     """
     if service is None:
@@ -620,13 +743,16 @@ def create_draft(
         subject: Subject line ('Re: ' is auto-prefixed for replies if missing).
         body: Plain-text body.
         reply_to_message_id: Optional Gmail message ID to reply to; threads the draft into that conversation.
-        account: Account alias from which to draft.
+        account: Account email or alias from which to draft.
         service: Optional pre-built Resource client.
 
     Returns:
         dict: account, draft_id, message_id, thread_id.
     """
     service = service or get_gmail_service(account=account)
+    token_file = get_token_filename(account)
+    display_acc = resolve_account_display_name(account, token_file)
+
     mime = EmailMessage()  # Modern stdlib MIME builder (handles UTF-8 headers/body encoding for us)
     mime["To"] = to
     mime.set_content(body)
@@ -650,7 +776,7 @@ def create_draft(
 
     draft = service.users().drafts().create(userId=USER_ID, body={"message": message_body}).execute()
     return {
-        "account": account,
+        "account": display_acc,
         "draft_id": draft.get("id"),
         "message_id": draft.get("message", {}).get("id"),
         "thread_id": draft.get("message", {}).get("threadId"),
@@ -682,12 +808,12 @@ def format_messages_table(messages: list[dict[str, Any]]) -> str:
     if not messages:
         return "No messages found."
     has_account = any("account" in m for m in messages)
-    col_acc_w, col_sender_w, col_subj_w = 12, 32, 60
+    col_acc_w, col_sender_w, col_subj_w = 30, 32, 60
     if has_account:
         header = f"{'Account':<{col_acc_w}} {'ID':<18} {'Date':<26} {'From':<{col_sender_w}} Subject"
         lines = [header, "-" * (col_acc_w + 18 + 26 + col_sender_w + col_subj_w + 4)]
         for m in messages:
-            acc = (m.get("account") or "default")[:col_acc_w]
+            acc = (m.get("account") or "")[:col_acc_w]
             sender = m["sender"][:col_sender_w] + ("…" if len(m["sender"]) > col_sender_w else "")
             subject = m["subject"][:col_subj_w] + ("…" if len(m["subject"]) > col_subj_w else "")
             lines.append(f"{acc:<{col_acc_w}} {m['id']:<18} {m['date']:<26} {sender:<{col_sender_w}} {subject}")
@@ -708,12 +834,11 @@ def main():
         epilog=(
             "Examples:\n"
             "  python -m nexus.shared_tools.gmail_engine --accounts\n"
-            "  python -m nexus.shared_tools.gmail_engine --auth --account work\n"
+            "  python -m nexus.shared_tools.gmail_engine --auth user@gmail.com\n"
             "  python -m nexus.shared_tools.gmail_engine --list 10 --account all\n"
-            "  python -m nexus.shared_tools.gmail_engine --search \"from:greenhouse.io newer_than:14d\" --account work --json\n"
-            "  python -m nexus.shared_tools.gmail_engine --read 18f2a9c3d4e5b6a7 --account work -o \"Vault/0. Inbox/lead.md\"\n"
-            "  python -m nexus.shared_tools.gmail_engine --draft \"a@b.com\" \"Hello\" \"Body\" --account work --reply-to 18f2a9c3d4e5b6a7\n"
-            "  python -m nexus.shared_tools.gmail_engine --modify 18f2a9c3d4e5b6a7 --account work --add Jobs --remove INBOX\n"
+            "  python -m nexus.shared_tools.gmail_engine --search \"from:greenhouse.io\" --account user@gmail.com\n"
+            "  python -m nexus.shared_tools.gmail_engine --read 18f2a9c3d4e5b6a7 --account user@gmail.com -o out.md\n"
+            "  python -m nexus.shared_tools.gmail_engine --draft \"a@b.com\" \"Hello\" \"Body\" --account user@gmail.com\n"
         ),
     )
     # Account targeting
@@ -721,15 +846,21 @@ def main():
         "--account",
         metavar="ACCOUNT",
         default="default",
-        help="Account alias to target (e.g. 'default', 'work', 'personal', or 'all' for queries). Default: 'default'"
+        help="Account email or alias to target (e.g. 'user@gmail.com', 'default', or 'all' for queries). Default: 'default'"
     )
     parser.add_argument(
         "--accounts",
         action="store_true",
-        help="List all configured/authenticated Gmail account aliases in .secrets/"
+        help="List all configured/authenticated Gmail account emails in .secrets/"
     )
     # Read
-    parser.add_argument("--auth", action="store_true", help="Run the one-time OAuth browser consent for --account")
+    parser.add_argument(
+        "--auth",
+        nargs="?",
+        const="DEFAULT",
+        metavar="EMAIL",
+        help="Run OAuth login flow and record verified email (optionally passing email as argument)"
+    )
     parser.add_argument("--list", metavar="N", type=int, help="List the N most recent inbox messages")
     parser.add_argument("--search", metavar="QUERY", help="Search with Gmail syntax (from:, subject:, newer_than:, is:unread)")
     parser.add_argument("--max", type=int, default=10, help="Max results for --search (default: 10)")
@@ -766,13 +897,13 @@ def main():
             print(f"Configured Gmail Accounts ({len(accs)}):")
             for acc in accs:
                 token_name = get_token_filename(acc)
-                print(f"  - {acc:<12} (.secrets/{token_name})")
+                print(f"  - {acc:<32} (.secrets/{token_name})")
         return
 
-    if args.auth:
-        get_gmail_service(account=args.account)
-        token_file = get_token_filename(args.account)
-        print(f"[Nexus] Gmail authentication successful for account '{args.account}'. Token stored at .secrets/{token_file}")
+    if args.auth is not None:
+        target = args.account if args.account != "default" else (args.auth if args.auth != "DEFAULT" else None)
+        email, token_file = authenticate_account(account=target)
+        print(f"[Nexus] Gmail authentication successful for '{email}'. Token stored at .secrets/{token_file}")
         return
 
     if args.list or args.search:
