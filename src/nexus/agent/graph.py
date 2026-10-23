@@ -161,6 +161,14 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
     whenever inspecting multiple files, auditing multiple sections, or running independent subtasks so
     raw file contents stay out of your primary context window.
 
+    ARCHITECT-DRAFTER PATTERN (WRITING & EDIT DELEGATION):
+    Subagents are not just for reading; they are your execution workforce. When multiple notes need to be created
+    or surgically modified, do NOT pull full note bodies into your primary window to execute `modify_file` yourself.
+    Instead, decide the architecture and strategy as the Commander, and instruct the subagent exactly what to write:
+    provide the target note path, the exact replacement guidelines or markdown blocks, and instruct it to call
+    `modify_file` or `create_file` to stage the changes to the HITL queue. The subagent absorbs the raw file contents,
+    executes the tool loop, and returns only a concise confirmation receipt (Transaction ID and summary) to your context.
+
     The subagent boots automatically with `inject_root_instructions()` (`Master Instructions.md` +
     `{vault_structure}` + `{shared_tools}`) and has full access to all Vault navigation, reading,
     search, and HITL file tools. You do NOT need to pass tool lists or file arrays—just make

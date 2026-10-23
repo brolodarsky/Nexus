@@ -18,10 +18,10 @@ from nexus.core.constants import get_chat_model
 
 
 def test_engine_settings_timeout_and_retries_defaults(monkeypatch: pytest.MonkeyPatch):
-    """Verify EngineSettings default timeout is 180s and max_retries is 3, with .env override support."""
+    """Verify EngineSettings default timeout is 300s (5m) and max_retries is 3, with .env override support."""
     # Test default values
     settings = EngineSettings()
-    assert settings.ai_request_timeout == 180
+    assert settings.ai_request_timeout == 300
     assert settings.ai_max_retries == 3
 
     # Test environment variable overrides

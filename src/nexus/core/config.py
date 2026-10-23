@@ -28,10 +28,10 @@ class EngineSettings(BaseSettings):
     nexus_primary_tier: str = "strong"
     nexus_subagent_tier: str = "low"
     # Provider Request Timeout & Retries:
-    # - ai_request_timeout: HTTP request timeout in seconds (e.g. 180s) passed to provider chat clients.
-    #   Deep reasoning models (`gemini-4-argon` / thinking mode) require >=120-180s on large context payloads (>150k chars).
+    # - ai_request_timeout: HTTP request timeout in seconds (default 300s / 5 minutes) passed to provider chat clients.
+    #   Deep reasoning models (`gemini-4-argon` / thinking mode) require ample headroom for complex multi-turn synthesis.
     # - ai_max_retries: Maximum automatic retry attempts on transient HTTP/gRPC errors (e.g. 504 DEADLINE_EXCEEDED, 429, 503).
-    ai_request_timeout: int = 180
+    ai_request_timeout: int = 300
     ai_max_retries: int = 3
     tavily_api_key: Optional[str] = None
     

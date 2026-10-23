@@ -65,6 +65,11 @@ def read_file(
 ) -> str:
     """Read the contents of a note or file in the Vault (automatically reflects any pending staged HITL edits).
 
+    CONTEXT HYGIENE DIRECTIVE: Reading 1–2 specific notes directly for quick queries is encouraged.
+    However, when researching across >2 files or auditing a section, DO NOT call `read_file` repeatedly
+    in the primary thread. Offload the inspection to parallel `spawn_subagent(task_prompt)` calls so raw
+    file bodies do not inflate your primary context window.
+
     You can pass a full Vault-relative path (e.g. "3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md")
     or a unique note title (e.g. "Job Hunt War Room" or "Health Summary.md").
     Optionally pass `start_line` and `end_line` (1-indexed, inclusive) to inspect a slice of a large file.
