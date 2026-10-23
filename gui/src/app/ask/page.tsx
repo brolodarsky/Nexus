@@ -151,6 +151,8 @@ export default function AskBrainPage() {
   const [boardChannel, setBoardChannel] = useState<string>("all");
   const [showBoard, setShowBoard] = useState<boolean>(true);
   const [expandedBulletinIds, setExpandedBulletinIds] = useState<Record<number, boolean>>({});
+  // isSidebarCollapsed: toggles the left conversation history menu between full width (w-64) and compact rail (w-14)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   
   const liveTraceRef = useRef<TraceEvent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -339,42 +341,103 @@ export default function AskBrainPage() {
 
   return (
     <div className="flex h-full max-h-screen">
-      {/* ── Sidebar ────────────────────────────────────────── */}
-      <div className="w-64 border-r border-border-subtle bg-bg-secondary flex flex-col shrink-0">
-        <div className="p-4 border-b border-border-subtle">
-          <button 
-            onClick={handleNewChat}
-            className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors text-sm font-medium"
+      {/* ── Collapsible Conversation History Sidebar Menu ──── */}
+      {isSidebarCollapsed ? (
+        // Collapsed Rail: Slim column with expand button, new chat icon, and conversation switcher
+        <aside
+          className="w-14 border-r border-border-subtle bg-bg-secondary flex flex-col items-center py-4 shrink-0 transition-all duration-300 ease-in-out select-none"
+          aria-label="Collapsed Conversations Menu"
+        >
+          <button
+            onClick={() => setIsSidebarCollapsed(false)}
+            className="p-2 rounded-lg text-text-muted hover:text-accent-cyan hover:bg-bg-tertiary transition-colors flex items-center justify-center"
+            title="Expand chat history"
+            aria-label="Expand chat history"
           >
-            <span className="text-lg">+</span> New Chat
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+            </svg>
           </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {conversations.map((conv) => (
-            <div
-              key={conv.id}
-              onClick={() => setActiveConvId(conv.id)}
-              className={`group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-sm transition-colors ${
-                activeConvId === conv.id ? "bg-bg-tertiary text-text-primary" : "text-text-secondary hover:bg-bg-tertiary/50"
-              }`}
-            >
-              <div className="flex flex-col overflow-hidden">
-                <span className="truncate font-medium">{conv.title}</span>
-                <span className="text-[0.65rem] text-text-muted mt-0.5">
-                  {conv.active_agent ? `🔒 ${conv.active_agent}` : "🔀 Auto-Routing"}
-                </span>
-              </div>
-              <button 
-                onClick={(e) => handleDeleteChat(conv.id, e)}
-                className="opacity-0 group-hover:opacity-100 p-1 text-text-muted hover:text-red-400 transition-opacity"
-                title="Delete Chat"
+
+          {/* Compact New Chat Action */}
+          <button
+            onClick={handleNewChat}
+            className="mt-3 w-9 h-9 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors flex items-center justify-center text-lg font-bold"
+            title="Start New Chat"
+            aria-label="Start New Chat"
+          >
+            +
+          </button>
+
+          {/* Conversation history icons for fast switching */}
+          <div className="mt-4 flex-1 overflow-y-auto space-y-1.5 w-full px-2 flex flex-col items-center">
+            {conversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => setActiveConvId(conv.id)}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center text-xs transition-all ${
+                  activeConvId === conv.id
+                    ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40 shadow-[0_0_10px_rgba(56,189,248,0.15)] font-bold"
+                    : "text-text-muted hover:text-text-primary hover:bg-bg-tertiary"
+                }`}
+                title={conv.title}
               >
-                ✕
+                💬
               </button>
-            </div>
-          ))}
-        </div>
-      </div>
+            ))}
+          </div>
+        </aside>
+      ) : (
+        // Expanded Conversation Menu: Full titles, agent lock indicators, and delete actions
+        <aside
+          className="w-64 border-r border-border-subtle bg-bg-secondary flex flex-col shrink-0 transition-all duration-300 ease-in-out"
+          aria-label="Conversations Menu"
+        >
+          <div className="p-4 border-b border-border-subtle flex items-center gap-2">
+            <button 
+              onClick={handleNewChat}
+              className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors text-sm font-medium"
+            >
+              <span className="text-lg">+</span> New Chat
+            </button>
+            <button
+              onClick={() => setIsSidebarCollapsed(true)}
+              className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary transition-colors shrink-0"
+              title="Collapse chat history"
+              aria-label="Collapse chat history"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {conversations.map((conv) => (
+              <div
+                key={conv.id}
+                onClick={() => setActiveConvId(conv.id)}
+                className={`group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-sm transition-colors ${
+                  activeConvId === conv.id ? "bg-bg-tertiary text-text-primary" : "text-text-secondary hover:bg-bg-tertiary/50"
+                }`}
+              >
+                <div className="flex flex-col overflow-hidden">
+                  <span className="truncate font-medium">{conv.title}</span>
+                  <span className="text-[0.65rem] text-text-muted mt-0.5">
+                    {conv.active_agent ? `🔒 ${conv.active_agent}` : "🔀 Auto-Routing"}
+                  </span>
+                </div>
+                <button 
+                  onClick={(e) => handleDeleteChat(conv.id, e)}
+                  className="opacity-0 group-hover:opacity-100 p-1 text-text-muted hover:text-red-400 transition-opacity"
+                  title="Delete Chat"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
 
       {/* ── Main Chat Area ────────────────────────────────────────── */}
       <div className="flex flex-col flex-1 min-w-0">
@@ -590,6 +653,16 @@ export default function AskBrainPage() {
                   Clear
                 </button>
               )}
+              {/* Symmetrical drawer collapse toggle */}
+              <button
+                type="button"
+                onClick={() => setShowBoard(false)}
+                className="text-xs px-2 py-1 rounded-md bg-bg-tertiary text-text-muted hover:text-text-primary transition-colors flex items-center justify-center"
+                title="Collapse Blackboard menu"
+                aria-label="Collapse Blackboard menu"
+              >
+                ✕
+              </button>
             </div>
           </div>
 

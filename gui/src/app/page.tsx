@@ -14,6 +14,11 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // isFleetCollapsed: accordion toggle to collapse/expand the registered agent fleet card grid
+  const [isFleetCollapsed, setIsFleetCollapsed] = useState(false);
+  // isActionsCollapsed: accordion toggle to collapse/expand the quick actions launcher menu
+  const [isActionsCollapsed, setIsActionsCollapsed] = useState(false);
+
   useEffect(() => {
     async function fetchData() {
       try {
@@ -113,66 +118,111 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* ── Agent Grid ────────────────────────────────────── */}
+      {/* ── Agent Fleet Grid ───────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-semibold text-text-primary">
-            Agent Fleet
-          </h2>
-          <span className="text-xs text-text-muted">
-            {agents.length} registered
-          </span>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-text-primary">
+              Agent Fleet
+            </h2>
+            <span className="text-xs text-text-muted">
+              ({agents.length} registered)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsFleetCollapsed((prev) => !prev)}
+            className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors flex items-center gap-1.5 text-xs font-medium"
+            title={isFleetCollapsed ? "Expand Agent Fleet" : "Collapse Agent Fleet"}
+            aria-expanded={!isFleetCollapsed}
+          >
+            <span>{isFleetCollapsed ? "Show fleet" : "Collapse"}</span>
+            <svg
+              className={`w-3.5 h-3.5 transition-transform duration-200 ${isFleetCollapsed ? "-rotate-90" : "rotate-0"}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
         </div>
 
-        {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {[...Array(6)].map((_, i) => (
-              <div
-                key={i}
-                className="glass-card p-5 h-28 animate-pulse"
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 stagger-grid">
-            {agents.map((agent) => (
-              <AgentCard key={agent.name} agent={agent} />
-            ))}
-          </div>
+        {!isFleetCollapsed && (
+          loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {[...Array(6)].map((_, i) => (
+                <div
+                  key={i}
+                  className="glass-card p-5 h-28 animate-pulse"
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 stagger-grid">
+              {agents.map((agent) => (
+                <AgentCard key={agent.name} agent={agent} />
+              ))}
+            </div>
+          )
         )}
       </section>
 
-      {/* ── Quick Actions ─────────────────────────────────── */}
+      {/* ── Quick Actions Launcher Menu ───────────────────── */}
       <section className="mt-8 animate-fade-in-up" style={{ animationDelay: "0.4s" }}>
-        <h2 className="text-lg font-semibold text-text-primary mb-4">
-          Quick Actions
-        </h2>
-        <div className="flex flex-wrap gap-3">
-          <Link
-            href="/hitl"
-            className="glass-card px-5 py-3 text-sm font-medium text-accent-amber hover:text-text-primary transition-colors flex items-center gap-2 border border-accent-amber/30"
-          >
-            <span>🔒</span> Review Queue ({pendingHitlCount})
-          </Link>
-          <a
-            href="/ask"
-            className="glass-card px-5 py-3 text-sm font-medium text-accent-cyan hover:text-text-primary transition-colors flex items-center gap-2"
-          >
-            <span>💬</span> Ask Brain
-          </a>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-text-primary">
+            Quick Actions
+          </h2>
           <button
-            disabled
-            className="glass-card px-5 py-3 text-sm font-medium text-text-muted opacity-40 cursor-not-allowed flex items-center gap-2"
+            type="button"
+            onClick={() => setIsActionsCollapsed((prev) => !prev)}
+            className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors flex items-center gap-1.5 text-xs font-medium"
+            title={isActionsCollapsed ? "Expand Quick Actions menu" : "Collapse Quick Actions menu"}
+            aria-expanded={!isActionsCollapsed}
           >
-            <span>📋</span> Weekly Review
-          </button>
-          <button
-            disabled
-            className="glass-card px-5 py-3 text-sm font-medium text-text-muted opacity-40 cursor-not-allowed flex items-center gap-2"
-          >
-            <span>🔍</span> Audit Engine
+            <span>{isActionsCollapsed ? "Show actions" : "Collapse"}</span>
+            <svg
+              className={`w-3.5 h-3.5 transition-transform duration-200 ${isActionsCollapsed ? "-rotate-90" : "rotate-0"}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
           </button>
         </div>
+
+        {!isActionsCollapsed && (
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/hitl"
+              className="glass-card px-5 py-3 text-sm font-medium text-accent-amber hover:text-text-primary transition-colors flex items-center gap-2 border border-accent-amber/30"
+            >
+              <span>🔒</span> Review Queue ({pendingHitlCount})
+            </Link>
+            <a
+              href="/ask"
+              className="glass-card px-5 py-3 text-sm font-medium text-accent-cyan hover:text-text-primary transition-colors flex items-center gap-2"
+            >
+              <span>💬</span> Ask Brain
+            </a>
+            <button
+              disabled
+              className="glass-card px-5 py-3 text-sm font-medium text-text-muted opacity-40 cursor-not-allowed flex items-center gap-2"
+            >
+              <span>📋</span> Weekly Review
+            </button>
+            <button
+              disabled
+              className="glass-card px-5 py-3 text-sm font-medium text-text-muted opacity-40 cursor-not-allowed flex items-center gap-2"
+            >
+              <span>🔍</span> Audit Engine
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );
