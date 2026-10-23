@@ -322,7 +322,28 @@ def call_model(state: NexusAgentState) -> dict:
     # 2. Resolve `get_chat_model()` dynamically on each turn so `.env` tier/model switches apply immediately
     nexus_tracer.llm_call()
     active_llm = get_chat_model(temperature=0.0)
-    response = active_llm.bind_tools(TOOLS).invoke(messages_for_llm)
+    try:
+        response = active_llm.bind_tools(TOOLS).invoke(messages_for_llm)
+    except Exception as e:
+        err_msg = str(e)
+        # Check if the failure is a deadline / timeout error from the provider gateway (e.g. 504 DEADLINE_EXCEEDED)
+        # Occurs when heavy reasoning models (`gemini-4-argon`) exceed HTTP deadlines on long conversation histories.
+        is_deadline_or_timeout = any(
+            token in err_msg.lower() or token in type(e).__name__.lower()
+            for token in ("504", "deadline_exceeded", "timeout", "timed out")
+        )
+        # Resilient Tier Fallback: If the primary strong model hits a deadline timeout, fallback to the high-throughput
+        # low-latency tier (`gemini-3.8-flash` / `low`) to preserve the user's conversation session without crashing.
+        current_primary = settings.nexus_primary_tier
+        if is_deadline_or_timeout and current_primary != "low":
+            nexus_tracer.info(
+                f"⚠️ Primary model tier ({current_primary}) exceeded deadline (504 DEADLINE_EXCEEDED). "
+                "Gracefully falling back to low-latency tier (Flash) to complete the turn..."
+            )
+            fallback_llm = get_chat_model(tier="low", temperature=0.0)
+            response = fallback_llm.bind_tools(TOOLS).invoke(messages_for_llm)
+        else:
+            raise e
 
     # Log input tokens, cached prompt tokens (`cache_read`), and output tokens to console and SSE trace bus
     _log_token_usage(nexus_tracer, response)

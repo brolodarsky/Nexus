@@ -39,6 +39,11 @@ def get_chat_model(tier: ModelTier | None = None, temperature: float = 0.0) -> B
     needing to edit `.py` files (which would cause `uvicorn --reload` to kill in-flight HTTP/SSE streams).
     """
     live_settings = EngineSettings()
+    # Resolve configurable HTTP timeout (default 180s) and max retry count (default 3) from `.env`
+    # Reasoning models (`gemini-4-argon`) require >90s on massive context histories to prevent 504 DEADLINE_EXCEEDED
+    timeout = live_settings.ai_request_timeout
+    max_retries = live_settings.ai_max_retries
+
     effective_tier: str = tier or live_settings.nexus_primary_tier
     if effective_tier not in ("low", "medium", "strong"):
         effective_tier = "medium"
@@ -58,8 +63,8 @@ def get_chat_model(tier: ModelTier | None = None, temperature: float = 0.0) -> B
             model=model_name,
             google_api_key=gemini_key,
             temperature=temperature,
-            timeout=90,
-            max_retries=2,
+            timeout=timeout,
+            max_retries=max_retries,
         )
 
     # OpenAI tier map: `"low"` uses mini for fast/cheap subagent & summarizer work; `"medium"` / `"strong"` for synthesis
@@ -71,8 +76,8 @@ def get_chat_model(tier: ModelTier | None = None, temperature: float = 0.0) -> B
     model_name = openai_tier_map.get(effective_tier, AI_MODEL_MEDIUM)
     # `gpt-5.6-*` models accept `reasoning_effort="none"` for deterministic low-latency tool calling
     if effective_tier in ("medium", "strong"):
-        return ChatOpenAI(model=model_name, temperature=temperature, reasoning_effort="none", timeout=90, max_retries=2)
-    return ChatOpenAI(model=model_name, temperature=temperature, timeout=90, max_retries=2)
+        return ChatOpenAI(model=model_name, temperature=temperature, reasoning_effort="none", timeout=timeout, max_retries=max_retries)
+    return ChatOpenAI(model=model_name, temperature=temperature, timeout=timeout, max_retries=max_retries)
 
 
 # Shared Config

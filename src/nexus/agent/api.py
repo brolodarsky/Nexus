@@ -79,8 +79,20 @@ def run_nexus_agent_with_trace(
         }
     except Exception as e:
         nexus_tracer.info(f"❌ Error: {e}")
+        err_str = str(e)
+        # Demystify 504 DEADLINE_EXCEEDED errors for chat users with clear remediation guidance
+        if "504" in err_str or "DEADLINE_EXCEEDED" in err_str:
+            user_msg = (
+                f"❌ NexusAgent encountered a provider deadline timeout (504 DEADLINE_EXCEEDED).\n\n"
+                f"The AI provider took longer than the configured timeout to complete reasoning over the active "
+                f"conversation history. You can continue by sending your next prompt, or use `spawn_subagent` to isolate "
+                f"heavy file reading so raw notes do not inflate the conversation context."
+            )
+        else:
+            user_msg = f"❌ NexusAgent encountered an error: {e}"
+
         return {
-            "response": f"❌ NexusAgent encountered an error: {e}",
+            "response": user_msg,
             "agent": "nexus",
             "domain": None,
             "confidence": 0.0,
