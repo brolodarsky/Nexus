@@ -17,7 +17,6 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **[[Tasks]]**
 - **[[Plan]]:** 10-day sliding tactical execution envelope (`[-5, +5]`).
 - **[[Daily Schedule]]:** Unified daily core working schedule.
-- **[[Current Learning]]:** Active focus and active subjects.
 - **[[Personal Specs]]:** Master sizing card, footwear measurements, and wardrobe specifications.
 - **Principles & Ethics:** Core values, decision-making frameworks.
 - **The 10-Year Horizon:** Strategic goals for the longer term.
@@ -159,7 +158,11 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **[[Doc - High School Transcript.pdf]]**
 
 ### 3.1.4. Networking & Professional CRM
-- **[[Professional CRM]]:** Contacts, recruiters, mentors, and warm intro tracking.
+- **[[Professional CRM]]:** Active contacts, recruiters, mentors, warm introductions, relationship state, and next actions.
+- **[[LinkedIn Strategy]]:** Profile positioning, content strategy, and connection targets.
+- **[[Communities & Events]]:** Online communities and local event sources for professional networking.
+- **[[Protocol - Outreach Channels & Contact Research]]:** Channel selection, contact research, and reusable outbound templates.
+- **[[Protocol - Recruiter Triage]]:** Recruiter qualification, privacy boundaries, RTR guidance, and response templates.
 - **Archive**
 	- **[[Professional CRM - Archive]]:** Inactive, closed, and historical networking contacts and outreach pipelines.
 
@@ -322,6 +325,7 @@ _The Content Log & Reference_
 	- **[Cloudflare Dashboard](https://dash.cloudflare.com/)**
 	- **[Codex Docs](https://developers.openai.com/codex/app)**
 	- **[Google Cloud Console](https://console.cloud.google.com/)**
+	- https://aistudio.google.com/u/1/projects
 	- **[Google Dev Forums](https://discuss.google.dev/categories)**
 	- **[Google Workspace Admin](https://admin.google.com/u/2/ac/home?hl=en)**
 	- **[LangSmith](https://smith.langchain.com/o/d59feb9e-e33c-4313-8135-b7bfa2796c37)**
@@ -365,6 +369,7 @@ _The Content Log & Reference_
 - **Web & Computer Use:** Browser automation (Playwright) moving toward native visual Computer Use APIs for direct GUI operation.
 #### Frameworks & Multi-Agent Swarms
 - **[[Multi-Agent Systems & Orchestration]]:** Deep dive into the Agentic Mesh and swarm architecture.
+	- **[[Concept - Architect-Drafter Pattern in Multi-Agent Swarms]]:** Context hygiene, Architect-Drafter division of labor, subagent writing delegation, and empirical token economics.
 	- **[[Multi-Agent Healthcare Architectures]]:** Industry progress on Virtual Tumor Boards, AMIE, and AgentClinic.
 - **The Orchestrators:** 
 	- [LangGraph](https://langchain-ai.github.io/langgraph/) (Stateful orchestration) 
