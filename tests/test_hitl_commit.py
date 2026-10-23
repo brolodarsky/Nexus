@@ -260,3 +260,75 @@ def test_api_rollback_and_recent(root: Path, client: TestClient):
     assert client.post(f"/api/hitl/{tx_id}/rollback").status_code == 200
     assert _read(root / "Vault" / "Note.md") == "a\n"
     assert client.post("/api/hitl/9999/approve").status_code == 404
+
+
+# ── Concurrency & Cumulative Overlay Stacking ───────────────────────────────
+
+
+def test_concurrent_modify_file_stacks_cleanly_into_single_transaction(root: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verifies that concurrent tool calls targeting the same note serialize cleanly via get_file_mutation_lock.
+
+    When an agent emits multiple tool calls in a single turn (e.g. LangGraph ToolNode parallel execution),
+    both threads must stack sequentially onto a single review card rather than creating competing sibling
+    transactions with stale baselines.
+    """
+    import concurrent.futures
+    import nexus.shared_tools.shared as shared_module
+    import nexus.shared_tools.vault_reader as vr_module
+
+    vault = root / "Vault"
+    monkeypatch.setattr(shared_module, "VAULT_PATH", vault)
+    monkeypatch.setattr(vr_module, "VAULT_PATH", vault)
+
+    # 1. Establish the note on disk with two disjoint sections
+    initial_text = "Header\n\nTask 1: Pending\n\nMiddle Section\n\nTask 2: Pending\n\nFooter\n"
+    _write(root, "ConcurrentNote.md", initial_text)
+
+    # 2. Define two concurrent worker tasks that would race in an un-locked environment
+    def worker1():
+        return shared_module.modify_file.invoke({
+            "file_path": "ConcurrentNote.md",
+            "target": "Task 1: Pending",
+            "replacement": "Task 1: Done",
+            "reasoning": "Completed task 1",
+        })
+
+    def worker2():
+        return shared_module.modify_file.invoke({
+            "file_path": "ConcurrentNote.md",
+            "target": "Task 2: Pending",
+            "replacement": "Task 2: In Progress",
+            "reasoning": "Started task 2",
+        })
+
+    # 3. Execute both workers in parallel across distinct threads
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(worker1)
+        f2 = executor.submit(worker2)
+        r1 = f1.result()
+        r2 = f2.result()
+
+    # 4. Exactly one worker stages the card, the second stacks onto it
+    results = [r1, r2]
+    assert any("staged to HITL queue" in r for r in results)
+    assert any("stacked onto existing pending HITL Transaction" in r for r in results)
+
+    # 5. Exactly ONE pending transaction must exist for this file
+    pending = hq.get_pending_transactions()
+    target_pending = [p for p in pending if p["target_file"] == "Vault/ConcurrentNote.md"]
+    assert len(target_pending) == 1
+
+    tx = target_pending[0]
+    # The proposal must include BOTH edits
+    assert "Task 1: Done" in tx["proposed_content"]
+    assert "Task 2: In Progress" in tx["proposed_content"]
+    # The reasoning must merge both explanations
+    assert "Completed task 1" in tx["reasoning"]
+    assert "Started task 2" in tx["reasoning"]
+    # Baseline matches original disk text
+    assert tx["original_content"] == initial_text
+
+    # 6. Approving the stacked card must succeed cleanly without stale-base error
+    commit_res = hq.commit_transaction(tx["id"], root)
+    assert commit_res["forced"] is False
+    assert _read(vault / "ConcurrentNote.md") == "Header\n\nTask 1: Done\n\nMiddle Section\n\nTask 2: In Progress\n\nFooter\n"

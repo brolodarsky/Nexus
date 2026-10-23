@@ -207,7 +207,7 @@ def modify_file(
         replacement: The new text to substitute in place of `target`.
         reasoning: Concise explanation of WHY this edit is being proposed for human HITL review.
     """
-    from nexus.core.hitl_queue import add_transaction, get_pending_for_file
+    from nexus.core.hitl_queue import add_transaction, get_file_mutation_lock, get_pending_for_file
     from nexus.shared_tools.vault_reader import resolve_vault_note_path
 
     if not target:
@@ -217,68 +217,75 @@ def modify_file(
     if resolved_path is not None:
         rel_vault_path = str(resolved_path.relative_to(VAULT_PATH)).replace("\\", "/")
         hitl_target_file = f"Vault/{rel_vault_path}"
-        try:
-            disk_content: Optional[str] = resolved_path.read_text(encoding="utf-8")
-        except Exception as e:
-            return f"Error reading existing file '{file_path}': {e}"
     else:
         # File may not exist on disk yet because it was staged via `create_file` earlier in this session!
         pending_new = get_pending_for_file(file_path)
         if pending_new is None:
             return err or f"Error: Could not resolve existing or pending staged file '{file_path}'."
         hitl_target_file = pending_new["target_file"]
-        disk_content = pending_new.get("original_content")
 
-    # Check if there is already a pending HITL edit for this file so we stack on top of `proposed_content`
-    pending_tx = get_pending_for_file(hitl_target_file)
-    working_base = (
-        pending_tx["proposed_content"]
-        if (pending_tx and pending_tx.get("proposed_content") is not None)
-        else (disk_content or "")
-    )
-    baseline_original = (
-        pending_tx.get("original_content")
-        if (pending_tx and pending_tx.get("original_content") is not None)
-        else disk_content
-    )
-    action_type = (
-        "create"
-        if (pending_tx and pending_tx.get("action_type") == "create" and baseline_original is None)
-        else "modify"
-    )
+    # Critical Section: Serialize concurrent tool calls (e.g. parallel LangChain ToolNode worker threads)
+    # targeting the same note so they cleanly inspect, stack, and coalesce edits instead of racing.
+    with get_file_mutation_lock(hitl_target_file):
+        if resolved_path is not None:
+            try:
+                disk_content: Optional[str] = resolved_path.read_text(encoding="utf-8")
+            except Exception as e:
+                return f"Error reading existing file '{file_path}': {e}"
+        else:
+            pending_new = get_pending_for_file(file_path)
+            disk_content = pending_new.get("original_content") if pending_new else None
 
-    # Apply replacement onto the active working base (staged content first; fallback to disk if agent matched pre-stage text)
-    proposed_content = _apply_surgical_replacement(working_base, target, replacement)
-    if proposed_content is None and disk_content is not None and working_base != disk_content:
-        # Agent matched against raw disk text; apply to disk_content only if `target` is also patched into `working_base`
-        return (
-            f"Error: `target` text was not found in the active staged version of `{hitl_target_file}` "
-            f"(Pending HITL Tx #{pending_tx['id']}). Call `read_file(\"{file_path}\")` to see the current staged text "
-            f"and apply your surgical edit on top of it."
+        # Check if there is already a pending HITL edit for this file so we stack on top of `proposed_content`
+        pending_tx = get_pending_for_file(hitl_target_file)
+        working_base = (
+            pending_tx["proposed_content"]
+            if (pending_tx and pending_tx.get("proposed_content") is not None)
+            else (disk_content or "")
         )
-    if proposed_content is None:
-        return (
-            f"Error: `target` text was not found in `{hitl_target_file}`. "
-            f"Call `read_file` to inspect the exact current lines and whitespace before calling `modify_file`."
+        baseline_original = (
+            pending_tx.get("original_content")
+            if (pending_tx and pending_tx.get("original_content") is not None)
+            else disk_content
+        )
+        action_type = (
+            "create"
+            if (pending_tx and pending_tx.get("action_type") == "create" and baseline_original is None)
+            else "modify"
         )
 
-    tx_id = add_transaction(
-        agent_name="nexus_agent",
-        action_type=action_type,
-        target_file=hitl_target_file,
-        proposed_content=proposed_content,
-        original_content=baseline_original,
-        reasoning=reasoning,
-    )
-    if pending_tx:
-        return (
-            f"✅ Surgical modification stacked onto existing pending HITL Transaction #{tx_id} on `{hitl_target_file}` "
-            f"(cumulative diff updated in place). Awaiting human approval."
+        # Apply replacement onto the active working base (staged content first; fallback to disk if agent matched pre-stage text)
+        proposed_content = _apply_surgical_replacement(working_base, target, replacement)
+        if proposed_content is None and disk_content is not None and working_base != disk_content:
+            # Agent matched against raw disk text; apply to disk_content only if `target` is also patched into `working_base`
+            return (
+                f"Error: `target` text was not found in the active staged version of `{hitl_target_file}` "
+                f"(Pending HITL Tx #{pending_tx['id']}). Call `read_file(\"{file_path}\")` to see the current staged text "
+                f"and apply your surgical edit on top of it."
+            )
+        if proposed_content is None:
+            return (
+                f"Error: `target` text was not found in `{hitl_target_file}`. "
+                f"Call `read_file` to inspect the exact current lines and whitespace before calling `modify_file`."
+            )
+
+        tx_id = add_transaction(
+            agent_name="nexus_agent",
+            action_type=action_type,
+            target_file=hitl_target_file,
+            proposed_content=proposed_content,
+            original_content=baseline_original,
+            reasoning=reasoning,
         )
-    return (
-        f"✅ Surgical modification staged to HITL queue (Transaction #{tx_id} on `{hitl_target_file}`). "
-        f"Awaiting human approval."
-    )
+        if pending_tx:
+            return (
+                f"✅ Surgical modification stacked onto existing pending HITL Transaction #{tx_id} on `{hitl_target_file}` "
+                f"(cumulative diff updated in place). Awaiting human approval."
+            )
+        return (
+            f"✅ Surgical modification staged to HITL queue (Transaction #{tx_id} on `{hitl_target_file}`). "
+            f"Awaiting human approval."
+        )
 
 
 @tool
@@ -299,7 +306,7 @@ def create_file(
         reasoning: Concise explanation of WHY this file is being created.
         overwrite: Set True only if intentionally replacing an entire existing file (default: False).
     """
-    from nexus.core.hitl_queue import add_transaction
+    from nexus.core.hitl_queue import add_transaction, get_file_mutation_lock
 
     clean_rel = file_path.strip().replace("\\", "/").lstrip("/")
     if clean_rel.startswith("Vault/"):
@@ -307,34 +314,35 @@ def create_file(
     if not clean_rel.endswith(".md") and "." not in clean_rel.split("/")[-1]:
         clean_rel += ".md"
 
-    full_path = VAULT_PATH / clean_rel
-    original_content: Optional[str] = None
-
-    if full_path.exists():
-        if not overwrite:
-            return (
-                f"Error: File 'Vault/{clean_rel}' already exists. "
-                f"Use `modify_file(file_path, target, replacement, reasoning)` to surgically edit existing files, "
-                f"or pass `overwrite=True` if you intentionally need a full-file replacement."
-            )
-        try:
-            original_content = full_path.read_text(encoding="utf-8")
-        except Exception:
-            original_content = None
-
     hitl_target_file = f"Vault/{clean_rel}"
-    tx_id = add_transaction(
-        agent_name="nexus_agent",
-        action_type="modify" if original_content is not None else "create",
-        target_file=hitl_target_file,
-        proposed_content=content,
-        original_content=original_content,
-        reasoning=reasoning,
-    )
-    return (
-        f"✅ File {'overwrite' if original_content is not None else 'creation'} staged to HITL queue "
-        f"(Transaction #{tx_id} on `{hitl_target_file}`). Awaiting human approval."
-    )
+    with get_file_mutation_lock(hitl_target_file):
+        full_path = VAULT_PATH / clean_rel
+        original_content: Optional[str] = None
+
+        if full_path.exists():
+            if not overwrite:
+                return (
+                    f"Error: File 'Vault/{clean_rel}' already exists. "
+                    f"Use `modify_file(file_path, target, replacement, reasoning)` to surgically edit existing files, "
+                    f"or pass `overwrite=True` if you intentionally need a full-file replacement."
+                )
+            try:
+                original_content = full_path.read_text(encoding="utf-8")
+            except Exception:
+                original_content = None
+
+        tx_id = add_transaction(
+            agent_name="nexus_agent",
+            action_type="modify" if original_content is not None else "create",
+            target_file=hitl_target_file,
+            proposed_content=content,
+            original_content=original_content,
+            reasoning=reasoning,
+        )
+        return (
+            f"✅ File {'overwrite' if original_content is not None else 'creation'} staged to HITL queue "
+            f"(Transaction #{tx_id} on `{hitl_target_file}`). Awaiting human approval."
+        )
 
 
 # ── 4. External Communication & Schedule Tools (Gmail & Calendar) ────────────

@@ -4,12 +4,40 @@ import json
 import difflib
 # os.replace: Atomic rename on the same volume (POSIX + Windows), so readers never see a half-written note
 import os
+# threading.RLock: Re-entrant process lock allowing the same thread to acquire the lock multiple times
+# (e.g., modify_file holding the lock while calling add_transaction) without causing a self-deadlock.
+# defaultdict: Automatically instantiates a new RLock on first access for any unseen target file path.
+import threading
+from collections import defaultdict
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 # DB_PATH: Resolves to `src/nexus/hitl.db`, the SQLite ledger for Two-Phase Commit (HITL) file mutations
 DB_PATH = Path(__file__).resolve().parent.parent / "hitl.db"
+
+# _file_mutation_locks: Per-target-file mutexes ensuring concurrent tool calls serialize their
+# inspection of pending staged state, surgical replacement, and transaction insertion/updates.
+_file_mutation_locks: Dict[str, threading.RLock] = defaultdict(threading.RLock)
+_file_mutation_locks_guard = threading.Lock()
+
+
+def get_file_mutation_lock(target_file: str) -> threading.RLock:
+    """Returns a process-wide re-entrant mutex (`threading.RLock`) for `target_file`.
+
+    Ensures concurrent tool calls (e.g. LangChain `ToolNode` worker threads) modifying the same
+    Vault note serialize their check of staged pending state, surgical replacements, and database
+    transactions so edits stack cumulatively into a single review card rather than creating race conditions.
+
+    Args:
+        target_file: Vault-relative or normalized target file path (e.g. 'Vault/Tasks.md').
+
+    Returns:
+        threading.RLock: The dedicated re-entrant mutex for this normalized file path.
+    """
+    norm = _normalize_target_file(target_file)
+    with _file_mutation_locks_guard:
+        return _file_mutation_locks[norm]
 
 
 # ── Commit-Integrity Errors ─────────────────────────────────────────────────
@@ -167,80 +195,81 @@ def add_transaction(
       - This guarantees at most ONE pending review card per file in the HITL Control Panel.
     """
     norm_target = _normalize_target_file(target_file)
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        '''
-        SELECT * FROM transactions
-        WHERE status = 'pending' AND REPLACE(target_file, '\\', '/') = ?
-        ORDER BY id ASC
-        ''',
-        (norm_target,),
-    )
-    existing_rows = [dict(r) for r in cursor.fetchall()]
-
-    if existing_rows:
-        oldest = existing_rows[0]
-        newest = existing_rows[-1]
-        tx_id = int(newest["id"])
-
-        # Preserve earliest pending action_type ('create' stays 'create' if refined before disk write)
-        baseline_action = oldest["action_type"] if oldest["action_type"] == "create" else action_type
-        baseline_original = oldest["original_content"] if oldest["original_content"] is not None else original_content
-
-        combined_reasoning = oldest.get("reasoning") or ""
-        for row in existing_rows[1:]:
-            combined_reasoning = _merge_reasoning(combined_reasoning, row.get("reasoning"))
-        combined_reasoning = _merge_reasoning(combined_reasoning, reasoning)
+    with get_file_mutation_lock(norm_target):
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
         cursor.execute(
             '''
-            UPDATE transactions
-            SET agent_name = ?,
-                action_type = ?,
-                target_file = ?,
-                original_content = ?,
-                proposed_content = ?,
-                reasoning = ?,
-                created_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            SELECT * FROM transactions
+            WHERE status = 'pending' AND REPLACE(target_file, '\\', '/') = ?
+            ORDER BY id ASC
             ''',
-            (
-                agent_name,
-                baseline_action,
-                norm_target,
-                baseline_original,
-                proposed_content,
-                combined_reasoning,
-                tx_id,
-            ),
+            (norm_target,),
         )
+        existing_rows = [dict(r) for r in cursor.fetchall()]
 
-        if len(existing_rows) > 1:
-            older_ids = [int(r["id"]) for r in existing_rows[:-1]]
-            placeholders = ",".join("?" for _ in older_ids)
+        if existing_rows:
+            oldest = existing_rows[0]
+            newest = existing_rows[-1]
+            tx_id = int(newest["id"])
+
+            # Preserve earliest pending action_type ('create' stays 'create' if refined before disk write)
+            baseline_action = oldest["action_type"] if oldest["action_type"] == "create" else action_type
+            baseline_original = oldest["original_content"] if oldest["original_content"] is not None else original_content
+
+            combined_reasoning = oldest.get("reasoning") or ""
+            for row in existing_rows[1:]:
+                combined_reasoning = _merge_reasoning(combined_reasoning, row.get("reasoning"))
+            combined_reasoning = _merge_reasoning(combined_reasoning, reasoning)
+
             cursor.execute(
-                f"UPDATE transactions SET status = 'superseded' WHERE id IN ({placeholders})",
-                older_ids,
+                '''
+                UPDATE transactions
+                SET agent_name = ?,
+                    action_type = ?,
+                    target_file = ?,
+                    original_content = ?,
+                    proposed_content = ?,
+                    reasoning = ?,
+                    created_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                ''',
+                (
+                    agent_name,
+                    baseline_action,
+                    norm_target,
+                    baseline_original,
+                    proposed_content,
+                    combined_reasoning,
+                    tx_id,
+                ),
             )
 
+            if len(existing_rows) > 1:
+                older_ids = [int(r["id"]) for r in existing_rows[:-1]]
+                placeholders = ",".join("?" for _ in older_ids)
+                cursor.execute(
+                    f"UPDATE transactions SET status = 'superseded' WHERE id IN ({placeholders})",
+                    older_ids,
+                )
+
+            conn.commit()
+            conn.close()
+            return tx_id
+
+        cursor.execute(
+            '''
+            INSERT INTO transactions
+            (agent_name, action_type, target_file, original_content, proposed_content, reasoning, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+            ''',
+            (agent_name, action_type, norm_target, original_content, proposed_content, reasoning),
+        )
+        tx_id = cursor.lastrowid
         conn.commit()
         conn.close()
         return tx_id
-
-    cursor.execute(
-        '''
-        INSERT INTO transactions
-        (agent_name, action_type, target_file, original_content, proposed_content, reasoning, status)
-        VALUES (?, ?, ?, ?, ?, ?, 'pending')
-        ''',
-        (agent_name, action_type, norm_target, original_content, proposed_content, reasoning),
-    )
-    tx_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return tx_id
 
 
 def get_pending_transactions() -> List[Dict[str, Any]]:
