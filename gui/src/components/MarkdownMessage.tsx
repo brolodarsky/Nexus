@@ -7,44 +7,172 @@ import remarkGfm from "remark-gfm";
 
 // Shared renderer used by the /ask chat stream and the /hitl Pre-Commit Preview tab.
 
-// ── Obsidian Wiki-Link Preprocessor & Rich Markdown Renderer ─
+// ── Obsidian Wiki-Link & LaTeX Preprocessor & Rich Markdown Renderer ─
 
-// VaultNotePill: Renders an Obsidian [[Wiki-Link]] target as a glowing cyan badge with a document icon
+// LATEX_SYMBOLS: Lookup map converting LaTeX math arrow/operator commands into clean Unicode characters
+// so LLM-emitted syntax like `$\leftrightarrow$` or `\rightarrow` renders natively without MathJax/KaTeX overhead.
+const LATEX_SYMBOLS: Record<string, string> = {
+  "\\longleftrightarrow": "↔",
+  "\\Longleftrightarrow": "⇔",
+  "\\leftrightarrow": "↔",
+  "\\Leftrightarrow": "⇔",
+  "\\longrightarrow": "→",
+  "\\Longrightarrow": "⇒",
+  "\\longleftarrow": "←",
+  "\\Longleftarrow": "⇐",
+  "\\rightarrow": "→",
+  "\\Rightarrow": "⇒",
+  "\\leftarrow": "←",
+  "\\Leftarrow": "⇐",
+  "\\updownarrow": "↕",
+  "\\Uparrow": "⇑",
+  "\\Downarrow": "⇓",
+  "\\uparrow": "↑",
+  "\\downarrow": "↓",
+  "\\mapsto": "↦",
+  "\\implies": "⇒",
+  "\\iff": "⇔",
+  "\\to": "→",
+  "\\gets": "←",
+  "\\leq": "≤",
+  "\\geq": "≥",
+  "\\neq": "≠",
+  "\\le": "≤",
+  "\\ge": "≥",
+  "\\ne": "≠",
+  "\\approx": "≈",
+  "\\equiv": "≡",
+  "\\sim": "∼",
+  "\\times": "×",
+  "\\div": "÷",
+  "\\pm": "±",
+  "\\cdot": "·",
+  "\\bullet": "•",
+  "\\infty": "∞",
+  "\\notin": "∉",
+  "\\in": "∈",
+  "\\subseteq": "⊆",
+  "\\subset": "⊂",
+  "\\cup": "∪",
+  "\\cap": "∩",
+  "\\forall": "∀",
+  "\\exists": "∃",
+  "\\emptyset": "∅",
+  "\\varnothing": "∅",
+  "\\Delta": "Δ",
+  "\\nabla": "∇",
+  "\\alpha": "α",
+  "\\beta": "β",
+  "\\gamma": "γ",
+  "\\delta": "δ",
+  "\\lambda": "λ",
+  "\\mu": "μ",
+  "\\pi": "π",
+  "\\sigma": "σ",
+  "\\tau": "τ",
+  "\\omega": "ω",
+  "\\Omega": "Ω",
+};
+
+// BARE_LATEX_PATTERN: Matches unambiguous multi-character LaTeX arrow/operator commands even when the LLM
+// omits surrounding `$` delimiters (e.g., `\rightarrow`, `\leftarrow`, `\leftrightarrow`).
+const BARE_LATEX_PATTERN =
+  /\\(longleftrightarrow|Longleftrightarrow|leftrightarrow|Leftrightarrow|longrightarrow|Longrightarrow|longleftarrow|Longleftarrow|rightarrow|Rightarrow|leftarrow|Leftarrow|updownarrow|uparrow|downarrow|mapsto|implies|iff|leq|geq|neq|approx|equiv|times|infty)\b/g;
+
+// MATH_INNER_LATEX_PATTERN: Matches all known LaTeX commands (sorted longest-first) inside `$...$` or `\(...\)` spans
+const MATH_INNER_LATEX_PATTERN = new RegExp(
+  Object.keys(LATEX_SYMBOLS)
+    .sort((a, b) => b.length - a.length)
+    .map((k) => k.replace(/\\/g, "\\\\") + "\\b")
+    .join("|"),
+  "g"
+);
+
+// Replaces LaTeX command tokens inside a math expression string with their Unicode equivalents
+function replaceLatexInMath(expr: string): string {
+  return expr
+    .replace(MATH_INNER_LATEX_PATTERN, (match) => LATEX_SYMBOLS[match] ?? match)
+    .trim();
+}
+
+// Strips trailing `.md` from note display labels so `[[Plan.md]]`, `` `Plan.md` ``, and `[[Plan]]` render identically
+function formatNoteDisplay(rawDisplay: string): string {
+  return rawDisplay.trim().replace(/\.md$/i, "");
+}
+
+// VaultNotePill: Renders an Obsidian [[Wiki-Link]] or Markdown note title as an unbroken glowing cyan badge
 function VaultNotePill({ target, children }: { target: string; children: React.ReactNode }) {
   return (
     <span
       title={`Vault Note: ${target}`}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded-md text-xs font-medium bg-accent-cyan/10 border border-accent-cyan/25 text-accent-cyan hover:bg-accent-cyan/20 transition-colors cursor-default"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 my-0.5 rounded-md text-xs font-medium bg-accent-cyan/10 border border-accent-cyan/25 text-accent-cyan hover:bg-accent-cyan/20 transition-colors cursor-default align-baseline"
     >
-      <span className="opacity-70 text-[0.65rem]">📄</span>
-      {children}
+      <span className="opacity-70 text-[0.65rem] shrink-0">📄</span>
+      <span>{children}</span>
     </span>
   );
 }
 
-// Converts Obsidian `[[Target|Alias]]` or `[[Target]]` syntax outside of fenced code blocks into standard
-// Markdown links with a `#wikilink:` href so custom `<a>` components can style them as glowing Vault pills.
-// Also strips wrapping backticks (`[[Target]]` or ``[[Target]]``) which LLMs commonly emit,
-// preventing ReactMarkdown from capturing the wikilink inside raw inline <code> tags.
+// Converts Obsidian `[[Target|Alias]]` / `[[Target]]` syntax, backticked `.md` note titles (`Plan.md`),
+// and inline LaTeX arrow/operator syntax (`$\leftrightarrow$`) outside of fenced code blocks into
+// clean Markdown links and Unicode characters.
 export function preprocessObsidianMarkdown(raw: string): string {
   if (!raw) return "";
-  // Split on fenced code blocks (```...```) so wiki-links inside raw Markdown drafts stay untouched as literal code
+  // Split on fenced code blocks (```...```) so raw Markdown drafts inside code fences stay untouched
   const segments = raw.split(/(```[\s\S]*?```)/g);
   return segments
     .map((segment, index) => {
       // Odd indices are fenced code blocks captured by the regex group
       if (index % 2 === 1) return segment;
-      // Match backtick-wrapped wikilinks (`[[target|alias]]` or ``[[target]]``) OR bare wikilinks ([[target|alias]] or [[target]])
-      return segment.replace(
+
+      // 1. Match backtick-wrapped wikilinks (`[[target|alias]]` or ``[[target]]``) OR bare wikilinks ([[target|alias]] or [[target]])
+      let processed = segment.replace(
         /`{1,2}\s*\[\[([^\]|]+)(?:\|([^\]]+))?\]\]\s*`{1,2}|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
         (_match, t1?: string, a1?: string, t2?: string, a2?: string) => {
           const target = (t1 || t2 || "").trim();
           const alias = (a1 || a2 || "").trim();
-          const display = alias || target.split("/").pop() || target;
+          const rawDisplay = alias || target.split("/").pop() || target;
+          const display = formatNoteDisplay(rawDisplay);
           const encodedTarget = encodeURIComponent(target);
           return `[${display}](#wikilink:${encodedTarget})`;
         }
       );
+
+      // 2. Convert backtick-wrapped Markdown note titles (e.g. `1.1. Section Instructions.md`, `Plan.md`, `Tasks.md`)
+      //    into #wikilink: links so all note titles share the unified VaultNotePill representation instead of splitting
+      //    between inline code boxes and Vault pills. Excludes paths with slashes (`Vault/Tasks.md`), CLI commands,
+      //    and wildcard/placeholder patterns (`Project - *.md`, `<Name>.md`).
+      processed = processed.replace(
+        /`([^`\n*?<>"{}$/\\]+\.md)`/g,
+        (match, noteFile: string) => {
+          const trimmed = noteFile.trim();
+          if (/^(python|uv|git|npm|node|npx|pip|pytest|ruff)\b/i.test(trimmed) || trimmed.startsWith("-")) {
+            return match;
+          }
+          const display = formatNoteDisplay(trimmed);
+          const encodedTarget = encodeURIComponent(trimmed);
+          return `[${display}](#wikilink:${encodedTarget})`;
+        }
+      );
+
+      // 3. Unwrap inline LaTeX math spans (`$...$` or `\(...\)`) containing backslash commands into clean Unicode.
+      //    Closing `$` is guarded by `(?![a-zA-Z0-9\\])` so currency ranges like `$150k–$200k` never pair across prose.
+      processed = processed.replace(
+        /(?:^|(?<![a-zA-Z0-9]))\$(?!\s)(?=[^$\n]*\\[a-zA-Z])([^$\n]+?)(?<!\s)\$(?![a-zA-Z0-9\\])/g,
+        (_match, inner: string) => replaceLatexInMath(inner)
+      );
+      processed = processed.replace(
+        /\\\(([\s\S]*?)\\\)/g,
+        (_match, inner: string) => replaceLatexInMath(inner)
+      );
+
+      // 4. Convert any remaining bare unambiguous LaTeX arrow/operator commands (e.g. `\rightarrow`, `\leftrightarrow`)
+      processed = processed.replace(
+        BARE_LATEX_PATTERN,
+        (match) => LATEX_SYMBOLS[match] ?? match
+      );
+
+      return processed;
     })
     .join("");
 }
@@ -138,7 +266,7 @@ export default function MarkdownMessage({ content }: { content: string }) {
                       }
                       if (!part) return null;
                       return (
-                        <code key={i} className="px-1.5 py-0.5 mx-0.5 rounded-md bg-bg-secondary/90 border border-border-subtle font-mono text-[0.78rem] text-accent-cyan">
+                        <code key={i} className="inline-block px-1.5 py-0.5 mx-0.5 my-0.5 rounded-md bg-bg-secondary/95 border border-white/15 font-mono text-[0.78rem] text-accent-cyan align-baseline">
                           {part}
                         </code>
                       );
@@ -149,7 +277,7 @@ export default function MarkdownMessage({ content }: { content: string }) {
             }
 
             return (
-              <code className="px-1.5 py-0.5 mx-0.5 rounded-md bg-bg-secondary/90 border border-border-subtle font-mono text-[0.78rem] text-accent-cyan">
+              <code className="inline-block px-1.5 py-0.5 mx-0.5 my-0.5 rounded-md bg-bg-secondary/95 border border-white/15 font-mono text-[0.78rem] text-accent-cyan align-baseline">
                 {children}
               </code>
             );
