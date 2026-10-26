@@ -215,12 +215,12 @@ export default function DashboardPage() {
             >
               <span>📋</span> Weekly Review
             </button>
-            <button
-              disabled
-              className="glass-card px-5 py-3 text-sm font-medium text-text-muted opacity-40 cursor-not-allowed flex items-center gap-2"
+            <Link
+              href="/audit"
+              className="glass-card px-5 py-3 text-sm font-medium text-accent-violet hover:text-text-primary transition-colors flex items-center gap-2"
             >
-              <span>🔍</span> Audit Engine
-            </button>
+              <span>📜</span> Audit Engine
+            </Link>
           </div>
         )}
       </section>

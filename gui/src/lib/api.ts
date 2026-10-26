@@ -185,6 +185,8 @@ export async function resetConversationRouting(conversationId: string): Promise<
 
 // Discriminated union of trace events emitted during live agent graph execution
 export interface TraceEvent {
+  id?: string;                      // Unique 8-char step event identifier
+  step?: number;                    // 1-indexed sequential step number within an agent's lifecycle
   type:
   | "agent_start"   // Agent began execution with initial context
   | "agent_end"     // Agent completed its graph cycle
@@ -198,16 +200,96 @@ export interface TraceEvent {
   | "info"          // Generic informational status message
   | "done"          // Execution complete; carries final output payload
   | "error";        // Fatal pipeline error
-  agent?: string;                   // Originating agent name (e.g. "Router", "CareerAgent")
-  color?: string;                   // Terminal/UI theme color (e.g. "yellow", "cyan")
-  message: string;                  // User-facing log text for the Thinking Panel
+  agent?: string;                   // Originating agent display name (e.g. "NexusAgent", "Subagent #1 (low)")
+  agent_id?: string;                // Unique DAG node identifier (e.g. "nexus", "subagent-1")
+  parent_id?: string | null;        // Parent DAG node identifier (e.g. "nexus" for spawned subagents, null for root)
+  color?: string;                   // Terminal/UI theme color (e.g. "yellow", "cyan", "magenta")
+  message: string;                  // Full, untruncated log text for the Thinking Panel
   timestamp: string;                // ISO-8601 UTC event timestamp
-  data?: Record<string, unknown>;   // Optional structured payload (e.g. tool arguments)
+  data?: Record<string, unknown>;   // Structured payload (e.g. full tool arguments, tool results, token counts, subagent prompts)
   // Payload fields populated only on the final "done" event:
   response?: string;                // Final Markdown answer from the assistant
   domain?: string | null;           // Routed domain category
   confidence?: number | null;       // Classification confidence
   reasoning?: string | null;        // Router rationale
+}
+
+// Interface representing an isolated subagent lifecycle within a structured run snapshot
+export interface SubagentRunRecord {
+  agent_id: string;                 // Unique subagent identifier (e.g. "subagent-1")
+  agent_name: string;               // Display name (e.g. "Subagent #1 (low)")
+  parent_id: string | null;         // Parent orchestrator ID (typically "nexus")
+  color: string;                    // Theme color assigned to this subagent
+  model_tier: string;               // Model tier ("low", "medium", "strong")
+  task_prompt: string;              // Full, untruncated task_prompt passed to spawn_subagent
+  started_at: string | null;        // ISO-8601 UTC start timestamp
+  ended_at: string | null;          // ISO-8601 UTC completion timestamp
+  final_response: string | null;    // Full synthesis returned by the subagent
+  tool_calls: Array<{
+    call_id?: string;
+    tool?: string;
+    args?: Record<string, unknown>;
+    result?: string;
+    timestamp?: string;
+  }>;
+  steps: TraceEvent[];              // Complete ordered trace steps executed inside this subagent
+}
+
+// Interface for lightweight run summaries returned by GET /api/agents/runs
+export interface RunSummary {
+  run_id: string;                   // 8-char UUID run identifier
+  filename: string;                 // JSON filename on disk in logs/runs/
+  timestamp: string;                // ISO-8601 UTC execution timestamp
+  thread_id: string;                // Conversation thread UUID
+  agent_name: string;               // Root agent name (e.g. "nexus")
+  domain: string | null;            // Domain classification if applicable
+  input_query: string;              // Full user query text
+  output_response: string;          // Full assistant markdown response
+  query_preview: string;            // Retained for backward compatibility
+  response_preview: string;         // Retained for backward compatibility
+  latency_seconds: number | null;   // Wall-clock execution time in seconds
+  tool_calls_count: number;         // Number of root tool calls executed
+  subagents_count?: number;         // Number of isolated subagents spawned during the run
+  trace_events_count?: number;      // Total telemetry trace steps emitted
+  metadata?: Record<string, unknown>;
+}
+
+// Interface for full run snapshot details returned by GET /api/agents/runs/{run_id}
+export interface RunSnapshot {
+  run_id: string;
+  timestamp: string;
+  thread_id: string;
+  agent_name: string;
+  domain: string | null;
+  confidence: number | null;
+  reasoning: string | null;
+  input_query: string;
+  output_response: string;
+  latency_seconds: number | null;
+  dpfh_injected_files: string[];
+  tool_calls: Array<{
+    id?: string;
+    name: string;
+    args: Record<string, unknown>;
+    result?: string | null;
+  }>;
+  subagents_count?: number;
+  subagents?: SubagentRunRecord[];
+  trace_events_count: number;
+  trace_events: TraceEvent[];
+  metadata: Record<string, unknown>;
+}
+
+// Fetches recent structured run summaries from logs/runs/
+export async function getAgentRuns(limit = 50, agent?: string): Promise<RunSummary[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (agent) params.set("agent", agent);
+  return apiFetch<RunSummary[]>(`/api/agents/runs?${params.toString()}`);
+}
+
+// Fetches a single complete, untruncated run snapshot by run_id or filename
+export async function getAgentRun(runId: string): Promise<RunSnapshot> {
+  return apiFetch<RunSnapshot>(`/api/agents/runs/${encodeURIComponent(runId)}`);
 }
 
 /**

@@ -16,13 +16,16 @@ or restricting directory access, Nexus runs ONE universal agent design (`NexusAg
 """
 # sqlite3: Standard library SQL engine used for local thread checkpointing (`SqliteSaver`)
 import sqlite3
+# threading: Provides thread-safe locking (`Lock`) for assigning unique serial numbers to parallel subagents
+import threading
+import time
 from pathlib import Path
 # Typing primitives:
 # - TypedDict: Enforces key-value types for the LangGraph state dictionary
 # - Annotated: Attaches reducer metadata (`add_messages`) to state keys
 # - Sequence: Immutable ordered sequence of LangChain `BaseMessage` objects
 # - Literal: Constrains conditional edge return strings to an explicit set of node names
-from typing import Annotated, Literal, Sequence, TypedDict
+from typing import Annotated, Any, Literal, Sequence, TypedDict
 
 # LangChain message primitives:
 # - AIMessage: Assistant responses (either conversational text or tool call requests)
@@ -68,12 +71,41 @@ from nexus.shared_tools.shared import (
     update_calendar_event,
 )
 
-# ── Agent Tracers ────────────────────────────────────────────────────────────
+# ── Agent Tracers & Subagent Serial Counter ──────────────────────────────────
 
-# Cyan console logger and SSE event emitter for the primary NexusAgent
-nexus_tracer = AgentTracer("NexusAgent", color="cyan")
-# Magenta console logger and SSE event emitter for dynamically spawned subagents
-subagent_tracer = AgentTracer("Subagent", color="magenta")
+# Cyan console logger and SSE event emitter for the primary NexusAgent (root node `agent_id="nexus"`)
+nexus_tracer = AgentTracer("NexusAgent", color="cyan", agent_id="nexus", parent_id=None)
+# Default magenta tracer kept for backward-compatible module imports; individual subagents instantiate their own serial-numbered AgentTracer
+subagent_tracer = AgentTracer("Subagent", color="magenta", agent_id="subagent", parent_id="nexus")
+
+# Thread-safe serial counter and color palette so concurrent `spawn_subagent` worker threads get distinct IDs (`subagent-1`, `subagent-2`, ...)
+_subagent_counter_lock = threading.Lock()
+_subagent_serial_counter = 0
+_SUBAGENT_COLORS = ["magenta", "yellow", "green", "blue"]
+
+
+def reset_subagent_counter() -> None:
+    """Resets the subagent serial number counter at the start of a new parent agent run so subagents start cleanly at #1."""
+    global _subagent_serial_counter
+    with _subagent_counter_lock:
+        _subagent_serial_counter = 0
+
+
+def _next_subagent_tracer(tier: str) -> tuple[int, str, AgentTracer]:
+    """Allocates a thread-safe sequential serial number and dedicated `AgentTracer` linked to `parent_id="nexus"`."""
+    global _subagent_serial_counter
+    with _subagent_counter_lock:
+        _subagent_serial_counter += 1
+        serial = _subagent_serial_counter
+    sub_id = f"subagent-{serial}"
+    color = _SUBAGENT_COLORS[(serial - 1) % len(_SUBAGENT_COLORS)]
+    tracer = AgentTracer(
+        agent_name=f"Subagent #{serial} ({tier})",
+        color=color,
+        agent_id=sub_id,
+        parent_id="nexus",
+    )
+    return serial, sub_id, tracer
 
 
 # ── State Schema ─────────────────────────────────────────────────────────────
@@ -136,18 +168,27 @@ def extract_message_text(msg: BaseMessage | None) -> str:
     return str(raw_content)
 
 
-def _log_token_usage(tracer: AgentTracer, ai_msg: BaseMessage) -> None:
+def _log_token_usage(tracer: AgentTracer, ai_msg: BaseMessage) -> dict[str, int]:
     """Extracts and logs prompt token counts, cached token hits (`cache_read`), and output tokens from an AIMessage."""
     usage = getattr(ai_msg, "usage_metadata", None)
     if not isinstance(usage, dict):
-        return
-    in_tok = usage.get("input_tokens", 0)
-    out_tok = usage.get("output_tokens", 0)
+        return {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
+    in_tok = int(usage.get("input_tokens", 0) or 0)
+    out_tok = int(usage.get("output_tokens", 0) or 0)
     details = usage.get("input_token_details") or {}
-    cached_tok = details.get("cache_read", 0) if isinstance(details, dict) else 0
+    cached_tok = int(details.get("cache_read", 0) or 0) if isinstance(details, dict) else 0
     if in_tok or out_tok:
         cache_pct = int((cached_tok / in_tok) * 100) if in_tok > 0 else 0
-        tracer.info(f"Tokens: {in_tok:,} in ({cached_tok:,} cached, {cache_pct}%) | {out_tok:,} out")
+        tracer.info(
+            f"Tokens: {in_tok:,} in ({cached_tok:,} cached, {cache_pct}%) | {out_tok:,} out",
+            data={
+                "input_tokens": in_tok,
+                "output_tokens": out_tok,
+                "cached_tokens": cached_tok,
+                "cache_pct": cache_pct,
+            },
+        )
+    return {"input_tokens": in_tok, "output_tokens": out_tok, "cached_tokens": cached_tok}
 
 
 # ── Dynamic Subagent Spawner (`spawn_subagent`) ──────────────────────────────
@@ -183,7 +224,19 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
                     cost-efficient execution; pass `"medium"` or `"strong"` only for complex synthesis subtasks.
     """
     effective_tier: ModelTier = model_tier if model_tier in ("low", "medium", "strong") else "low"
-    subagent_tracer.agent_start(f"Subtask ({effective_tier}): {task_prompt[:85]}")
+    serial, sub_id, local_tracer = _next_subagent_tracer(effective_tier)
+    t0 = time.time()
+
+    # Emit full, untruncated task_prompt so the Thinking Panel, Graph View, and Run Logs capture 100% of the prompt
+    local_tracer.agent_start(
+        f"Subtask #{serial} ({effective_tier}): {task_prompt}",
+        metadata={
+            "serial": serial,
+            "subagent_id": sub_id,
+            "model_tier": effective_tier,
+            "task_prompt": task_prompt,
+        },
+    )
 
     # Build an ephemeral, stateless subagent client (no checkpointer needed; lives only for this subtask)
     sub_base_llm = get_chat_model(tier=effective_tier, temperature=0.0)
@@ -193,7 +246,7 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
     sub_sys_content = (
         inject_root_instructions()
         + "\n\n# Subagent Execution Mode\n"
-        + "You are an isolated Flash subagent spawned by the parent NexusAgent (Astra) to execute the specific task below. "
+        + f"You are an isolated Flash subagent (Subagent #{serial}) spawned by the parent NexusAgent (Astra) to execute the specific task below. "
         + "Read any relevant `Section Instructions.md` and Vault notes needed, execute the task thoroughly, "
         + "and return a concise, high-signal, grounded synthesis to the parent agent. "
         + "Your final synthesis will automatically be published to the Shared Agent Blackboard (`blackboard.db`), "
@@ -206,41 +259,54 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
         HumanMessage(content=task_prompt),
     ]
     posted_to_board = False
+    turn_idx = 0
 
     while True:
-        subagent_tracer.llm_call()
+        turn_idx += 1
+        local_tracer.llm_call(metadata={"turn": turn_idx, "model_tier": effective_tier})
         ai_msg = sub_llm.invoke(sub_messages)
-        _log_token_usage(subagent_tracer, ai_msg)
+        _log_token_usage(local_tracer, ai_msg)
         sub_messages.append(ai_msg)
 
         if not getattr(ai_msg, "tool_calls", None):
             final_text = extract_message_text(ai_msg)
+            elapsed_sub = round(time.time() - t0, 2)
             # Automatically publish the subagent's distilled report onto the Shared Blackboard if not already posted
             if final_text.strip() and not posted_to_board:
                 auto_channel = infer_channel(task_prompt)
-                first_line = task_prompt.strip().splitlines()[0][:85]
+                first_line = task_prompt.strip().splitlines()[0][:120]
                 bulletin_id = post_bulletin(
-                    author=f"Subagent ({effective_tier})",
+                    author=f"Subagent #{serial} ({effective_tier})",
                     title=first_line,
                     content=final_text,
                     channel=auto_channel,
                 )
-                subagent_tracer.info(f"📋 Posted Bulletin #{bulletin_id} to Blackboard [{auto_channel}]")
-            subagent_tracer.llm_response(final_text)
-            subagent_tracer.agent_end()
+                local_tracer.info(
+                    f"📋 Posted Bulletin #{bulletin_id} to Blackboard [{auto_channel}]",
+                    data={"bulletin_id": bulletin_id, "channel": auto_channel, "title": first_line},
+                )
+            local_tracer.llm_response(final_text, metadata={"turn": turn_idx, "latency_seconds": elapsed_sub})
+            local_tracer.agent_end(f"Completed in {elapsed_sub:.1f}s")
             return final_text
+
+        # If the LLM emitted intermediate thought/explanation alongside tool calls, trace that text too
+        intermediate_text = extract_message_text(ai_msg).strip()
+        if intermediate_text:
+            local_tracer.llm_response(intermediate_text, metadata={"turn": turn_idx, "intermediate": True})
 
         for tc in ai_msg.tool_calls:
             tc_name = tc.get("name", "unknown")
+            tc_id = tc.get("id")
             if tc_name == "post_to_board":
                 posted_to_board = True
-            subagent_tracer.tool_call(tc_name, tc.get("args", {}))
+            local_tracer.tool_call(tc_name, tc.get("args", {}), call_id=tc_id)
 
         tool_res = sub_tool_node.invoke({"messages": sub_messages})
         for t_msg in tool_res.get("messages", []):
             t_name = getattr(t_msg, "name", "unknown")
+            t_call_id = getattr(t_msg, "tool_call_id", None)
             t_content = extract_message_text(t_msg)
-            subagent_tracer.tool_result(t_name, _truncate(t_content, RESULT_TRUNCATE_LEN))
+            local_tracer.tool_result(t_name, t_content, call_id=t_call_id)
             sub_messages.append(t_msg)
 
 
@@ -358,8 +424,12 @@ def call_model(state: NexusAgentState) -> dict:
 
     # 3. Emit trace telemetry for either tool invocations or final conversational text
     if hasattr(response, "tool_calls") and response.tool_calls:
+        # If the LLM emitted reasoning/text alongside its tool calls, emit that text first so no thought is hidden
+        intermediate_text = extract_message_text(response).strip()
+        if intermediate_text:
+            nexus_tracer.llm_response(intermediate_text, metadata={"intermediate": True})
         for tc in response.tool_calls:
-            nexus_tracer.tool_call(tc.get("name", "unknown"), tc.get("args", {}))
+            nexus_tracer.tool_call(tc.get("name", "unknown"), tc.get("args", {}), call_id=tc.get("id"))
     else:
         nexus_tracer.llm_response(extract_message_text(response))
 
@@ -367,12 +437,13 @@ def call_model(state: NexusAgentState) -> dict:
 
 
 def traced_tool_node(state: NexusAgentState) -> dict:
-    """Node: Executes requested tool calls and broadcasts structured tool results to console and SSE trace bus."""
+    """Node: Executes requested tool calls and broadcasts full, untruncated tool results to console and SSE trace bus."""
     result = tool_node.invoke(state)
     for msg in result.get("messages", []):
         tool_name = getattr(msg, "name", "unknown")
+        call_id = getattr(msg, "tool_call_id", None)
         content = extract_message_text(msg)
-        nexus_tracer.tool_result(tool_name, _truncate(content, RESULT_TRUNCATE_LEN))
+        nexus_tracer.tool_result(tool_name, content, call_id=call_id)
     return result
 
 

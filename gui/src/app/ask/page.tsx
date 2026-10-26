@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 // MarkdownMessage: Shared GFM + Obsidian [[Wiki-Link]] renderer (also used by the HITL Pre-Commit Preview)
 import MarkdownMessage from "@/components/MarkdownMessage";
+// ThinkingPanel & AgentGraphView: Lossless agent execution trace viewer with Graph View, full step payloads, and raw JSON
+import { ThinkingPanel } from "@/components/AgentTraceVisualizer";
 import { 
   askBrainStream, 
   getChatHistory, 
@@ -28,115 +30,6 @@ interface Message {
   domain?: string | null;
   confidence?: number | null;
   trace?: TraceEvent[];
-}
-
-// ── Icon map for trace event types ───────────────────────────
-
-const TRACE_ICONS: Record<string, string> = {
-  agent_start: "▶",
-  agent_end: "■",
-  llm_call: "🤖",
-  llm_response: "💬",
-  tool_call: "🔧",
-  tool_result: "✅",
-  tool_error: "❌",
-  route: "🔀",
-  delegate: "📤",
-  info: "ℹ️",
-};
-
-// Agent color → Tailwind text class
-const AGENT_COLORS: Record<string, string> = {
-  yellow: "text-amber-400",
-  cyan: "text-cyan-400",
-  green: "text-emerald-400",
-  magenta: "text-fuchsia-400",
-  blue: "text-blue-400",
-  red: "text-red-400",
-  white: "text-zinc-300",
-};
-
-// ── Thinking Panel (collapsible trace log) ───────────────────
-
-function ThinkingPanel({
-  events,
-  isLive,
-  defaultExpanded = true,
-}: {
-  events: TraceEvent[];
-  isLive: boolean;
-  defaultExpanded?: boolean;
-}) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll while live
-  useEffect(() => {
-    if (expanded && isLive && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [events, expanded, isLive]);
-
-  // Auto-collapse when pipeline finishes
-  useEffect(() => {
-    if (!isLive && events.length > 0) {
-      setExpanded(false);
-    }
-  }, [isLive, events.length]);
-
-  if (events.length === 0) return null;
-
-  return (
-    <div className="mt-2 rounded-xl border border-border-subtle/50 overflow-hidden">
-      <button
-        onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-[0.65rem] font-medium text-text-muted hover:text-text-secondary transition-colors"
-      >
-        <svg
-          className={`w-3 h-3 transition-transform ${expanded ? "rotate-90" : ""}`}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path d="M9 18l6-6-6-6" />
-        </svg>
-        {isLive ? (
-          <span className="inline-flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-pulse" />
-            Thinking… ({events.length} steps)
-          </span>
-        ) : (
-          <span>Pipeline trace ({events.length} steps)</span>
-        )}
-      </button>
-
-      {expanded && (
-        <div
-          ref={scrollRef}
-          className="max-h-48 overflow-y-auto px-3 pb-2 space-y-0.5 border-t border-border-subtle/30"
-        >
-          {events.map((evt, i) => {
-            const icon = TRACE_ICONS[evt.type] ?? "·";
-            const colorClass = AGENT_COLORS[evt.color ?? "white"] ?? "text-zinc-300";
-
-            return (
-              <div
-                key={i}
-                className="flex items-start gap-2 text-[0.65rem] leading-relaxed font-mono"
-              >
-                <span className="shrink-0 w-4 text-center">{icon}</span>
-                <span className={`shrink-0 font-semibold ${colorClass}`}>
-                  [{evt.agent ?? "System"}]
-                </span>
-                <span className="text-text-muted break-all">{evt.message}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
 }
 
 export default function AskBrainPage() {
@@ -515,7 +408,9 @@ export default function AskBrainPage() {
             <div
               className={`rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${msg.role === "user"
                 ? "max-w-2xl bg-accent-cyan/10 border border-accent-cyan/20 text-text-primary"
-                : "max-w-3xl glass-card text-text-primary"
+                : (msg.trace && msg.trace.length > 0)
+                  ? "max-w-4xl xl:max-w-5xl w-full glass-card text-text-primary"
+                  : "max-w-3xl glass-card text-text-primary"
                 }`}
             >
               {msg.role === "assistant" && msg.agent && (
@@ -558,7 +453,7 @@ export default function AskBrainPage() {
         {/* Live thinking panel while streaming */}
         {loading && (
           <div className="flex justify-start">
-            <div className="glass-card px-5 py-3.5 text-sm text-text-secondary max-w-2xl w-full">
+            <div className="glass-card px-5 py-3.5 text-sm text-text-secondary max-w-4xl xl:max-w-5xl w-full">
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-pulse" />
                 <span

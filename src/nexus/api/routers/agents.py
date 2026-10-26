@@ -162,23 +162,32 @@ async def ask_brain(request: AskRequest):
         # Phase 1: Persist user message to SQLite chats.db before running agents
         log_message(role="user", content=request.query, conversation_id=conversation_id)
         
-        # Phase 2: Invoke the unified NexusAgent directly (no legacy multi-agent routing hop)
-        from nexus.agent.api import run_nexus_agent_with_trace
-        result = run_nexus_agent_with_trace(query=request.query, thread_id=conversation_id)
+        # Subscribe to trace_bus so synchronous `/ask` also captures 100% of LLM & Subagent trace steps
+        trace_events = []
+        def _on_sync_trace(evt):
+            trace_events.append(evt)
+        unsub_sync = trace_bus.subscribe(_on_sync_trace)
+
+        try:
+            # Phase 2: Invoke the unified NexusAgent directly (no legacy multi-agent routing hop)
+            from nexus.agent.api import run_nexus_agent_with_trace
+            result = run_nexus_agent_with_trace(query=request.query, thread_id=conversation_id)
+        finally:
+            unsub_sync()
 
         routed_domain = result.get("domain")
         agent_name = "nexus"
         elapsed_sec = time.time() - t0
         response_text = result.get("response", "")
 
-        # Phase 4: Persist assistant response to SQLite chats.db
+        # Phase 4: Persist assistant response + full trace events to SQLite chats.db
         log_message(
             role="assistant",
             content=response_text,
             agent=agent_name,
             domain=routed_domain,
             confidence=result.get("confidence"),
-            trace=[],
+            trace=trace_events,
             conversation_id=conversation_id
         )
 
@@ -192,6 +201,7 @@ async def ask_brain(request: AskRequest):
             confidence=result.get("confidence"),
             reasoning=result.get("reasoning"),
             tool_calls=result.get("tool_calls"),
+            trace_events=trace_events,
             latency_seconds=elapsed_sec,
         )
 
@@ -363,7 +373,7 @@ async def ask_brain_stream(request: AskRequest, req: Request):
 # ── Run Snapshot Inspection Endpoints ─────────────────────────
 
 @router.get("/runs")
-async def get_agent_runs(limit: int = 20, agent: Optional[str] = None):
+async def get_agent_runs(limit: int = 50, agent: Optional[str] = None):
     """
     Returns recent structured JSON run snapshots from logs/runs/.
     Supports filtering by agent name and custom limit.
@@ -397,5 +407,3 @@ async def get_engine_dashboard():
         "summary": summary,
         "markdown": markdown,
     }
-
-

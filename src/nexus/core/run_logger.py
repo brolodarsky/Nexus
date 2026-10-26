@@ -73,7 +73,88 @@ def log_run(
     filename = f"{timestamp_compact}_{safe_agent}_{run_id}.json"
     file_path = runs_dir / filename
 
-    # Build structured snapshot payload
+    # Build structured snapshot payload with lossless subagent & token telemetry extraction
+    events_list = trace_events or []
+    subagents_map: dict[str, dict[str, Any]] = {}
+    total_in_tokens = 0
+    total_out_tokens = 0
+    total_cached_tokens = 0
+
+    for evt in events_list:
+        evt_type = evt.get("type")
+        evt_agent_id = evt.get("agent_id") or evt.get("agent", "")
+        evt_data = evt.get("data") or {}
+
+        # Aggregate token counts from structured info events or message strings
+        if evt_type == "info" and isinstance(evt_data, dict) and ("input_tokens" in evt_data or "output_tokens" in evt_data):
+            total_in_tokens += int(evt_data.get("input_tokens", 0) or 0)
+            total_out_tokens += int(evt_data.get("output_tokens", 0) or 0)
+            total_cached_tokens += int(evt_data.get("cached_tokens", 0) or 0)
+
+        # Group isolated subagent lifecycles by their unique agent_id (or agent label for legacy traces)
+        is_sub = str(evt_agent_id).startswith("subagent") or str(evt.get("agent", "")).lower().startswith("subagent")
+        if is_sub:
+            sub_key = str(evt_agent_id) if str(evt_agent_id).startswith("subagent-") else str(evt.get("agent", "subagent"))
+            if sub_key not in subagents_map:
+                subagents_map[sub_key] = {
+                    "agent_id": sub_key,
+                    "agent_name": evt.get("agent", sub_key),
+                    "parent_id": evt.get("parent_id", "nexus"),
+                    "color": evt.get("color", "magenta"),
+                    "model_tier": evt_data.get("model_tier", "low") if isinstance(evt_data, dict) else "low",
+                    "task_prompt": evt_data.get("task_prompt") or evt_data.get("context") or evt.get("message", ""),
+                    "started_at": evt.get("timestamp"),
+                    "ended_at": None,
+                    "final_response": None,
+                    "tool_calls": [],
+                    "steps": [],
+                }
+            sub_entry = subagents_map[sub_key]
+            sub_entry["steps"].append(evt)
+            if evt_type == "agent_start" and isinstance(evt_data, dict):
+                if evt_data.get("task_prompt"):
+                    sub_entry["task_prompt"] = evt_data["task_prompt"]
+                if evt_data.get("model_tier"):
+                    sub_entry["model_tier"] = evt_data["model_tier"]
+            elif evt_type == "tool_call" and isinstance(evt_data, dict):
+                sub_entry["tool_calls"].append({
+                    "call_id": evt_data.get("call_id"),
+                    "tool": evt_data.get("tool"),
+                    "args": evt_data.get("args", {}),
+                    "timestamp": evt.get("timestamp"),
+                })
+            elif evt_type == "tool_result" and isinstance(evt_data, dict):
+                # Attach result to matching tool_call if call_id matches, or append to latest matching tool name
+                c_id = evt_data.get("call_id")
+                t_name = evt_data.get("tool")
+                matched = False
+                for tc_item in reversed(sub_entry["tool_calls"]):
+                    if (c_id and tc_item.get("call_id") == c_id) or (not c_id and tc_item.get("tool") == t_name and "result" not in tc_item):
+                        tc_item["result"] = evt_data.get("result")
+                        matched = True
+                        break
+                if not matched:
+                    sub_entry["tool_calls"].append({
+                        "call_id": c_id,
+                        "tool": t_name,
+                        "result": evt_data.get("result"),
+                        "timestamp": evt.get("timestamp"),
+                    })
+            elif evt_type == "llm_response":
+                resp_str = evt_data.get("response") if isinstance(evt_data, dict) else None
+                sub_entry["final_response"] = resp_str or evt.get("message")
+            elif evt_type == "agent_end":
+                sub_entry["ended_at"] = evt.get("timestamp")
+
+    merged_metadata = dict(metadata or {})
+    if total_in_tokens or total_out_tokens:
+        merged_metadata["token_usage"] = {
+            "input_tokens": total_in_tokens,
+            "output_tokens": total_out_tokens,
+            "cached_tokens": total_cached_tokens,
+            "total_tokens": total_in_tokens + total_out_tokens,
+        }
+
     snapshot = {
         "run_id": run_id,
         "timestamp": timestamp_iso,
@@ -87,9 +168,11 @@ def log_run(
         "latency_seconds": round(latency_seconds, 3) if latency_seconds is not None else None,
         "dpfh_injected_files": dpfh_injected_files or [],
         "tool_calls": tool_calls or [],
-        "trace_events_count": len(trace_events) if trace_events else 0,
-        "trace_events": trace_events or [],
-        "metadata": metadata or {},
+        "subagents_count": len(subagents_map),
+        "subagents": list(subagents_map.values()),
+        "trace_events_count": len(events_list),
+        "trace_events": events_list,
+        "metadata": merged_metadata,
     }
 
     # Write formatted, indented JSON with UTF-8 encoding
@@ -99,16 +182,16 @@ def log_run(
     return file_path
 
 
-def list_runs(limit: int = 20, agent: Optional[str] = None) -> list[dict[str, Any]]:
+def list_runs(limit: int = 50, agent: Optional[str] = None) -> list[dict[str, Any]]:
     """
-    Lists recent run snapshots ordered from newest to oldest.
+    Lists recent run snapshots ordered from newest to oldest without truncating query/response fields.
 
     Args:
         limit: Maximum number of run metadata entries to return
-        agent: Optional agent name filter (e.g., 'career')
+        agent: Optional agent name filter (e.g., 'nexus')
 
     Returns:
-        List of lightweight run summary dictionaries
+        List of run summary dictionaries including full query, response, subagent count, and trace step count
     """
     runs_dir = _ensure_runs_dir()
     json_files = sorted(runs_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -124,6 +207,21 @@ def list_runs(limit: int = 20, agent: Optional[str] = None) -> list[dict[str, An
             # Apply agent filter if specified
             if agent and data.get("agent_name", "").lower() != agent.lower():
                 continue
+
+            trace_evts = data.get("trace_events") or []
+            subagents_list = data.get("subagents")
+            if subagents_list is None:
+                # Reconstruct subagent count for older run logs that didn't persist `subagents` top-level array
+                sub_starts = [
+                    e for e in trace_evts
+                    if e.get("type") == "agent_start" and str(e.get("agent", "")).lower().startswith("subagent")
+                ]
+                subagents_count = len(sub_starts)
+            else:
+                subagents_count = len(subagents_list)
+
+            full_query = data.get("input_query", "")
+            full_response = data.get("output_response", "")
                 
             summaries.append({
                 "run_id": data.get("run_id"),
@@ -132,10 +230,15 @@ def list_runs(limit: int = 20, agent: Optional[str] = None) -> list[dict[str, An
                 "thread_id": data.get("thread_id"),
                 "agent_name": data.get("agent_name"),
                 "domain": data.get("domain"),
-                "query_preview": data.get("input_query", "")[:100],
-                "response_preview": data.get("output_response", "")[:100],
+                "input_query": full_query,
+                "output_response": full_response,
+                "query_preview": full_query,
+                "response_preview": full_response,
                 "latency_seconds": data.get("latency_seconds"),
                 "tool_calls_count": len(data.get("tool_calls", [])),
+                "subagents_count": subagents_count,
+                "trace_events_count": data.get("trace_events_count", len(trace_evts)),
+                "metadata": data.get("metadata") or {},
             })
         except Exception:
             continue

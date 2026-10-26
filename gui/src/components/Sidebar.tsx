@@ -21,7 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Ask Brain", href: "/ask", icon: "💬" },
   { label: "Brain Explorer", href: "/vault", icon: "🗂️" },
   { label: "HITL Queue", href: "/hitl", icon: "🔒" },
-  { label: "Audit Log", href: "/audit", icon: "📜", disabled: true },
+  { label: "Audit Log", href: "/audit", icon: "📜" },
 ];
 
 export default function Sidebar() {

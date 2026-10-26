@@ -7,9 +7,9 @@ and the Evaluation Suite (`src/nexus/evals/runner.py`).
 import time
 from typing import Any, Optional
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 
-from nexus.agent.graph import extract_message_text, nexus_graph, nexus_tracer
+from nexus.agent.graph import extract_message_text, nexus_graph, nexus_tracer, reset_subagent_counter
 
 
 # Optional[dict] and Optional[str] allow callers to omit metadata filters or explicit thread IDs.
@@ -19,7 +19,7 @@ def run_nexus_agent_with_trace(
     thread_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """
-    Execute a user query against the universal `NexusAgent` and return the final response + tool trace metadata.
+    Execute a user query against the universal `NexusAgent` and return the final response + lossless tool trace metadata.
 
     Args:
         query: The user's natural-language prompt or task instruction.
@@ -30,7 +30,9 @@ def run_nexus_agent_with_trace(
         Dictionary with keys: `response`, `agent`, `domain`, `confidence`, `reasoning`, `tool_calls`, `final_state`.
     """
     active_thread = thread_id or "nexus_primary"
-    nexus_tracer.agent_start(f"Query: {query[:80]}")
+    reset_subagent_counter()
+    # Emit 100% untruncated query context
+    nexus_tracer.agent_start(f"Query: {query}", metadata={"query": query, "thread_id": active_thread})
 
     # If CLI filters were supplied (e.g. `--domain career --tag medical`), prepend them as a concise hint.
     user_prompt = query
@@ -49,24 +51,41 @@ def run_nexus_agent_with_trace(
         )
         elapsed = time.time() - t0
 
-        # Collect tool call metadata emitted during this invocation
+        # Build a lookup map of tool_call_id -> full ToolMessage output from the current turn
+        all_msgs = final_state.get("messages", [])
+        # Identify the index of the latest HumanMessage so `tool_calls` only reports calls from this turn
+        last_human_idx = 0
+        for idx in range(len(all_msgs) - 1, -1, -1):
+            if isinstance(all_msgs[idx], HumanMessage):
+                last_human_idx = idx
+                break
+        turn_msgs = all_msgs[last_human_idx:]
+
+        tool_results_by_id: dict[str, str] = {}
+        for msg in turn_msgs:
+            if isinstance(msg, ToolMessage):
+                tc_id = getattr(msg, "tool_call_id", None)
+                if tc_id:
+                    tool_results_by_id[tc_id] = extract_message_text(msg)
+
+        # Collect 100% untruncated tool call metadata and results emitted during this invocation
         tool_calls: list[dict[str, Any]] = []
-        for msg in final_state.get("messages", []):
+        for msg in turn_msgs:
             if hasattr(msg, "tool_calls") and msg.tool_calls:
                 for tc in msg.tool_calls:
+                    tc_id = tc.get("id")
                     tool_calls.append({
+                        "id": tc_id,
                         "name": tc.get("name", ""),
-                        "args": {
-                            k: (v[:200] if isinstance(v, str) and len(v) > 200 else v)
-                            for k, v in (tc.get("args") or {}).items()
-                        },
+                        "args": dict(tc.get("args") or {}),
+                        "result": tool_results_by_id.get(tc_id) if tc_id else None,
                     })
 
-        last_message = final_state["messages"][-1] if final_state.get("messages") else None
+        last_message = all_msgs[-1] if all_msgs else None
         response_text = extract_message_text(last_message)
 
-        nexus_tracer.agent_end()
-        nexus_tracer.info(f"Completed in {elapsed:.1f}s")
+        nexus_tracer.agent_end(f"Completed in {elapsed:.1f}s")
+        nexus_tracer.info(f"Completed in {elapsed:.1f}s", data={"latency_seconds": round(elapsed, 3)})
 
         return {
             "response": response_text,
