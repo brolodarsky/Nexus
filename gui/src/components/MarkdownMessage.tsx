@@ -9,8 +9,23 @@ import remarkGfm from "remark-gfm";
 
 // ── Obsidian Wiki-Link Preprocessor & Rich Markdown Renderer ─
 
+// VaultNotePill: Renders an Obsidian [[Wiki-Link]] target as a glowing cyan badge with a document icon
+function VaultNotePill({ target, children }: { target: string; children: React.ReactNode }) {
+  return (
+    <span
+      title={`Vault Note: ${target}`}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded-md text-xs font-medium bg-accent-cyan/10 border border-accent-cyan/25 text-accent-cyan hover:bg-accent-cyan/20 transition-colors cursor-default"
+    >
+      <span className="opacity-70 text-[0.65rem]">📄</span>
+      {children}
+    </span>
+  );
+}
+
 // Converts Obsidian `[[Target|Alias]]` or `[[Target]]` syntax outside of fenced code blocks into standard
 // Markdown links with a `#wikilink:` href so custom `<a>` components can style them as glowing Vault pills.
+// Also strips wrapping backticks (`[[Target]]` or ``[[Target]]``) which LLMs commonly emit,
+// preventing ReactMarkdown from capturing the wikilink inside raw inline <code> tags.
 export function preprocessObsidianMarkdown(raw: string): string {
   if (!raw) return "";
   // Split on fenced code blocks (```...```) so wiki-links inside raw Markdown drafts stay untouched as literal code
@@ -19,11 +34,17 @@ export function preprocessObsidianMarkdown(raw: string): string {
     .map((segment, index) => {
       // Odd indices are fenced code blocks captured by the regex group
       if (index % 2 === 1) return segment;
-      return segment.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_match, target: string, alias?: string) => {
-        const display = (alias || target.split("/").pop() || target).trim();
-        const encodedTarget = encodeURIComponent(target.trim());
-        return `[${display}](#wikilink:${encodedTarget})`;
-      });
+      // Match backtick-wrapped wikilinks (`[[target|alias]]` or ``[[target]]``) OR bare wikilinks ([[target|alias]] or [[target]])
+      return segment.replace(
+        /`{1,2}\s*\[\[([^\]|]+)(?:\|([^\]]+))?\]\]\s*`{1,2}|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+        (_match, t1?: string, a1?: string, t2?: string, a2?: string) => {
+          const target = (t1 || t2 || "").trim();
+          const alias = (a1 || a2 || "").trim();
+          const display = alias || target.split("/").pop() || target;
+          const encodedTarget = encodeURIComponent(target);
+          return `[${display}](#wikilink:${encodedTarget})`;
+        }
+      );
     })
     .join("");
 }
@@ -72,15 +93,7 @@ export default function MarkdownMessage({ content }: { content: string }) {
             // Render Obsidian `[[Wiki-Links]]` as styled Vault note pills
             if (href?.startsWith("#wikilink:")) {
               const target = decodeURIComponent(href.replace("#wikilink:", ""));
-              return (
-                <span
-                  title={`Vault Note: ${target}`}
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded-md text-xs font-medium bg-accent-cyan/10 border border-accent-cyan/25 text-accent-cyan hover:bg-accent-cyan/20 transition-colors cursor-default"
-                >
-                  <span className="opacity-70 text-[0.65rem]">📄</span>
-                  {children}
-                </span>
-              );
+              return <VaultNotePill target={target}>{children}</VaultNotePill>;
             }
             return (
               <a
@@ -99,11 +112,42 @@ export default function MarkdownMessage({ content }: { content: string }) {
             </pre>
           ),
           code: ({ className, children }) => {
-            // Inline code vs fenced code block detection
+            // Inline code vs fenced code block detection (className "language-*" denotes fenced blocks)
             const isBlock = Boolean(className?.includes("language-"));
             if (isBlock) {
               return <code className={`${className} font-mono text-xs`}>{children}</code>;
             }
+
+            // Defense-in-depth: if any #wikilink: escaped pre-processing inside an inline code span,
+            // unpack and render it as a styled VaultNotePill rather than leaking raw markdown syntax
+            if (typeof children === "string" && children.includes("#wikilink:")) {
+              const parts = children.split(/(\[[^\]]+\]\(#wikilink:[^)]+\))/g);
+              if (parts.length > 1) {
+                return (
+                  <>
+                    {parts.map((part, i) => {
+                      const match = part.match(/^\[(.*?)\]\(#wikilink:(.*?)\)$/);
+                      if (match) {
+                        const display = match[1];
+                        const target = decodeURIComponent(match[2]);
+                        return (
+                          <VaultNotePill key={i} target={target}>
+                            {display}
+                          </VaultNotePill>
+                        );
+                      }
+                      if (!part) return null;
+                      return (
+                        <code key={i} className="px-1.5 py-0.5 mx-0.5 rounded-md bg-bg-secondary/90 border border-border-subtle font-mono text-[0.78rem] text-accent-cyan">
+                          {part}
+                        </code>
+                      );
+                    })}
+                  </>
+                );
+              }
+            }
+
             return (
               <code className="px-1.5 py-0.5 mx-0.5 rounded-md bg-bg-secondary/90 border border-border-subtle font-mono text-[0.78rem] text-accent-cyan">
                 {children}
