@@ -107,6 +107,56 @@ class VaultEntry(BaseModel):
     mtime: float | None = None
     has_audio: bool = False
 
+
+# VaultNoteSummary: models lightweight metadata for all markdown notes across the Vault
+# Used by the GUI Home page to support instant fuzzy-search, folder filtering, and note pinning
+class VaultNoteSummary(BaseModel):
+    name: str                   # Base filename with extension (e.g. "Goals.md")
+    title: str                  # Clean display title stripped of ".md" extension (e.g. "Goals")
+    path: str                   # Vault-relative path using forward slashes (e.g. "1. Core/1.1. Philosophy & Personal North Star/Goals.md")
+    folder: str                 # Vault-relative parent directory (e.g. "1. Core/1.1. Philosophy & Personal North Star") or "Vault Root"
+    size: int | None = None     # File size in bytes (None if inaccessible)
+    mtime: float | None = None  # POSIX timestamp of last modification in seconds since epoch
+
+
+@router.get("/notes", response_model=list[VaultNoteSummary])
+async def list_all_notes():
+    """
+    Returns a flat list of all markdown notes in the Vault, sorted alphabetically by path.
+    Enables rapid client-side search, filtering, and selection for pinned notes on the Home page.
+    """
+    notes: list[VaultNoteSummary] = []
+    try:
+        # os.walk: Recursively traverses directory tree; modifying dirs[:] in-place prunes ignored folders from traversal
+        for root, dirs, files in os.walk(VAULT_PATH):
+            dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
+            for file in files:
+                if file.endswith(".md"):
+                    full_path = Path(root) / file
+                    # Normalizing to forward slashes ensures cross-platform consistency between Windows and Unix
+                    rel_path = str(full_path.relative_to(VAULT_PATH)).replace("\\", "/")
+                    folder_rel = str(Path(root).relative_to(VAULT_PATH)).replace("\\", "/")
+                    if folder_rel == ".":
+                        folder_rel = "Vault Root"
+                    stat = full_path.stat()
+                    # Strip .md suffix for clean display title
+                    clean_title = file[:-3] if file.endswith(".md") else file
+                    notes.append(VaultNoteSummary(
+                        name=file,
+                        title=clean_title,
+                        path=rel_path,
+                        folder=folder_rel,
+                        size=stat.st_size,
+                        mtime=stat.st_mtime,
+                    ))
+        # Deterministic case-insensitive alphabetical sort by relative path
+        notes.sort(key=lambda n: n.path.lower())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to scan notes: {str(e)}")
+
+    return notes
+
+
 @router.get("/list", response_model=list[VaultEntry])
 async def list_vault(path: str | None = Query(default=None)):
     """

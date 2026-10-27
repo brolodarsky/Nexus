@@ -16,9 +16,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nexus — Engine Control Panel",
+  title: "Nexus",
   description:
-    "Mission Control for the Nexus Agentic Engine. Monitor agents, review HITL decisions, and explore your knowledge vault.",
+    "Personal Knowledge Workspace and Engine Control Panel for the Nexus Agentic Engine.",
 };
 
 export default function RootLayout({

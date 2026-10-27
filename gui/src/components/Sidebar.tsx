@@ -17,7 +17,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "Mission Control", href: "/", icon: "⚡" },
+  { label: "Home", href: "/", icon: "📌" },
   { label: "Ask Brain", href: "/ask", icon: "💬" },
   { label: "Brain Explorer", href: "/vault", icon: "🗂️" },
   { label: "HITL Queue", href: "/hitl", icon: "🔒" },

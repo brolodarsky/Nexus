@@ -20,6 +20,55 @@ export default function BrainExplorerPage() {
   // isPodcastCollapsed: allows minimizing the Podcast Studio control box when reading long notes
   const [isPodcastCollapsed, setIsPodcastCollapsed] = useState(false);
 
+  // pinnedNotes: array of note paths pinned to the Home page, synchronized via localStorage
+  const [pinnedNotes, setPinnedNotes] = useState<string[]>([]);
+
+  // Load pinned notes from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("nexus_pinned_notes");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) setPinnedNotes(parsed);
+      }
+    } catch {
+      // Ignore localStorage access restrictions
+    }
+  }, []);
+
+  // togglePinNote: Toggles whether the currently selected note is pinned to the Home page
+  const togglePinNote = (path: string) => {
+    const next = pinnedNotes.includes(path)
+      ? pinnedNotes.filter((p) => p !== path)
+      : [...pinnedNotes, path];
+    setPinnedNotes(next);
+    try {
+      localStorage.setItem("nexus_pinned_notes", JSON.stringify(next));
+    } catch {
+      // Ignore quota/privacy errors
+    }
+  };
+
+  // Inspect URL search params on mount to automatically open linked notes (e.g. /vault?note=Tasks.md)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const targetNote = params.get("note");
+      if (targetNote) {
+        const name = targetNote.split("/").pop() || targetNote;
+        const entry: VaultEntry = {
+          name,
+          path: targetNote,
+          type: "file",
+          has_audio: false,
+        };
+        handleSelectNote(entry);
+      }
+    } catch {
+      // Ignore URL parsing errors
+    }
+  }, []);
+
   useEffect(() => {
     fetchDirectory(currentPath);
   }, [currentPath]);
@@ -211,7 +260,30 @@ export default function BrainExplorerPage() {
           <>
             {/* Header / Podcast Control Panel */}
             <div className="p-6 border-b border-border-subtle bg-bg-secondary/20 shrink-0">
-              <h1 className="text-2xl font-bold text-text-primary mb-1 truncate">{selectedNote.name.replace(/\.md$/, "")}</h1>
+              <div className="flex items-start justify-between gap-4 mb-1">
+                <h1 className="text-2xl font-bold text-text-primary truncate">
+                  {selectedNote.name.replace(/\.md$/, "")}
+                </h1>
+                <button
+                  type="button"
+                  onClick={() => togglePinNote(selectedNote.path)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 ${
+                    pinnedNotes.includes(selectedNote.path)
+                      ? "bg-accent-amber/20 text-accent-amber border border-accent-amber/40 hover:bg-accent-rose/20 hover:text-accent-rose hover:border-accent-rose/40"
+                      : "bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/30 hover:bg-accent-cyan/25"
+                  }`}
+                  title={
+                    pinnedNotes.includes(selectedNote.path)
+                      ? "Unpin note from Home page"
+                      : "Pin note to Home page"
+                  }
+                >
+                  <span>📌</span>
+                  <span>
+                    {pinnedNotes.includes(selectedNote.path) ? "Pinned to Home" : "Pin to Home"}
+                  </span>
+                </button>
+              </div>
               <p className="text-xs font-mono text-text-muted mb-4">{selectedNote.path}</p>
 
               {/* Collapsible Podcast Studio Box */}

@@ -78,6 +78,18 @@ export interface VaultEntry {
   has_audio: boolean;         // True if a companion synthesized podcast .mp3 exists
 }
 
+// Interface representing lightweight metadata for all markdown notes in the Vault
+// Used for search, filtering, and pinning notes to the Home page
+export interface VaultNoteSummary {
+  name: string;               // Base filename with extension (e.g. "Goals.md")
+  title: string;              // Clean display title stripped of .md extension (e.g. "Goals")
+  path: string;               // Vault-relative path using forward slashes
+  folder: string;             // Vault-relative parent folder or "Vault Root"
+  size?: number;              // File size in bytes
+  mtime?: number;             // POSIX timestamp of last modification in seconds since epoch
+}
+
+
 // ── Helpers ───────────────────────────────────────────────────
 
 // Error subclass carrying the HTTP status + parsed FastAPI `detail`, so callers can branch on codes
@@ -487,6 +499,12 @@ export async function getRecentRevisions(limit = 10): Promise<HitlRevision[]> {
 export async function listVault(path?: string): Promise<VaultEntry[]> {
   const params = path ? `?path=${encodeURIComponent(path)}` : "";
   return apiFetch<VaultEntry[]>(`/api/vault/list${params}`);
+}
+
+// Fetches a flat list of all markdown notes in the Vault for fast search, filtering, and pinning
+// Promise<VaultNoteSummary[]>: Resolves with an array of note descriptors sorted alphabetically
+export async function getAllVaultNotes(): Promise<VaultNoteSummary[]> {
+  return apiFetch<VaultNoteSummary[]>("/api/vault/notes");
 }
 
 // Triggers background TTS podcast audio generation for a specific markdown note
