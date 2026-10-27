@@ -28,12 +28,32 @@ export interface AgentStatus {
 
 // Interface for synchronous chat response returned by POST /api/agents/ask
 export interface AskResponse {
-  response: string;         // Final generated markdown text from the agent
-  agent: string;            // The specific agent that answered (e.g. "career", "librarian")
-  domain: string | null;    // Classified knowledge domain (e.g. "career", "general")
-  confidence: number | null;// Router confidence score between 0.0 and 1.0
-  reasoning: string | null; // Explanation of why the router selected this agent
-  timestamp: string;        // ISO-8601 timestamp of response generation
+  response: string;           // Final generated markdown text from the agent
+  agent: string;              // The specific agent that answered (e.g. "nexus")
+  domain: string | null;      // Classified knowledge domain (e.g. "career", "general")
+  confidence: number | null;  // Router confidence score between 0.0 and 1.0
+  reasoning: string | null;   // Explanation of why the router selected this agent
+  model_tier?: string | null; // Effective model tier used for this turn ("strong", "medium", "low")
+  model_name?: string | null; // Concrete provider model identifier (e.g. "gemini-4-argon", "gemini-3.8-flash")
+  timestamp: string;          // ISO-8601 timestamp of response generation
+}
+
+// Interface describing a single selectable model/tier option in the Chat UI
+export interface ModelOption {
+  id: string;                 // Selection key passed as `model_tier` (e.g. "strong", "medium", "low")
+  tier: "low" | "medium" | "strong" | string; // Capability/cost tier
+  model_name: string;         // Concrete LLM identifier (e.g. "gemini-4-argon", "gemini-3.8-flash")
+  label: string;              // Full dropdown label (e.g. "Strong (gemini-4-argon)")
+  short_label: string;        // Compact pill label (e.g. "Strong", "Fast")
+  description: string;        // Tooltip/helper description of model strength and role
+}
+
+// Interface for the model catalog returned by GET /api/agents/models
+export interface ModelsCatalogResponse {
+  default_tier: string;       // Default tier configured in `.env` (`NEXUS_PRIMARY_TIER`)
+  default_model: string;      // Concrete model name for the default tier
+  provider: string;           // Active LLM provider ("gemini" or "openai")
+  models: ModelOption[];      // Ordered list of selectable model options for each turn
 }
 
 // Interface for individual chat messages loaded from SQLite chats.db
@@ -144,11 +164,24 @@ export async function getAgentStatus(): Promise<AgentStatus[]> {
   return apiFetch<AgentStatus[]>("/api/agents/status");
 }
 
-// Synchronous one-shot query execution through the Content Router
-export async function askBrain(query: string, conversationId: string): Promise<AskResponse> {
+// Fetches selectable per-turn model tiers and active provider catalog from GET /api/agents/models
+export async function getAvailableModels(): Promise<ModelsCatalogResponse> {
+  return apiFetch<ModelsCatalogResponse>("/api/agents/models");
+}
+
+// Synchronous one-shot query execution through NexusAgent with optional per-turn model tier override
+export async function askBrain(
+  query: string,
+  conversationId: string,
+  modelTier?: string
+): Promise<AskResponse> {
   return apiFetch<AskResponse>("/api/agents/ask", {
     method: "POST",
-    body: JSON.stringify({ query, conversation_id: conversationId }),
+    body: JSON.stringify({
+      query,
+      conversation_id: conversationId,
+      model_tier: modelTier,
+    }),
   });
 }
 
@@ -224,6 +257,8 @@ export interface TraceEvent {
   domain?: string | null;           // Routed domain category
   confidence?: number | null;       // Classification confidence
   reasoning?: string | null;        // Router rationale
+  model_tier?: string | null;       // Effective model tier used on this turn ("strong", "medium", "low")
+  model_name?: string | null;       // Concrete model identifier used on this turn (e.g. "gemini-4-argon")
 }
 
 // Interface representing an isolated subagent lifecycle within a structured run snapshot
@@ -311,6 +346,7 @@ export async function getAgentRun(runId: string): Promise<RunSnapshot> {
  * @param query The user's input prompt.
  * @param conversationId The target conversation UUID for sticky state and message persistence.
  * @param callbacks Event listeners for streaming updates, stream completion, and errors.
+ * @param modelTier Optional per-turn model tier or model identifier ("strong", "medium", "low").
  * @returns An abort function that immediately terminates the active HTTP stream.
  */
 export function askBrainStream(
@@ -320,7 +356,8 @@ export function askBrainStream(
     onTrace: (event: TraceEvent) => void;
     onDone: (event: TraceEvent) => void;
     onError: (error: string) => void;
-  }
+  },
+  modelTier?: string
 ): () => void {
   // AbortController allows canceling the fetch request if the user navigates away or cancels
   const controller = new AbortController();
@@ -331,7 +368,11 @@ export function askBrainStream(
       const res = await fetch(`${API_BASE}/api/agents/ask/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, conversation_id: conversationId }),
+        body: JSON.stringify({
+          query,
+          conversation_id: conversationId,
+          model_tier: modelTier,
+        }),
         signal: controller.signal, // Connects the abort signal to the fetch request
       });
 

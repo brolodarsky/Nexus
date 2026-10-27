@@ -7,6 +7,7 @@ import MarkdownMessage from "@/components/MarkdownMessage";
 import { ThinkingPanel } from "@/components/AgentTraceVisualizer";
 import { 
   askBrainStream, 
+  getAvailableModels,
   getChatHistory, 
   getConversations, 
   createConversation, 
@@ -18,9 +19,10 @@ import {
   type Conversation,
   type TraceEvent,
   type BoardBulletin,
+  type ModelOption,
 } from "@/lib/api";
 
-// ── Types ────────────────────────────────────────────────────
+// ── Types & Constants ────────────────────────────────────────
 
 interface Message {
   role: "user" | "assistant";
@@ -29,7 +31,58 @@ interface Message {
   agent?: string;
   domain?: string | null;
   confidence?: number | null;
+  modelTier?: string | null;
+  modelName?: string | null;
   trace?: TraceEvent[];
+}
+
+// LocalStorage key for remembering the user's selected model tier across page reloads
+const MODEL_STORAGE_KEY = "nexus_chat_model_tier";
+
+// Immediate fallback catalog rendered before GET /api/agents/models resolves
+const FALLBACK_MODELS: ModelOption[] = [
+  {
+    id: "strong",
+    tier: "strong",
+    model_name: "gemini-4-argon",
+    label: "Strong (gemini-4-argon)",
+    short_label: "Strong",
+    description: "Deep reasoning & complex synthesis — Astra (gemini-4-argon)",
+  },
+  {
+    id: "low",
+    tier: "low",
+    model_name: "gemini-3.8-flash",
+    label: "Fast (gemini-3.8-flash)",
+    short_label: "Fast",
+    description: "High-speed, low-cost execution — Flash (gemini-3.8-flash)",
+  },
+];
+
+// Extracts the model tier and model name executed during a turn from either explicit fields or persisted trace events
+function extractTurnModelInfo(
+  trace?: TraceEvent[],
+  explicitTier?: string | null,
+  explicitModel?: string | null
+): { modelTier: string | null; modelName: string | null } {
+  if (explicitTier || explicitModel) {
+    return { modelTier: explicitTier ?? null, modelName: explicitModel ?? null };
+  }
+  if (!trace || trace.length === 0) {
+    return { modelTier: null, modelName: null };
+  }
+  // Inspect root NexusAgent `agent_start` or `llm_call` trace events for `model_tier` and `model_name` metadata
+  for (const evt of trace) {
+    const isRoot = !evt.parent_id && (evt.agent_id === "nexus" || evt.agent === "NexusAgent" || !evt.agent_id);
+    if (isRoot && (evt.type === "agent_start" || evt.type === "llm_call") && evt.data) {
+      const tier = typeof evt.data.model_tier === "string" ? evt.data.model_tier : null;
+      const name = typeof evt.data.model_name === "string" ? evt.data.model_name : null;
+      if (tier || name) {
+        return { modelTier: tier, modelName: name };
+      }
+    }
+  }
+  return { modelTier: null, modelName: null };
 }
 
 export default function AskBrainPage() {
@@ -46,6 +99,9 @@ export default function AskBrainPage() {
   const [expandedBulletinIds, setExpandedBulletinIds] = useState<Record<number, boolean>>({});
   // isSidebarCollapsed: toggles the left conversation history menu between full width (w-64) and compact rail (w-14)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  // Per-turn model selection state: catalog of available models from `/api/agents/models` + currently selected tier
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>(FALLBACK_MODELS);
+  const [selectedModelTier, setSelectedModelTier] = useState<string>("strong");
   
   const liveTraceRef = useRef<TraceEvent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -60,8 +116,35 @@ export default function AskBrainPage() {
       .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
   }, [boardChannel]);
 
-  // Fetch conversations and initial Blackboard bulletins on mount
+  // Fetch conversations, selectable model catalog, and initial Blackboard bulletins on mount
   useEffect(() => {
+    try {
+      const savedTier = localStorage.getItem(MODEL_STORAGE_KEY);
+      if (savedTier) {
+        setSelectedModelTier(savedTier);
+      }
+    } catch {
+      // Ignore storage access errors in restricted browser contexts
+    }
+
+    getAvailableModels()
+      .then((catalog) => {
+        if (catalog.models && catalog.models.length > 0) {
+          setModelOptions(catalog.models);
+        }
+        // Only apply backend default_tier if the user hasn't explicitly chosen a tier in localStorage
+        try {
+          if (!localStorage.getItem(MODEL_STORAGE_KEY) && catalog.default_tier) {
+            setSelectedModelTier(catalog.default_tier);
+          }
+        } catch {
+          if (catalog.default_tier) {
+            setSelectedModelTier(catalog.default_tier);
+          }
+        }
+      })
+      .catch((err) => console.error("Failed to load available models:", err));
+
     getConversations().then((convos) => {
       setConversations(convos);
       if (convos.length > 0) {
@@ -70,6 +153,17 @@ export default function AskBrainPage() {
     });
     refreshBoard("all");
   }, [refreshBoard]);
+
+  // Persist user's per-turn model selection preference and keep input focused for immediate typing
+  const handleSelectModelTier = useCallback((tierId: string) => {
+    setSelectedModelTier(tierId);
+    try {
+      localStorage.setItem(MODEL_STORAGE_KEY, tierId);
+    } catch {
+      // Ignore storage quota errors
+    }
+    inputRef.current?.focus();
+  }, []);
 
   // Re-fetch bulletins when the user switches channel filter tabs
   useEffect(() => {
@@ -86,15 +180,20 @@ export default function AskBrainPage() {
     getChatHistory(activeConvId)
       .then((history) => {
         setMessages(
-          history.map((entry) => ({
-            role: entry.role,
-            content: entry.content,
-            agent: entry.agent,
-            domain: entry.domain,
-            confidence: entry.confidence,
-            trace: entry.trace,
-            timestamp: new Date(entry.timestamp),
-          }))
+          history.map((entry) => {
+            const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
+            return {
+              role: entry.role,
+              content: entry.content,
+              agent: entry.agent,
+              domain: entry.domain,
+              confidence: entry.confidence,
+              modelTier,
+              modelName,
+              trace: entry.trace,
+              timestamp: new Date(entry.timestamp),
+            };
+          })
         );
       })
       .catch((err) => console.error("Failed to load chat history:", err))
@@ -120,7 +219,10 @@ export default function AskBrainPage() {
     };
   }, []);
 
-  const handleNewChat = async () => {
+  const handleNewChat = async (initialTier?: string) => {
+    if (initialTier) {
+      handleSelectModelTier(initialTier);
+    }
     setActiveConvId(null);
     setMessages([]);
     inputRef.current?.focus();
@@ -159,10 +261,14 @@ export default function AskBrainPage() {
         getConversations().then(setConversations);
       }
 
+      const turnModelOption =
+        modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
       const userMsg: Message = {
         role: "user",
         content: query,
         timestamp: new Date(),
+        modelTier: turnModelOption?.tier ?? selectedModelTier,
+        modelName: turnModelOption?.model_name ?? null,
       };
       setMessages((prev) => [...prev, userMsg]);
       setInput("");
@@ -170,67 +276,82 @@ export default function AskBrainPage() {
       setLiveTrace([]);
       liveTraceRef.current = [];
 
-      const abort = askBrainStream(query, targetConvId, {
-        onTrace: (event) => {
-          setLiveTrace((prev) => {
-            const newTrace = [...prev, event];
-            liveTraceRef.current = newTrace;
-            return newTrace;
-          });
-          // Live-refresh the Blackboard whenever a subagent posts a bulletin or completes
-          if (
-            event.message?.includes("Blackboard") ||
-            event.data?.tool === "post_to_board" ||
-            (event.agent === "Subagent" && event.type === "agent_end")
-          ) {
+      const abort = askBrainStream(
+        query,
+        targetConvId,
+        {
+          onTrace: (event) => {
+            setLiveTrace((prev) => {
+              const newTrace = [...prev, event];
+              liveTraceRef.current = newTrace;
+              return newTrace;
+            });
+            // Live-refresh the Blackboard whenever a subagent posts a bulletin or completes
+            if (
+              event.message?.includes("Blackboard") ||
+              event.data?.tool === "post_to_board" ||
+              (event.agent === "Subagent" && event.type === "agent_end")
+            ) {
+              refreshBoard();
+            }
+          },
+          onDone: (event) => {
+            // Build the final message with the full trace and executed model metadata attached
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const doneEvt = event as any;
+            const { modelTier, modelName } = extractTurnModelInfo(
+              liveTraceRef.current,
+              doneEvt.model_tier as string | null,
+              doneEvt.model_name as string | null
+            );
+            const assistantMsg: Message = {
+              role: "assistant",
+              content: event.response ?? "",
+              timestamp: new Date(event.timestamp),
+              agent: doneEvt.agent as string | undefined,
+              domain: doneEvt.domain as string | null,
+              confidence: doneEvt.confidence as number | null,
+              modelTier: modelTier ?? turnModelOption?.tier ?? selectedModelTier,
+              modelName: modelName ?? turnModelOption?.model_name ?? null,
+              trace: liveTraceRef.current,
+            };
+            setMessages((msgs) => [...msgs, assistantMsg]);
+            setLiveTrace([]);
+            liveTraceRef.current = [];
+            setLoading(false);
+            abortRef.current = null;
+            inputRef.current?.focus();
+            getConversations().then(setConversations); // refresh to update active agent status
             refreshBoard();
-          }
+          },
+          onError: (errorMessage) => {
+            const errorMsg: Message = {
+              role: "assistant",
+              content: `❌ ${errorMessage}`,
+              timestamp: new Date(),
+              modelTier: turnModelOption?.tier ?? selectedModelTier,
+              modelName: turnModelOption?.model_name ?? null,
+              trace: liveTraceRef.current.length > 0 ? liveTraceRef.current : undefined,
+            };
+            setMessages((msgs) => [...msgs, errorMsg]);
+            setLiveTrace([]);
+            liveTraceRef.current = [];
+            setLoading(false);
+            abortRef.current = null;
+            inputRef.current?.focus();
+          },
         },
-        onDone: (event) => {
-          // Build the final message with the full trace attached
-          // The "done" event carries agent/domain/confidence at the top level
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const doneEvt = event as any;
-          const assistantMsg: Message = {
-            role: "assistant",
-            content: event.response ?? "",
-            timestamp: new Date(event.timestamp),
-            agent: doneEvt.agent as string | undefined,
-            domain: doneEvt.domain as string | null,
-            confidence: doneEvt.confidence as number | null,
-            trace: liveTraceRef.current,
-          };
-          setMessages((msgs) => [...msgs, assistantMsg]);
-          setLiveTrace([]);
-          liveTraceRef.current = [];
-          setLoading(false);
-          abortRef.current = null;
-          inputRef.current?.focus();
-          getConversations().then(setConversations); // refresh to update active agent status
-          refreshBoard();
-        },
-        onError: (errorMessage) => {
-          const errorMsg: Message = {
-            role: "assistant",
-            content: `❌ ${errorMessage}`,
-            timestamp: new Date(),
-            trace: liveTraceRef.current.length > 0 ? liveTraceRef.current : undefined,
-          };
-          setMessages((msgs) => [...msgs, errorMsg]);
-          setLiveTrace([]);
-          liveTraceRef.current = [];
-          setLoading(false);
-          abortRef.current = null;
-          inputRef.current?.focus();
-        },
-      });
+        selectedModelTier
+      );
 
       abortRef.current = abort;
     },
-    [input, loading, activeConvId]
+    [input, loading, activeConvId, selectedModelTier, modelOptions, refreshBoard]
   );
 
   const activeConv = conversations.find(c => c.id === activeConvId);
+  const activeModelOption =
+    modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
 
   return (
     <div className="flex h-full max-h-screen">
@@ -254,7 +375,7 @@ export default function AskBrainPage() {
 
           {/* Compact New Chat Action */}
           <button
-            onClick={handleNewChat}
+            onClick={() => handleNewChat()}
             className="mt-3 w-9 h-9 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors flex items-center justify-center text-lg font-bold"
             title="Start New Chat"
             aria-label="Start New Chat"
@@ -286,23 +407,50 @@ export default function AskBrainPage() {
           className="w-64 border-r border-border-subtle bg-bg-secondary flex flex-col shrink-0 transition-all duration-300 ease-in-out"
           aria-label="Conversations Menu"
         >
-          <div className="p-4 border-b border-border-subtle flex items-center gap-2">
-            <button 
-              onClick={handleNewChat}
-              className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors text-sm font-medium"
-            >
-              <span className="text-lg">+</span> New Chat
-            </button>
-            <button
-              onClick={() => setIsSidebarCollapsed(true)}
-              className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary transition-colors shrink-0"
-              title="Collapse chat history"
-              aria-label="Collapse chat history"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-              </svg>
-            </button>
+          <div className="p-4 border-b border-border-subtle space-y-2">
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => handleNewChat()}
+                className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors text-sm font-medium"
+              >
+                <span className="text-lg">+</span> New Chat
+              </button>
+              <button
+                onClick={() => setIsSidebarCollapsed(true)}
+                className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary transition-colors shrink-0"
+                title="Collapse chat history"
+                aria-label="Collapse chat history"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                </svg>
+              </button>
+            </div>
+            {/* Quick New Chat Model Preset Buttons (Strong vs. Fast/Low-Cost opening) */}
+            <div className="flex items-center gap-1.5">
+              {modelOptions.map((opt) => {
+                const isSelected = selectedModelTier === opt.id;
+                const isStrong = opt.tier === "strong";
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => handleNewChat(opt.id)}
+                    title={`Open new chat with ${opt.description}`}
+                    className={`flex-1 py-1 px-2 rounded-lg text-[0.68rem] font-medium border transition-all flex items-center justify-center gap-1 ${
+                      isSelected
+                        ? isStrong
+                          ? "bg-accent-violet/15 border-accent-violet/40 text-purple-300"
+                          : "bg-accent-cyan/15 border-accent-cyan/40 text-accent-cyan"
+                        : "bg-bg-tertiary/50 border-border-subtle text-text-muted hover:text-text-secondary"
+                    }`}
+                  >
+                    <span>{isStrong ? "🧠" : opt.tier === "medium" ? "⚖️" : "⚡"}</span>
+                    <span className="truncate">{opt.short_label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {conversations.map((conv) => (
@@ -414,16 +562,31 @@ export default function AskBrainPage() {
                 }`}
             >
               {msg.role === "assistant" && msg.agent && (
-                <span className="inline-flex items-center gap-1.5 mb-2.5 px-2.5 py-0.5 rounded-full text-[0.65rem] font-medium bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan">
-                  <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan" />
-                  {msg.agent === "career"
-                    ? "Career Agent"
-                    : msg.agent === "librarian"
-                      ? "Librarian"
-                      : "NexusAgent"}
-                  {msg.domain && <span className="text-text-muted">• {msg.domain}</span>}
-                  {msg.confidence != null && <span className="text-text-muted">• {Math.round(msg.confidence * 100)}%</span>}
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.65rem] font-medium bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan" />
+                    {msg.agent === "career"
+                      ? "Career Agent"
+                      : msg.agent === "librarian"
+                        ? "Librarian"
+                        : "NexusAgent"}
+                    {msg.domain && <span className="text-text-muted">• {msg.domain}</span>}
+                    {msg.confidence != null && <span className="text-text-muted">• {Math.round(msg.confidence * 100)}%</span>}
+                  </span>
+                  {(msg.modelName || msg.modelTier) && (
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-mono border ${
+                        msg.modelTier === "strong"
+                          ? "bg-accent-violet/15 border-accent-violet/30 text-purple-300"
+                          : "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                      }`}
+                      title={`Executed on ${msg.modelName ?? msg.modelTier} (${msg.modelTier ?? "default"} tier)`}
+                    >
+                      <span>{msg.modelTier === "strong" ? "🧠" : msg.modelTier === "medium" ? "⚖️" : "⚡"}</span>
+                      <span>{msg.modelName ?? msg.modelTier}</span>
+                    </span>
+                  )}
+                </div>
               )}
               {msg.role === "assistant" ? (
                 <MarkdownMessage content={msg.content} />
@@ -464,7 +627,13 @@ export default function AskBrainPage() {
                   className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-pulse"
                   style={{ animationDelay: "0.4s" }}
                 />
-                <span className="ml-2">Routing query…</span>
+                <span className="ml-2">
+                  Routing query with{" "}
+                  <span className="font-mono text-text-primary">
+                    {activeModelOption?.label ?? selectedModelTier}
+                  </span>
+                  …
+                </span>
               </span>
               <ThinkingPanel
                 events={liveTrace}
@@ -476,27 +645,62 @@ export default function AskBrainPage() {
         )}
       </div>
 
-      {/* ── Input Bar ─────────────────────────────────────── */}
+      {/* ── Input Bar with Per-Turn Model Selector ──────────── */}
       <form
         onSubmit={handleSubmit}
-        className="px-8 py-5 border-t border-border-subtle shrink-0"
+        className="px-8 py-4 border-t border-border-subtle shrink-0"
       >
-        <div className="flex items-center gap-3 glass-card px-4 py-2.5">
+        <div className="flex items-center gap-2.5 glass-card px-4 py-2.5">
           <span className="text-lg text-text-muted">💬</span>
           <input
             ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask your brain anything..."
+            placeholder={`Ask your brain anything (${activeModelOption?.label ?? selectedModelTier})...`}
             disabled={loading}
             className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none disabled:opacity-50"
             id="ask-brain-input"
           />
+
+          {/* Per-Turn Model Selector: segmented toggle pills + native select accessibility */}
+          <div
+            className="flex items-center gap-1 p-1 rounded-xl bg-bg-secondary/80 border border-border-subtle shrink-0"
+            role="group"
+            aria-label="Select model for this turn"
+          >
+            {modelOptions.map((opt) => {
+              const isSelected = selectedModelTier === opt.id;
+              const isStrong = opt.tier === "strong";
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => handleSelectModelTier(opt.id)}
+                  title={opt.description}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 disabled:opacity-50 ${
+                    isSelected
+                      ? isStrong
+                        ? "bg-accent-violet/20 text-purple-300 border border-accent-violet/40 shadow-sm"
+                        : "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40 shadow-sm"
+                      : "text-text-muted hover:text-text-primary border border-transparent"
+                  }`}
+                >
+                  <span>{isStrong ? "🧠" : opt.tier === "medium" ? "⚖️" : "⚡"}</span>
+                  <span>{opt.short_label}</span>
+                  <span className="hidden md:inline font-mono text-[0.65rem] opacity-75">
+                    ({opt.model_name})
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="flex items-center justify-center w-9 h-9 rounded-xl bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            className="flex items-center justify-center w-9 h-9 rounded-xl bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
           >
             <svg
               viewBox="0 0 24 24"

@@ -42,18 +42,21 @@ router = APIRouter()
 
 # Pydantic schema for incoming chat requests
 class AskRequest(BaseModel):
-    query: str              # Raw user prompt text
-    conversation_id: str    # UUID linking to chats.db conversation thread
+    query: str                          # Raw user prompt text
+    conversation_id: str                # UUID linking to chats.db conversation thread
+    model_tier: Optional[str] = None    # Optional per-turn model tier/ID override ("strong", "medium", "low")
 
 
 # Pydantic schema for synchronous chat responses
 class AskResponse(BaseModel):
-    response: str                   # Markdown text returned by the answering agent
-    agent: str                      # Agent identifier (e.g., "career", "librarian")
-    domain: str | None = None       # Classified knowledge domain (e.g., "career", "general")
-    confidence: float | None = None # Router confidence score (0.0 to 1.0)
-    reasoning: str | None = None    # Router explanation for domain selection
-    timestamp: str                  # ISO-8601 UTC timestamp
+    response: str                       # Markdown text returned by the answering agent
+    agent: str                          # Agent identifier (e.g., "nexus")
+    domain: str | None = None           # Classified knowledge domain (e.g., "career", "general")
+    confidence: float | None = None     # Router confidence score (0.0 to 1.0)
+    reasoning: str | None = None        # Router explanation for domain selection
+    model_tier: str | None = None       # Effective model tier used for this turn ("strong", "medium", "low")
+    model_name: str | None = None       # Concrete provider model identifier (e.g., "gemini-4-argon", "gemini-3.8-flash")
+    timestamp: str                      # ISO-8601 UTC timestamp
 
 
 # Pydantic schema for agent operational status displayed in the dashboard
@@ -95,6 +98,14 @@ AGENT_REGISTRY = [
 async def get_agent_status():
     """Returns the status of all registered agents for dashboard monitoring."""
     return AGENT_REGISTRY
+
+
+# Returns selectable model tiers and active provider metadata for per-turn model selection in the Chat UI
+@router.get("/models")
+async def get_models_catalog():
+    """Returns the configured model tiers, concrete model identifiers, and default tier from `.env`."""
+    from nexus.core.constants import get_available_models
+    return get_available_models()
 
 # Returns all conversation threads for sidebar rendering
 @router.get("/ask/conversations")
@@ -169,9 +180,13 @@ async def ask_brain(request: AskRequest):
         unsub_sync = trace_bus.subscribe(_on_sync_trace)
 
         try:
-            # Phase 2: Invoke the unified NexusAgent directly (no legacy multi-agent routing hop)
+            # Phase 2: Invoke the unified NexusAgent directly with optional per-turn model override
             from nexus.agent.api import run_nexus_agent_with_trace
-            result = run_nexus_agent_with_trace(query=request.query, thread_id=conversation_id)
+            result = run_nexus_agent_with_trace(
+                query=request.query,
+                thread_id=conversation_id,
+                model_tier=request.model_tier,
+            )
         finally:
             unsub_sync()
 
@@ -179,6 +194,8 @@ async def ask_brain(request: AskRequest):
         agent_name = "nexus"
         elapsed_sec = time.time() - t0
         response_text = result.get("response", "")
+        used_tier = result.get("model_tier")
+        used_model = result.get("model_name")
 
         # Phase 4: Persist assistant response + full trace events to SQLite chats.db
         log_message(
@@ -203,6 +220,7 @@ async def ask_brain(request: AskRequest):
             tool_calls=result.get("tool_calls"),
             trace_events=trace_events,
             latency_seconds=elapsed_sec,
+            metadata={"model_tier": used_tier, "model_name": used_model},
         )
 
         # Update last_run timestamps in the static registry
@@ -219,6 +237,8 @@ async def ask_brain(request: AskRequest):
             domain=routed_domain,
             confidence=result.get("confidence"),
             reasoning=result.get("reasoning"),
+            model_tier=used_tier,
+            model_name=used_model,
             timestamp=now,
         )
     except Exception as e:
@@ -231,7 +251,12 @@ async def ask_brain(request: AskRequest):
 # ── SSE Streaming Endpoint & Worker Thread ───────────────────
 
 # Worker function executed inside a dedicated background OS thread
-def _run_pipeline(query: str, conversation_id: str, event_queue: queue.Queue):
+def _run_pipeline(
+    query: str,
+    conversation_id: str,
+    event_queue: queue.Queue,
+    model_tier: Optional[str] = None,
+):
     """
     Runs agent graph execution in a background thread so the async event loop is not blocked.
     Collects trace events via trace_bus subscription and pushes the final 'done' event to event_queue.
@@ -247,14 +272,20 @@ def _run_pipeline(query: str, conversation_id: str, event_queue: queue.Queue):
     unsub = trace_bus.subscribe(_on_trace)
 
     try:
-        # Invoke the unified NexusAgent directly
+        # Invoke the unified NexusAgent directly with optional per-turn model override
         from nexus.agent.api import run_nexus_agent_with_trace
-        result = run_nexus_agent_with_trace(query=query, thread_id=conversation_id)
+        result = run_nexus_agent_with_trace(
+            query=query,
+            thread_id=conversation_id,
+            model_tier=model_tier,
+        )
 
         routed_domain = result.get("domain")
         agent_name = "nexus"
         elapsed_sec = time.time() - t0
         response_text = result.get("response", "")
+        used_tier = result.get("model_tier")
+        used_model = result.get("model_name")
 
         now = datetime.now(timezone.utc).isoformat()
         for agent in AGENT_REGISTRY:
@@ -286,6 +317,7 @@ def _run_pipeline(query: str, conversation_id: str, event_queue: queue.Queue):
             tool_calls=result.get("tool_calls"),
             trace_events=trace_events,
             latency_seconds=elapsed_sec,
+            metadata={"model_tier": used_tier, "model_name": used_model},
         )
 
         # Push terminal 'done' event to thread queue to complete the SSE stream
@@ -296,6 +328,8 @@ def _run_pipeline(query: str, conversation_id: str, event_queue: queue.Queue):
             "domain": routed_domain,
             "confidence": result.get("confidence"),
             "reasoning": result.get("reasoning"),
+            "model_tier": used_tier,
+            "model_name": used_model,
             "timestamp": now,
         })
     except Exception as e:
@@ -329,7 +363,7 @@ async def ask_brain_stream(request: AskRequest, req: Request):
     # Spawn synchronous agent pipeline in background OS thread (daemon=True allows clean shutdown)
     pipeline_thread = threading.Thread(
         target=_run_pipeline, 
-        args=(request.query, request.conversation_id, event_queue), 
+        args=(request.query, request.conversation_id, event_queue, request.model_tier), 
         daemon=True
     )
     pipeline_thread.start()

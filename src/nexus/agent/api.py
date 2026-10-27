@@ -10,13 +10,15 @@ from typing import Any, Optional
 from langchain_core.messages import HumanMessage, ToolMessage
 
 from nexus.agent.graph import extract_message_text, nexus_graph, nexus_tracer, reset_subagent_counter
+from nexus.core.constants import resolve_model_config
 
 
-# Optional[dict] and Optional[str] allow callers to omit metadata filters or explicit thread IDs.
+# Optional[dict] and Optional[str] allow callers to omit metadata filters, explicit thread IDs, or per-turn model overrides.
 def run_nexus_agent_with_trace(
     query: str,
     filters: Optional[dict] = None,
     thread_id: Optional[str] = None,
+    model_tier: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Execute a user query against the universal `NexusAgent` and return the final response + lossless tool trace metadata.
@@ -25,14 +27,27 @@ def run_nexus_agent_with_trace(
         query: The user's natural-language prompt or task instruction.
         filters: Optional CLI metadata filters (`domain`, `tag`, `type`) to prepend as search context hints.
         thread_id: Optional conversation UUID for persistent `SqliteSaver` checkpointer state.
+        model_tier: Optional per-turn model tier or model identifier (`"strong"`, `"medium"`, `"low"`, or explicit model name).
 
     Returns:
-        Dictionary with keys: `response`, `agent`, `domain`, `confidence`, `reasoning`, `tool_calls`, `final_state`.
+        Dictionary with keys: `response`, `agent`, `domain`, `confidence`, `reasoning`, `model_tier`, `model_name`, `tool_calls`, `final_state`.
     """
     active_thread = thread_id or "nexus_primary"
+    resolved_model = resolve_model_config(model_tier)
+    effective_tier = resolved_model["tier"]
+    active_model_name = resolved_model["model_name"]
+
     reset_subagent_counter()
-    # Emit 100% untruncated query context
-    nexus_tracer.agent_start(f"Query: {query}", metadata={"query": query, "thread_id": active_thread})
+    # Emit 100% untruncated query context + active per-turn model tier and model name for the Thinking Panel & DAG
+    nexus_tracer.agent_start(
+        f"Query ({effective_tier} · {active_model_name}): {query}",
+        metadata={
+            "query": query,
+            "thread_id": active_thread,
+            "model_tier": effective_tier,
+            "model_name": active_model_name,
+        },
+    )
 
     # If CLI filters were supplied (e.g. `--domain career --tag medical`), prepend them as a concise hint.
     user_prompt = query
@@ -41,7 +56,8 @@ def run_nexus_agent_with_trace(
         if filter_str:
             user_prompt = f"[Context Filter Hint: {filter_str}]\n\n{query}"
 
-    config = {"configurable": {"thread_id": active_thread}}
+    # Pass `model_tier` inside LangGraph `configurable` so `call_model` resolves the chosen model for this turn
+    config = {"configurable": {"thread_id": active_thread, "model_tier": model_tier}}
     t0 = time.time()
 
     try:
@@ -92,7 +108,9 @@ def run_nexus_agent_with_trace(
             "agent": "nexus",
             "domain": (filters or {}).get("domain"),
             "confidence": 1.0,
-            "reasoning": "Single Universal Agent (NexusAgent) hydrated with Master Instructions.",
+            "reasoning": f"Single Universal Agent (NexusAgent · {active_model_name} [{effective_tier}]) hydrated with Master Instructions.",
+            "model_tier": effective_tier,
+            "model_name": active_model_name,
             "tool_calls": tool_calls,
             "final_state": final_state,
         }
@@ -116,6 +134,8 @@ def run_nexus_agent_with_trace(
             "domain": None,
             "confidence": 0.0,
             "reasoning": f"Error: {e}",
+            "model_tier": effective_tier,
+            "model_name": active_model_name,
             "tool_calls": [],
             "final_state": {"messages": []},
         }
@@ -125,9 +145,10 @@ def run_nexus_agent(
     query: str,
     filters: Optional[dict] = None,
     thread_id: Optional[str] = None,
+    model_tier: Optional[str] = None,
 ) -> str:
     """Execute a query against `NexusAgent` and return the markdown response string."""
-    result = run_nexus_agent_with_trace(query=query, filters=filters, thread_id=thread_id)
+    result = run_nexus_agent_with_trace(query=query, filters=filters, thread_id=thread_id, model_tier=model_tier)
     return result["response"]
 
 
@@ -139,21 +160,26 @@ def route_content(
     content: str,
     filters: Optional[dict] = None,
     thread_id: Optional[str] = None,
+    model_tier: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Universal entrypoint returning a structured dict (`response`, `agent`, `domain`, `confidence`, `reasoning`).
     Replaces the legacy 3-agent router pipeline with direct execution on `NexusAgent`.
     """
-    return run_nexus_agent_with_trace(query=content, filters=filters, thread_id=thread_id)
+    return run_nexus_agent_with_trace(query=content, filters=filters, thread_id=thread_id, model_tier=model_tier)
 
 
-def execute_vault_query(query: str, thread_id: Optional[str] = None) -> dict[str, Any]:
+def execute_vault_query(
+    query: str,
+    thread_id: Optional[str] = None,
+    model_tier: Optional[str] = None,
+) -> dict[str, Any]:
     """
     Executes a query against `NexusAgent` and returns the raw LangGraph `final_state` dict (`{"messages": [...]}`).
     Used by `src/nexus/evals/runner.py` to inspect message history, tool calls, and token usage.
     """
     active_thread = thread_id or f"eval_{int(time.time() * 1000)}"
-    config = {"configurable": {"thread_id": active_thread}}
+    config = {"configurable": {"thread_id": active_thread, "model_tier": model_tier}}
     return nexus_graph.invoke(
         {"messages": [HumanMessage(content=query)]},
         config=config,

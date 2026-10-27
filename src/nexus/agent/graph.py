@@ -34,6 +34,8 @@ from typing import Annotated, Any, Literal, Sequence, TypedDict
 # - SystemMessage: Ephemeral top-level instructions injected per LLM invocation
 # - ToolMessage: Output returned from executing a `@tool` function
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+# RunnableConfig: LangChain configuration dictionary carrying per-invocation metadata (`thread_id`, `model_tier`)
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 # SqliteSaver: LangGraph checkpointer that persists graph state snapshots across turns
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -49,7 +51,14 @@ from langgraph.prebuilt import ToolNode
 from langchain_openai import ChatOpenAI
 
 from nexus.core.config import settings
-from nexus.core.constants import AI_MODEL_LOW, AI_MODEL_MEDIUM, VAULT_PATH, ModelTier, get_chat_model
+from nexus.core.constants import (
+    AI_MODEL_LOW,
+    AI_MODEL_MEDIUM,
+    VAULT_PATH,
+    ModelTier,
+    get_chat_model,
+    resolve_model_config,
+)
 # inject_root_instructions: Dynamically loads and hydrates `Vault/Master Instructions.md` (<1ms disk read)
 from nexus.core.blackboard import infer_channel, post_bulletin
 from nexus.core.engine_constitution import inject_root_instructions
@@ -376,7 +385,8 @@ def _sanitize_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
 
 # ── Graph Nodes ──────────────────────────────────────────────────────────────
 
-def call_model(state: NexusAgentState) -> dict:
+# `config: RunnableConfig | None` carries per-turn runtime options (`thread_id`, `model_tier`) injected by `nexus_graph.invoke(..., config=config)`.
+def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> dict:
     """
     Node: Invokes the LLM with the ephemeral root instructions (`inject_root_instructions()`) and thread history.
     Enforces Ephemeral System Prompt Injection (Standard 9): `Master Instructions.md` is read fresh from disk
@@ -393,9 +403,17 @@ def call_model(state: NexusAgentState) -> dict:
     ephemeral_sys_msg = SystemMessage(content=system_prompt_content)
     messages_for_llm: list[BaseMessage] = [ephemeral_sys_msg] + cleaned_messages
 
-    # 2. Resolve `get_chat_model()` dynamically on each turn so `.env` tier/model switches apply immediately
-    nexus_tracer.llm_call()
-    active_llm = get_chat_model(temperature=0.0)
+    # 2. Extract optional per-turn `model_tier` override from LangGraph `RunnableConfig` (`configurable.model_tier`).
+    # Keeping `model_tier` in `RunnableConfig` rather than `messages` preserves 100% KV prompt-cache prefix stability.
+    configurable = (config or {}).get("configurable") or {}
+    requested_tier = configurable.get("model_tier")
+    resolved_model = resolve_model_config(requested_tier)
+    effective_tier = resolved_model["tier"]
+    active_model_name = resolved_model["model_name"]
+
+    # Resolve `get_chat_model(tier=requested_tier)` dynamically on each turn so UI model switches and `.env` edits apply immediately
+    nexus_tracer.llm_call(metadata={"model_tier": effective_tier, "model_name": active_model_name})
+    active_llm = get_chat_model(tier=requested_tier, temperature=0.0)
     try:
         response = active_llm.bind_tools(TOOLS).invoke(messages_for_llm)
     except Exception as e:
@@ -406,12 +424,11 @@ def call_model(state: NexusAgentState) -> dict:
             token in err_msg.lower() or token in type(e).__name__.lower()
             for token in ("504", "deadline_exceeded", "timeout", "timed out")
         )
-        # Resilient Tier Fallback: If the primary strong model hits a deadline timeout, fallback to the high-throughput
+        # Resilient Tier Fallback: If the active strong/medium model hits a deadline timeout, fallback to the high-throughput
         # low-latency tier (`gemini-3.8-flash` / `low`) to preserve the user's conversation session without crashing.
-        current_primary = settings.nexus_primary_tier
-        if is_deadline_or_timeout and current_primary != "low":
+        if is_deadline_or_timeout and effective_tier != "low":
             nexus_tracer.info(
-                f"⚠️ Primary model tier ({current_primary}) exceeded deadline (504 DEADLINE_EXCEEDED). "
+                f"⚠️ Primary model tier ({effective_tier} · {active_model_name}) exceeded deadline (504 DEADLINE_EXCEEDED). "
                 "Gracefully falling back to low-latency tier (Flash) to complete the turn..."
             )
             fallback_llm = get_chat_model(tier="low", temperature=0.0)

@@ -14,7 +14,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from nexus.agent.api import run_nexus_agent_with_trace
 from nexus.agent.graph import call_model
 from nexus.core.config import EngineSettings
-from nexus.core.constants import get_chat_model
+from nexus.core.constants import get_available_models, get_chat_model, resolve_model_config
 
 
 def test_engine_settings_timeout_and_retries_defaults(monkeypatch: pytest.MonkeyPatch):
@@ -93,3 +93,33 @@ def test_run_nexus_agent_with_trace_504_diagnostic_message(monkeypatch: pytest.M
     assert "504 DEADLINE_EXCEEDED" in res["response"]
     assert "provider deadline timeout" in res["response"]
     assert res["confidence"] == 0.0
+
+
+def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch):
+    """Verify per-turn model_tier in RunnableConfig routes call_model to the selected tier and get_available_models returns catalog."""
+    monkeypatch.setenv("AI_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-xyz")
+
+    catalog = get_available_models()
+    assert catalog["provider"] == "gemini"
+    assert any(m["id"] == "strong" for m in catalog["models"])
+    assert any(m["id"] == "low" for m in catalog["models"])
+
+    low_cfg = resolve_model_config("low")
+    assert low_cfg["tier"] == "low"
+
+    recorded_tiers: list[str | None] = []
+    mock_llm = MagicMock()
+    mock_bound = MagicMock()
+    mock_llm.bind_tools.return_value = mock_bound
+    mock_bound.invoke.return_value = AIMessage(content="Fast turn response")
+
+    def fake_get_chat_model(tier=None, temperature=0.0):
+        recorded_tiers.append(tier)
+        return mock_llm
+
+    monkeypatch.setattr("nexus.agent.graph.get_chat_model", fake_get_chat_model)
+
+    state = {"messages": [HumanMessage(content="Quick question")]}
+    call_model(state, config={"configurable": {"thread_id": "t1", "model_tier": "low"}})
+    assert recorded_tiers == ["low"]
