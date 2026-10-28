@@ -119,19 +119,20 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 # 3. Operations
 _Financial and logistical systems to support a life of freedom._ The "Engine"
-- **[[Operations Lessons]]:** Enduring procedural memory & strategic rules for operations, wealth, and housing.
+- **[[Notes]]:** Enduring procedural memory & strategic rules for operations, wealth, and housing.
 ## 3.1. Career Strategy & Revenue
 **[Link - Career - Google Drive](https://drive.google.com/drive/u/0/folders/1uJfG9nFqFD_BgbMY4HJ4GyRtieem-kC8)**
 - **[[3. Operations/3.1. Career Strategy & Revenue/Section Instructions|Section Instructions]]:** Operational guide and strategic career advisory rules.
-- **[[Job Hunt War Room]]**: Action plan and target company pipelines.
+- **📁 [[Campaign - Get A Career Job]]**: Macro job hunt campaign hub and grouped mission pursuits.
+- **[[Industry Targets]]:** Curated target companies across 10 verticals with positioning guides and active role leads.
 - **[[Protocol - Career Maintenance]]:** Recurring professional cadences (daily/weekly).
 - **[[Career Lessons]]:** Enduring procedural memory & strategic rules for career execution.
 - **[[Project - Career Management System Upgrades]]:** Professional infrastructure roadmap.
 
 ### 3.1.1. Market Research & Future of Work
-- **[[Synthesis - AI Superagency & The Future of Work]]**
+- **[[Concept - AI Superagency & The Future of Work]]**
 - **[[Employer Skill Requirements]]:** Desired skills from job descriptions.
-- **📁 Saved Articles:** AI and Job Market research (Linked within [[Synthesis - AI Superagency & The Future of Work#5. "No-Regret" Strategies for Professionals & Graduates|AI Superagency Synthesis]]).
+- **📁 Saved Articles:** AI and Job Market research (Linked within [[Concept - AI Superagency & The Future of Work#5. "No-Regret" Strategies for Professionals & Graduates|AI Superagency Synthesis]]).
 - **📁 Saved Job Listings**
 
 ### 3.1.2. Interview Prep & Technical Depth
@@ -236,6 +237,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 # 4. Life
 _Dedicated space for exploration, relationships, and pure interest._ Connection & Joy
 ## 4.1. Social Life & Community
+- [[People & Names]]
 - **Family Data**
 - **"People Data":** Things people tell me - Preferences, important context. B-days in Google contacts.
 - **Gift Ideas:** Running list of potential gifts for friends and family.
