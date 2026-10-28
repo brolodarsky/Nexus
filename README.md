@@ -24,6 +24,7 @@ To demonstrate real-world utility and verify agent performance under complex, no
 Nexus/
 ├── .agents/                    # AI agent instructions
 │   ├── rules/                  # Builder coding constraints
+│   │   ├── builder_work_tracking.md     # Daily plan updating & collaborative attribution
 │   │   └── code_commenting_standards.md # Learning-first educational commenting
 │   ├── skills/                 # Builder mandatory behaviors (repo/git/docs)
 │   │   ├── conventional_commits/     # Commit message format rules
