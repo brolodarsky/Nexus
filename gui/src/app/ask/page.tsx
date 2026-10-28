@@ -100,7 +100,6 @@ export default function AskBrainPage() {
   const [liveTrace, setLiveTrace] = useState<TraceEvent[]>([]);
   // Shared Agent Blackboard state: live bulletins posted by Flash subagents and Astra
   const [bulletins, setBulletins] = useState<BoardBulletin[]>([]);
-  const [boardChannel, setBoardChannel] = useState<string>("all");
   const [showBoard, setShowBoard] = useState<boolean>(true);
   const [expandedBulletinIds, setExpandedBulletinIds] = useState<Record<number, boolean>>({});
   // isSidebarCollapsed: toggles the left conversation history menu between full width (w-64) and compact rail (w-14)
@@ -118,12 +117,11 @@ export default function AskBrainPage() {
   const isHydratedRef = useRef<boolean>(false);
 
   // Helper to fetch recent bulletins from `/api/board`
-  const refreshBoard = useCallback((channelFilter?: string) => {
-    const ch = channelFilter ?? boardChannel;
-    getBoardBulletins(ch, 25)
-      .then((res) => setBulletins(res.bulletins))
+  const refreshBoard = useCallback(() => {
+    getBoardBulletins(25)
+      .then((res) => setBulletins(res.bulletins || []))
       .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
-  }, [boardChannel]);
+  }, []);
 
   // Fetch conversations, selectable model catalog, initial Blackboard bulletins, and restore draft state on mount
   useEffect(() => {
@@ -181,7 +179,7 @@ export default function AskBrainPage() {
         setActiveConvId(convos[0].id);
       }
     });
-    refreshBoard("all");
+    refreshBoard();
   }, [refreshBoard]);
 
   // Persist user's per-turn model selection preference and keep input focused for immediate typing
@@ -194,11 +192,6 @@ export default function AskBrainPage() {
     }
     inputRef.current?.focus();
   }, []);
-
-  // Re-fetch bulletins when the user switches channel filter tabs
-  useEffect(() => {
-    refreshBoard(boardChannel);
-  }, [boardChannel, refreshBoard]);
 
   // Fetch messages when active conversation changes
   useEffect(() => {
@@ -861,7 +854,7 @@ export default function AskBrainPage() {
               {bulletins.length > 0 && (
                 <button
                   onClick={async () => {
-                    await clearBoardBulletins(boardChannel);
+                    await clearBoardBulletins();
                     refreshBoard();
                   }}
                   className="text-[0.68rem] px-2 py-1 rounded-md bg-bg-tertiary text-text-muted hover:text-red-400 transition-colors"
@@ -881,23 +874,6 @@ export default function AskBrainPage() {
                 ✕
               </button>
             </div>
-          </div>
-
-          {/* Channel filter tabs */}
-          <div className="px-3 py-2 border-b border-border-subtle flex items-center gap-1 overflow-x-auto">
-            {["all", "email", "calendar", "vault", "mission"].map((ch) => (
-              <button
-                key={ch}
-                onClick={() => setBoardChannel(ch)}
-                className={`px-2.5 py-1 rounded-md text-[0.68rem] font-medium capitalize transition-colors ${
-                  boardChannel === ch
-                    ? "bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/30"
-                    : "text-text-muted hover:text-text-secondary hover:bg-bg-tertiary/60"
-                }`}
-              >
-                {ch}
-              </button>
-            ))}
           </div>
 
           {/* Bulletin Feed */}
@@ -929,9 +905,11 @@ export default function AskBrainPage() {
                         className="text-left flex-1 min-w-0"
                       >
                         <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                          <span className="px-1.5 py-0.5 rounded bg-accent-cyan/15 text-accent-cyan font-mono text-[0.6rem] uppercase">
-                            {b.channel}
-                          </span>
+                          {b.pinned ? (
+                            <span className="text-[0.65rem]" title="Pinned bulletin">
+                              📌
+                            </span>
+                          ) : null}
                           <span className="text-[0.65rem] text-purple-300 font-medium truncate">
                             {b.author}
                           </span>

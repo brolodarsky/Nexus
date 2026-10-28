@@ -567,17 +567,15 @@ export function getPodcastAudioUrl(path: string): string {
 export interface BoardBulletin {
   id: number;                 // Auto-incrementing primary key in `blackboard.db`
   author: string;             // Originating agent label (e.g. "Subagent (low)", "Flash: Gmail Sweep", "Astra")
-  channel: string;            // Semantic channel tag ("email", "calendar", "vault", "mission", "general")
   title: string;              // Concise summary headline
   content: string;            // Full Markdown findings payload
   pinned: number;             // 1 if pinned to top of board, else 0
   created_at: string;         // SQLite UTC/local timestamp string
 }
 
-// Fetches recent bulletins from the Shared Agent Blackboard, optionally filtered by channel
-export async function getBoardBulletins(channel?: string, limit: number = 25): Promise<{ bulletins: BoardBulletin[]; count: number }> {
+// Fetches recent bulletins from the Shared Agent Blackboard
+export async function getBoardBulletins(limit: number = 25): Promise<{ bulletins: BoardBulletin[]; count: number }> {
   const params = new URLSearchParams();
-  if (channel && channel !== "all") params.set("channel", channel);
   params.set("limit", String(limit));
   return apiFetch<{ bulletins: BoardBulletin[]; count: number }>(`/api/board?${params.toString()}`);
 }
@@ -589,10 +587,9 @@ export async function deleteBoardBulletin(bulletinId: number): Promise<{ status:
   });
 }
 
-// Clears unpinned bulletins (or all bulletins in a specific channel)
-export async function clearBoardBulletins(channel?: string): Promise<{ status: string; deleted_count: number }> {
-  const query = channel && channel !== "all" ? `?channel=${encodeURIComponent(channel)}` : "";
-  return apiFetch<{ status: string; deleted_count: number }>(`/api/board${query}`, {
+// Clears all unpinned bulletins
+export async function clearBoardBulletins(): Promise<{ status: string; deleted_count: number }> {
+  return apiFetch<{ status: string; deleted_count: number }>("/api/board", {
     method: "DELETE",
   });
 }

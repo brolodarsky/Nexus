@@ -525,7 +525,6 @@ def run_shared_tool_cli(module: str, cli_args: Optional[List[str]] = None) -> st
 def post_to_board(
     title: str,
     content: str,
-    channel: str = "general",
     author: str = "Subagent",
     pinned: bool = False,
 ) -> str:
@@ -539,8 +538,7 @@ def post_to_board(
     Args:
         title: Concise headline for the bulletin (e.g. "Oct 22 Multi-Inbox Gmail Triage" or "Wed Oct 21 Calendar Audit").
         content: Markdown summary of findings, actionable items, and key metadata.
-        channel: Board channel tag — one of `"email"`, `"calendar"`, `"vault"`, `"mission"`, or `"general"`.
-        author: Identifier for the agent posting (e.g. `"Flash: Gmail Sweep"`, `"Flash: Calendar Audit"`, `"Astra"`).
+        author: Identifier for the agent posting (e.g. "Flash: Gmail Sweep", "Flash: Calendar Audit", "Astra").
         pinned: Set True to pin high-priority standing bulletins to the top of the board.
     """
     from nexus.core.blackboard import post_bulletin
@@ -549,30 +547,26 @@ def post_to_board(
         author=author,
         title=title,
         content=content,
-        channel=channel,
         pinned=pinned,
     )
-    return f"📋 Bulletin #{bulletin_id} posted to Shared Blackboard [`{channel}`]: '{title}'."
+    return f"📋 Bulletin #{bulletin_id} posted to Shared Blackboard: '{title}'."
 
 
 @tool
 def read_board(
-    channel: Optional[str] = None,
     limit: int = 12,
 ) -> str:
     """Read recent bulletins from the Shared Agent Blackboard (`blackboard.db`).
 
-    Call this to inspect recent findings already gathered by Flash subagents (`email`, `calendar`,
-    `vault`, `mission`) before launching duplicate external API sweeps.
+    Call this to inspect recent findings already gathered by Flash subagents
+    before launching duplicate external API sweeps.
 
     Args:
-        channel: Optional channel filter (`"email"`, `"calendar"`, `"vault"`, `"mission"`, `"general"`).
-                 Leave omitted or pass `"all"` to view bulletins across all channels.
         limit: Maximum number of recent bulletins to return (default: 12).
     """
     from nexus.core.blackboard import format_board_digest
 
-    return format_board_digest(channel=channel, limit=limit)
+    return format_board_digest(limit=limit)
 
 
 # ── Backward-Compatible Factories (for any legacy callers) ───────────────────
