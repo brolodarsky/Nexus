@@ -39,6 +39,12 @@ interface Message {
 // LocalStorage key for remembering the user's selected model tier across page reloads
 const MODEL_STORAGE_KEY = "nexus_chat_model_tier";
 
+// LocalStorage key for preserving unsubmitted chat prompt drafts across Nexus tab navigation and reloads
+const CHAT_DRAFT_STORAGE_KEY = "nexus_chat_input_draft";
+
+// LocalStorage key for remembering the active conversation ID across Nexus tab navigation
+const ACTIVE_CONV_STORAGE_KEY = "nexus_chat_active_conv_id";
+
 // Immediate fallback catalog rendered before GET /api/agents/models resolves
 const FALLBACK_MODELS: ModelOption[] = [
   {
@@ -108,6 +114,8 @@ export default function AskBrainPage() {
   // inputRef: HTMLTextAreaElement reference allowing programmatic focus management and dynamic height auto-expansion
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<(() => void) | null>(null);
+  // isHydratedRef: guards against overwriting saved localStorage drafts with initial empty state during hydration
+  const isHydratedRef = useRef<boolean>(false);
 
   // Helper to fetch recent bulletins from `/api/board`
   const refreshBoard = useCallback((channelFilter?: string) => {
@@ -117,7 +125,7 @@ export default function AskBrainPage() {
       .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
   }, [boardChannel]);
 
-  // Fetch conversations, selectable model catalog, and initial Blackboard bulletins on mount
+  // Fetch conversations, selectable model catalog, initial Blackboard bulletins, and restore draft state on mount
   useEffect(() => {
     try {
       const savedTier = localStorage.getItem(MODEL_STORAGE_KEY);
@@ -127,6 +135,17 @@ export default function AskBrainPage() {
     } catch {
       // Ignore storage access errors in restricted browser contexts
     }
+
+    // Restore unsubmitted chat draft from localStorage so typed text survives Nexus tab navigation and reloads
+    try {
+      const savedDraft = localStorage.getItem(CHAT_DRAFT_STORAGE_KEY);
+      if (savedDraft) {
+        setInput(savedDraft);
+      }
+    } catch {
+      // Gracefully ignore storage quota / access errors in private browsing contexts
+    }
+    isHydratedRef.current = true;
 
     getAvailableModels()
       .then((catalog) => {
@@ -149,6 +168,16 @@ export default function AskBrainPage() {
     getConversations().then((convos) => {
       setConversations(convos);
       if (convos.length > 0) {
+        // Restore previously active conversation if it exists, maintaining context across tab navigation
+        try {
+          const savedActiveConv = localStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
+          if (savedActiveConv && convos.some((c) => c.id === savedActiveConv)) {
+            setActiveConvId(savedActiveConv);
+            return;
+          }
+        } catch {
+          // Gracefully fallback to the most recent conversation
+        }
         setActiveConvId(convos[0].id);
       }
     });
@@ -225,6 +254,33 @@ export default function AskBrainPage() {
     el.style.height = `${nextHeight}px`;
   }, [input]);
 
+  // Sync unsubmitted input draft to localStorage on every change once hydration is complete
+  useEffect(() => {
+    if (!isHydratedRef.current) return;
+    try {
+      if (input) {
+        localStorage.setItem(CHAT_DRAFT_STORAGE_KEY, input);
+      } else {
+        localStorage.removeItem(CHAT_DRAFT_STORAGE_KEY);
+      }
+    } catch {
+      // Gracefully ignore storage quota / access errors in private browsing contexts
+    }
+  }, [input]);
+
+  // Persist active conversation ID so switching Nexus tabs (e.g., Ask Brain -> Brain Explorer -> Ask Brain) restores the same active chat
+  useEffect(() => {
+    try {
+      if (activeConvId) {
+        localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, activeConvId);
+      } else {
+        localStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+      }
+    } catch {
+      // Gracefully ignore storage quota / access errors in private browsing contexts
+    }
+  }, [activeConvId]);
+
   // Clean up abort on unmount
   useEffect(() => {
     return () => {
@@ -238,6 +294,11 @@ export default function AskBrainPage() {
     }
     setActiveConvId(null);
     setMessages([]);
+    try {
+      localStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+    } catch {
+      // Ignore storage errors
+    }
     inputRef.current?.focus();
   };
 
@@ -247,7 +308,17 @@ export default function AskBrainPage() {
     const updated = conversations.filter((c) => c.id !== id);
     setConversations(updated);
     if (activeConvId === id) {
-      setActiveConvId(updated.length > 0 ? updated[0].id : null);
+      const nextId = updated.length > 0 ? updated[0].id : null;
+      setActiveConvId(nextId);
+      try {
+        if (nextId) {
+          localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, nextId);
+        } else {
+          localStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+        }
+      } catch {
+        // Ignore storage errors
+      }
     }
   };
 
@@ -270,6 +341,11 @@ export default function AskBrainPage() {
         const res = await createConversation(title);
         targetConvId = res.conversation_id;
         setActiveConvId(targetConvId);
+        try {
+          localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, targetConvId);
+        } catch {
+          // Ignore storage errors
+        }
         // Refresh conversations list to show the new one
         getConversations().then(setConversations);
       }
@@ -285,6 +361,11 @@ export default function AskBrainPage() {
       };
       setMessages((prev) => [...prev, userMsg]);
       setInput("");
+      try {
+        localStorage.removeItem(CHAT_DRAFT_STORAGE_KEY);
+      } catch {
+        // Ignore storage errors
+      }
       setLoading(true);
       setLiveTrace([]);
       liveTraceRef.current = [];
