@@ -10,6 +10,7 @@ For work writing engine code, modifying Vault structure, adding/modifying tools,
 # Living Project Context & Engineering Standards
 - **Primary Project Doc:** Read `Project - Nexus Agentic Engine.md` for the entire living Nexus gameplan. Make sure to keep it updated with the `maintain_project_docs` skill after any change.
 - **Educational Commenting:** NEVER strip or compress existing educational comments during refactors or edits. Follow `.agents/rules/code_commenting_standards.md`.
+- **Zero-Vestige Refactoring:** When replacing, modernizing, or refactoring tools, components, or workflows, NEVER leave dead, superseded, or vestigial code, scratch scripts, or orphaned dependencies behind. Trace all references, prune cleanly in the same turn, and verify no stale call sites remain. Follow `.agents/rules/no_vestigial_code.md`.
 - **Daily Plan & Work Attribution:** Whenever doing Nexus work (engine, tools, workflows, Vault structure), update `Vault/1. Core/1.1. Philosophy & Personal North Star/Plan.md` under `# Today` (`## Career & Technical`). Clearly articulate what the human did/directed and what the agent executed/built—never make it appear as though the human did all the work alone or obscure the collaboration. Follow `.agents/rules/builder_work_tracking.md`.
 
 # Standing Safety & Execution Directives
