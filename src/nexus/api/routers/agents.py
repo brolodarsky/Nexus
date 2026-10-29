@@ -22,10 +22,10 @@ from pydantic import BaseModel
 from nexus.core.trace import trace_bus
 # run_logger: Persists formatted execution run snapshots to logs/runs/ for observability and evals
 from nexus.core.run_logger import log_run, list_runs, get_run
-# chats_db: SQLite data access layer for persisting conversations, messages, and sticky agent routing state
+# chats_db: SQLite data access layer for conversations and chat history
 from nexus.core.chats_db import (
-    get_active_agent, set_active_agent, log_message, get_chat_history,
-    create_conversation, get_conversations, get_conversation, 
+    log_message, get_chat_history,
+    create_conversation, get_conversations, 
     delete_conversation, update_conversation_title
 )
 
@@ -97,13 +97,6 @@ async def update_conversation(conversation_id: str, req: UpdateTitleRequest):
     """Renames an existing conversation thread."""
     update_conversation_title(conversation_id, req.title)
     return {"status": "updated"}
-
-# Clears the sticky agent lock so the next message is routed fresh
-@router.post("/ask/conversations/{conversation_id}/reset")
-async def reset_conversation_routing(conversation_id: str):
-    """Clears sticky session agent lock for the specified conversation."""
-    set_active_agent(None, conversation_id)
-    return {"status": "reset"}
 
 # Returns message history for a specific conversation
 @router.get("/ask/history")

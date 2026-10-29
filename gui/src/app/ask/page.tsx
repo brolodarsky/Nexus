@@ -12,7 +12,6 @@ import {
   getConversations, 
   createConversation, 
   deleteConversation, 
-  resetConversationRouting,
   getBoardBulletins,
   clearBoardBulletins,
   deleteBoardBulletin,
@@ -315,12 +314,6 @@ export default function AskBrainPage() {
     }
   };
 
-  const handleResetRouting = async () => {
-    if (!activeConvId) return;
-    await resetConversationRouting(activeConvId);
-    setConversations(prev => prev.map(c => c.id === activeConvId ? { ...c, active_agent: null } : c));
-  };
-
   const handleSubmit = useCallback(
     async (e?: React.FormEvent) => {
       e?.preventDefault();
@@ -562,9 +555,6 @@ export default function AskBrainPage() {
               >
                 <div className="flex flex-col overflow-hidden">
                   <span className="truncate font-medium">{conv.title}</span>
-                  <span className="text-[0.65rem] text-text-muted mt-0.5">
-                    {conv.active_agent ? `🔒 ${conv.active_agent}` : "🔀 Auto-Routing"}
-                  </span>
                 </div>
                 <button 
                   onClick={(e) => handleDeleteChat(conv.id, e)}
@@ -592,14 +582,6 @@ export default function AskBrainPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {activeConv?.active_agent && (
-              <button
-                onClick={handleResetRouting}
-                className="text-xs px-3 py-1.5 rounded-lg bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
-              >
-                Reset Routing
-              </button>
-            )}
             <button
               onClick={() => setShowBoard((prev) => !prev)}
               className={`text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 ${

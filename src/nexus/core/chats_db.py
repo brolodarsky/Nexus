@@ -1,5 +1,5 @@
 """
-chats_db.py — Unified UI chat persistence and Sticky Session state.
+chats_db.py — Unified UI chat persistence.
 """
 import sqlite3
 import json
@@ -22,7 +22,6 @@ def init_db():
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
                 title TEXT,
-                active_agent TEXT,
                 created_at TEXT,
                 last_updated TEXT
             )
@@ -49,8 +48,8 @@ def create_conversation(title: str = "New Chat") -> str:
     now = datetime.now(timezone.utc).isoformat()
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO conversations (id, title, active_agent, created_at, last_updated) VALUES (?, ?, ?, ?, ?)",
-            (conv_id, title, None, now, now)
+            "INSERT INTO conversations (id, title, created_at, last_updated) VALUES (?, ?, ?, ?)",
+            (conv_id, title, now, now)
         )
         conn.commit()
     return conv_id
@@ -74,20 +73,6 @@ def delete_conversation(conversation_id: str):
 def update_conversation_title(conversation_id: str, title: str):
     with _get_conn() as conn:
         conn.execute("UPDATE conversations SET title = ? WHERE id = ?", (title, conversation_id))
-        conn.commit()
-
-def get_active_agent(conversation_id: str) -> str | None:
-    with _get_conn() as conn:
-        row = conn.execute("SELECT active_agent FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
-        return row["active_agent"] if row else None
-
-def set_active_agent(agent: str | None, conversation_id: str):
-    with _get_conn() as conn:
-        now = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            "UPDATE conversations SET active_agent = ?, last_updated = ? WHERE id = ?",
-            (agent, now, conversation_id)
-        )
         conn.commit()
 
 def log_message(role: str, content: str, agent: str = None, domain: str = None, confidence: float = None, trace: list = None, conversation_id: str = None):

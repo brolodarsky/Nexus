@@ -51,7 +51,7 @@ export interface ChatHistoryEntry {
 export interface Conversation {
   id: string;                 // UUID primary key linking to chats.db
   title: string;              // User-visible thread title (e.g. "Career Outreach")
-  active_agent: string | null;// Sticky session agent (bypasses router if locked)
+  active_agent?: string | null;// Legacy sticky session agent (retained as optional for backward compatibility)
   created_at: string;         // ISO-8601 creation timestamp
   last_updated: string;       // ISO-8601 timestamp of last user/assistant message
 }
@@ -174,13 +174,6 @@ export async function updateConversationTitle(conversationId: string, title: str
   return apiFetch<{ status: string }>(`/api/agents/ask/conversations/${conversationId}`, {
     method: "PATCH",
     body: JSON.stringify({ title }),
-  });
-}
-
-// Clears sticky agent routing for a conversation to force the next message back through the Content Router
-export async function resetConversationRouting(conversationId: string): Promise<{ status: string }> {
-  return apiFetch<{ status: string }>(`/api/agents/ask/conversations/${conversationId}/reset`, {
-    method: "POST",
   });
 }
 
