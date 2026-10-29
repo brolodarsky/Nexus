@@ -10,4 +10,5 @@ export * from "./agents";
 export * from "./vault";
 export * from "./hitl";
 export * from "./board";
+export * from "./tools";
 

@@ -147,7 +147,8 @@ This repository distinguishes between capabilities and constraints that define h
 | `src/nexus/core/trace.py` | Lossless event bus (`TraceEventBus`) and dual console/SSE telemetry tracer (`AgentTracer`) with hierarchical `agent_id` and `parent_id` tracking for DAG graph reconstruction. | N/A (library module) |
 | `src/nexus/core/run_logger.py` | Structured JSON run snapshot logger persisting lossless execution traces, subagent fleet breakdowns, token usage metrics, and tool calls to `logs/runs/`. | N/A (library module) |
 | `src/nexus/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve with stale-base guard (`?force=true` override), reject, 3-way rebase (`/{id}/rebase`), rollback (`/{id}/rollback`), and recent revisions (`/revisions/recent`). | Via GUI or API |
-| `resume_engine/` | PDF and DOCX rendering with page fill metrics. Outputs fill %, verdict, and room remaining after every render. | `node src/nexus/shared_tools/resume_engine/render.js` |
+| `src/nexus/api/routers/tools.py` | Operational tools endpoints: resume/cover letter portfolio scanning, markdown editing, headless Chromium/Word rendering, and asset streaming. | Via GUI (`/tools`) or API |
+| `resume_engine/` | PDF and DOCX document compiler with page geometry budget metrics. Accessible via the Control Panel Tools page (`/tools`) or headless CLI. | GUI `/tools` or `node src/nexus/shared_tools/resume_engine/render.js` |
 | `start.ps1` | Launches the full Nexus Control Panel (FastAPI + Next.js). | `.\start.ps1` |
 
 ## Architectural Methods

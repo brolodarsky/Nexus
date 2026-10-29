@@ -206,20 +206,36 @@ function renderToDocx(mdPath) {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main Entrypoint — Supports interactive CLI, programmatic CLI args, and flags
 // ---------------------------------------------------------------------------
 async function main() {
-    // Support passing a path directly as a CLI argument (for workflow/script use)
-    let selected;
-    if (process.argv[2]) {
-        const target = path.resolve(process.argv[2]);
-        if (fs.existsSync(target)) {
-            selected = [target];
-        } else {
-            console.error(`File not found: ${target}`);
-            process.exit(1);
+    // Parse arguments: filter out execution flags (prefixed with --) and extract file path arguments
+    // process.argv.slice(2): Strips node runtime path and script file path
+    const args = process.argv.slice(2);
+    const flags = new Set(args.filter(arg => arg.startsWith('--')).map(arg => arg.toLowerCase()));
+    const fileArgs = args.filter(arg => !arg.startsWith('--'));
+
+    const isPdfOnly = flags.has('--pdf-only');
+    const isDocxOnly = flags.has('--docx-only');
+    const isAll = flags.has('--all');
+
+    let selected = [];
+
+    if (isAll) {
+        // --all flag: batch-render all discovered resumes and cover letters across the portfolio
+        selected = findRenderableFiles();
+    } else if (fileArgs.length > 0) {
+        // Positional file paths: resolve each target and verify physical disk presence
+        for (const filePath of fileArgs) {
+            const resolved = path.resolve(filePath);
+            if (fs.existsSync(resolved)) {
+                selected.push(resolved);
+            } else {
+                console.error(`  Warning: File not found: ${resolved}`);
+            }
         }
     } else {
+        // Interactive terminal picker when invoked with no command line arguments
         const files = findRenderableFiles();
 
         if (files.length === 0) {
@@ -236,43 +252,55 @@ async function main() {
 
     console.log(`\n  Rendering ${selected.length} document(s)...\n`);
 
-    const browser = await chromium.launch();
+    // Headless Chromium browser instance only required if PDF rendering or metric measurement is needed
+    const needsBrowser = !isDocxOnly;
+    const browser = needsBrowser ? await chromium.launch() : null;
     const allMetrics = [];
 
     for (const file of selected) {
         const baseName = path.basename(file, '.md');
         console.log(`  --- ${baseName} ---`);
 
-        const metrics = await renderToPdf(file, browser);
-        allMetrics.push(metrics);
-        renderToDocx(file);
+        // 1. PDF Compilation & Geometry Budget Measurement
+        if (browser && !isDocxOnly) {
+            const metrics = await renderToPdf(file, browser);
+            allMetrics.push(metrics);
+        }
+
+        // 2. Word DOCX Compilation
+        if (!isPdfOnly) {
+            renderToDocx(file);
+        }
         console.log('');
     }
 
-    await browser.close();
-
-    // Print page metrics summary
-    console.log('  ' + '═'.repeat(60));
-    console.log('  📐 PAGE METRICS');
-    console.log('  ' + '═'.repeat(60));
-    for (const m of allMetrics) {
-        const icon = m.verdict === 'GOOD FIT' ? '✅' :
-                     m.verdict === 'TIGHT FIT' ? '🎯' :
-                     m.verdict === 'ROOM' ? '📝' :
-                     m.verdict === 'UNDERFILL' ? '⚠️' : '🔴';
-        console.log(`  ${icon} ${m.file}`);
-        console.log(`     Pages: ${m.pages} | Last page fill: ${m.lastPageFillPct}% | Verdict: ${m.verdict}`);
-        if (m.approxBulletsRemaining > 0) {
-            console.log(`     Room: ~${m.approxBulletsRemaining} bullet points remaining (~${m.roomRemainingPx}px)`);
-        } else if (m.lastPageFillPct > 100) {
-            const overflowPx = m.contentHeightPx - (m.pages * m.PAGE_HEIGHT_PX);
-            console.log(`     Over by ~${Math.abs(m.roomRemainingPx)}px — trim ~${Math.ceil(Math.abs(m.roomRemainingPx) / 45)} bullet points`);
-        }
+    if (browser) {
+        await browser.close();
     }
-    console.log('  ' + '─'.repeat(60));
 
-    // Output machine-readable JSON for agent consumption
-    console.log(`  [METRICS_JSON] ${JSON.stringify(allMetrics)}`);
+    // Print human-readable page metrics summary table
+    if (allMetrics.length > 0) {
+        console.log('  ' + '═'.repeat(60));
+        console.log('  📐 PAGE METRICS');
+        console.log('  ' + '═'.repeat(60));
+        for (const m of allMetrics) {
+            const icon = m.verdict === 'GOOD FIT' ? '✅' :
+                         m.verdict === 'TIGHT FIT' ? '🎯' :
+                         m.verdict === 'ROOM' ? '📝' :
+                         m.verdict === 'UNDERFILL' ? '⚠️' : '🔴';
+            console.log(`  ${icon} ${m.file}`);
+            console.log(`     Pages: ${m.pages} | Last page fill: ${m.lastPageFillPct}% | Verdict: ${m.verdict}`);
+            if (m.approxBulletsRemaining > 0) {
+                console.log(`     Room: ~${m.approxBulletsRemaining} bullet points remaining (~${m.roomRemainingPx}px)`);
+            } else if (m.lastPageFillPct > 100) {
+                console.log(`     Over by ~${Math.abs(m.roomRemainingPx)}px — trim ~${Math.ceil(Math.abs(m.roomRemainingPx) / 45)} bullet points`);
+            }
+        }
+        console.log('  ' + '─'.repeat(60));
+
+        // Output machine-readable JSON for agent consumption and backend API parsing
+        console.log(`  [METRICS_JSON] ${JSON.stringify(allMetrics)}`);
+    }
     console.log('');
     console.log('  Done.');
 }
