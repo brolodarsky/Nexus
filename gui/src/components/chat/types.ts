@@ -36,6 +36,12 @@ export const CHAT_DRAFT_STORAGE_KEY = "nexus_chat_input_draft";
 // LocalStorage key for remembering the active conversation ID across Nexus tab navigation
 export const ACTIVE_CONV_STORAGE_KEY = "nexus_chat_active_conv_id";
 
+// LocalStorage key for persisting whether the left conversation history menu is collapsed across page navigation
+export const CHAT_SIDEBAR_COLLAPSED_KEY = "nexus_chat_sidebar_collapsed";
+
+// LocalStorage key for persisting whether the right Subagent Blackboard drawer is open across page navigation
+export const CHAT_BOARD_OPEN_KEY = "nexus_chat_board_open";
+
 // Immediate fallback catalog rendered before GET /api/agents/models resolves
 export const FALLBACK_MODELS: ModelOption[] = [
   {

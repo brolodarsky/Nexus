@@ -33,6 +33,8 @@ import {
   MODEL_STORAGE_KEY,
   CHAT_DRAFT_STORAGE_KEY,
   ACTIVE_CONV_STORAGE_KEY,
+  CHAT_SIDEBAR_COLLAPSED_KEY,
+  CHAT_BOARD_OPEN_KEY,
   extractTurnModelInfo,
   type Message,
 } from "@/components/chat";
@@ -87,6 +89,26 @@ export default function ChatPage() {
         }
       } catch {
         // Gracefully ignore storage quota / access errors in private browsing contexts
+      }
+
+      // Restore left conversation history sidebar collapse state from localStorage so panel choice survives tab navigation
+      try {
+        const savedSidebarCollapsed = localStorage.getItem(CHAT_SIDEBAR_COLLAPSED_KEY);
+        if (savedSidebarCollapsed !== null) {
+          setIsSidebarCollapsed(savedSidebarCollapsed === "true");
+        }
+      } catch {
+        // Gracefully fall back to default expanded state if storage is inaccessible
+      }
+
+      // Restore right Subagent Blackboard drawer visibility from localStorage so drawer choice survives tab navigation
+      try {
+        const savedBoardOpen = localStorage.getItem(CHAT_BOARD_OPEN_KEY);
+        if (savedBoardOpen !== null) {
+          setShowBoard(savedBoardOpen === "true");
+        }
+      } catch {
+        // Gracefully fall back to default open drawer if storage is inaccessible
       }
       isHydratedRef.current = true;
     });
@@ -384,6 +406,39 @@ export default function ChatPage() {
     [refreshBoard]
   );
 
+  // handleToggleSidebarCollapse: memoized handler to toggle left conversation history menu and persist choice
+  const handleToggleSidebarCollapse = useCallback((collapsed: boolean) => {
+    setIsSidebarCollapsed(collapsed);
+    try {
+      localStorage.setItem(CHAT_SIDEBAR_COLLAPSED_KEY, String(collapsed));
+    } catch {
+      // Ignore quota/privacy errors in restricted browser contexts
+    }
+  }, []);
+
+  // handleToggleBoard: memoized handler to toggle right Subagent Blackboard drawer and persist choice
+  const handleToggleBoard = useCallback(() => {
+    setShowBoard((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(CHAT_BOARD_OPEN_KEY, String(next));
+      } catch {
+        // Ignore quota/privacy errors in restricted browser contexts
+      }
+      return next;
+    });
+  }, []);
+
+  // handleCloseBoard: memoized handler to collapse/close right Subagent Blackboard drawer and persist choice
+  const handleCloseBoard = useCallback(() => {
+    setShowBoard(false);
+    try {
+      localStorage.setItem(CHAT_BOARD_OPEN_KEY, "false");
+    } catch {
+      // Ignore quota/privacy errors in restricted browser contexts
+    }
+  }, []);
+
   const activeConv = conversations.find((c) => c.id === activeConvId);
   const activeModelOption =
     modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
@@ -398,7 +453,7 @@ export default function ChatPage() {
         isCollapsed={isSidebarCollapsed}
         modelOptions={modelOptions}
         selectedModelTier={selectedModelTier}
-        onToggleCollapse={setIsSidebarCollapsed}
+        onToggleCollapse={handleToggleSidebarCollapse}
         onSelectConversation={setActiveConvId}
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
@@ -410,7 +465,7 @@ export default function ChatPage() {
           title={activeConv?.title}
           showBoard={showBoard}
           bulletinCount={bulletins.length}
-          onToggleBoard={() => setShowBoard((prev) => !prev)}
+          onToggleBoard={handleToggleBoard}
         />
 
         <ChatMessageThread
@@ -441,7 +496,7 @@ export default function ChatPage() {
           onRefresh={refreshBoard}
           onClear={handleClearBoard}
           onDismiss={handleDismissBulletin}
-          onClose={() => setShowBoard(false)}
+          onClose={handleCloseBoard}
         />
       )}
     </div>
