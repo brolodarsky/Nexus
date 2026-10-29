@@ -360,7 +360,10 @@ async def get_agent_run(run_id: str):
     """
     Retrieves full details of a specific execution run snapshot by ID.
     """
-    run_data = get_run(run_id)
+    try:
+        run_data = get_run(run_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not run_data:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
     return run_data

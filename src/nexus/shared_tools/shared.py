@@ -84,9 +84,12 @@ def read_file(
 
     # 1. Check if this file has a pending transaction in the HITL queue (`hitl.db`).
     # First resolve on disk if it exists so short filenames ("Plan.md") map to their canonical `Vault/...` path.
-    resolved_path, _ = resolve_vault_note_path(file_path)
+    resolved_path, err = resolve_vault_note_path(file_path)
+    if err and ("outside the Vault" in err or "cannot be empty" in err):
+        return err
+
     lookup_target = (
-        f"Vault/{str(resolved_path.relative_to(VAULT_PATH)).replace(chr(92), '/')}"
+        f"Vault/{str(resolved_path.relative_to(VAULT_PATH.resolve())).replace(chr(92), '/')}"
         if resolved_path is not None
         else file_path
     )
@@ -219,8 +222,10 @@ def modify_file(
         return "Error: `target` cannot be empty in `modify_file`. Read the file first and pass the exact text block to replace, or use `create_file` for new files."
 
     resolved_path, err = resolve_vault_note_path(file_path)
+    if err and ("outside the Vault" in err or "cannot be empty" in err):
+        return err
     if resolved_path is not None:
-        rel_vault_path = str(resolved_path.relative_to(VAULT_PATH)).replace("\\", "/")
+        rel_vault_path = str(resolved_path.relative_to(VAULT_PATH.resolve())).replace("\\", "/")
         hitl_target_file = f"Vault/{rel_vault_path}"
     else:
         # File may not exist on disk yet because it was staged via `create_file` earlier in this session!
@@ -318,6 +323,11 @@ def create_file(
         clean_rel = clean_rel[len("Vault/"):]
     if not clean_rel.endswith(".md") and "." not in clean_rel.split("/")[-1]:
         clean_rel += ".md"
+
+    resolved_vault = VAULT_PATH.resolve()
+    candidate_target = (resolved_vault / clean_rel).resolve()
+    if not candidate_target.is_relative_to(resolved_vault):
+        return f"Error: Refusing to stage file outside the Vault: '{file_path}'"
 
     hitl_target_file = f"Vault/{clean_rel}"
     with get_file_mutation_lock(hitl_target_file):

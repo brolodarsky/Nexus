@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
+import re
 import sys
 import subprocess
 from pathlib import Path
@@ -41,10 +42,29 @@ async def get_vault_structure(path: str | None = Query(default=None)):
     Without a path, returns top-level folders only.
     With a path, returns folders AND files in that subtree.
     """
+    resolved_vault = VAULT_PATH.resolve()
+    if path:
+        clean_path = path.strip()
+        if (
+            clean_path.startswith(("/", "\\"))
+            or os.path.isabs(clean_path)
+            or bool(re.match(r"^[a-zA-Z]:", clean_path))
+            or Path(clean_path).is_absolute()
+            or bool(Path(clean_path).drive)
+        ):
+            raise HTTPException(status_code=400, detail="Invalid directory path.")
+        safe_path = (resolved_vault / clean_path).resolve()
+        if not safe_path.is_relative_to(resolved_vault):
+            raise HTTPException(status_code=400, detail="Invalid directory path.")
+
     try:
         from nexus.shared_tools.vault_reader import get_directory_tree
         tree = get_directory_tree(path=path, show_files=path is not None)
+        if tree.startswith("Error:"):
+            raise HTTPException(status_code=400, detail=tree)
         return VaultStructureResponse(tree=tree, path=path)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -60,12 +80,26 @@ async def get_note(path: str = Query(..., description="Relative path from Vault 
     if not path.strip():
         raise HTTPException(status_code=400, detail="Path cannot be empty.")
 
+    clean_path = path.strip()
+    if (
+        clean_path.startswith(("/", "\\"))
+        or os.path.isabs(clean_path)
+        or bool(re.match(r"^[a-zA-Z]:", clean_path))
+        or Path(clean_path).is_absolute()
+        or bool(Path(clean_path).drive)
+    ):
+        raise HTTPException(status_code=400, detail=f"Invalid note path: '{path}'")
+
     try:
         from nexus.shared_tools.vault_reader import read_note_content
         content = read_note_content(path)
 
-        if content.startswith("File not found:"):
+        if content.startswith("Error: Refusing to access path outside the Vault") or content.startswith("Error: Absolute"):
+            raise HTTPException(status_code=400, detail=content)
+        if content.startswith("File not found"):
             raise HTTPException(status_code=404, detail=content)
+        if content.startswith("Error:"):
+            raise HTTPException(status_code=400, detail=content)
 
         return NoteContentResponse(path=path, content=content)
     except HTTPException:
@@ -88,10 +122,29 @@ async def search_vault(
     if not keyword.strip():
         raise HTTPException(status_code=400, detail="Keyword cannot be empty.")
 
+    resolved_vault = VAULT_PATH.resolve()
+    if path:
+        clean_path = path.strip()
+        if (
+            clean_path.startswith(("/", "\\"))
+            or os.path.isabs(clean_path)
+            or bool(re.match(r"^[a-zA-Z]:", clean_path))
+            or Path(clean_path).is_absolute()
+            or bool(Path(clean_path).drive)
+        ):
+            raise HTTPException(status_code=400, detail="Invalid folder path.")
+        safe_path = (resolved_vault / clean_path).resolve()
+        if not safe_path.is_relative_to(resolved_vault):
+            raise HTTPException(status_code=400, detail="Invalid folder path.")
+
     try:
         from nexus.shared_tools.vault_reader import search_within
         results = search_within(keyword, root_path=path)
+        if results.startswith("Error:"):
+            raise HTTPException(status_code=400, detail=results)
         return SearchResult(results=results, keyword=keyword, path=path)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -126,16 +179,24 @@ async def list_all_notes():
     Enables rapid client-side search, filtering, and selection for pinned notes on the Home page.
     """
     notes: list[VaultNoteSummary] = []
+    resolved_vault = VAULT_PATH.resolve()
     try:
         # os.walk: Recursively traverses directory tree; modifying dirs[:] in-place prunes ignored folders from traversal
-        for root, dirs, files in os.walk(VAULT_PATH):
-            dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
+        for root, dirs, files in os.walk(resolved_vault):
+            dirs[:] = [
+                d for d in dirs
+                if d not in IGNORE_DIRS
+                and not d.startswith(".")
+                and (Path(root) / d).resolve().is_relative_to(resolved_vault)
+            ]
             for file in files:
                 if file.endswith(".md"):
-                    full_path = Path(root) / file
+                    full_path = (Path(root) / file).resolve()
+                    if not full_path.is_relative_to(resolved_vault):
+                        continue
                     # Normalizing to forward slashes ensures cross-platform consistency between Windows and Unix
-                    rel_path = str(full_path.relative_to(VAULT_PATH)).replace("\\", "/")
-                    folder_rel = str(Path(root).relative_to(VAULT_PATH)).replace("\\", "/")
+                    rel_path = str(full_path.relative_to(resolved_vault)).replace("\\", "/")
+                    folder_rel = str(Path(root).resolve().relative_to(resolved_vault)).replace("\\", "/")
                     if folder_rel == ".":
                         folder_rel = "Vault Root"
                     stat = full_path.stat()
@@ -162,11 +223,22 @@ async def list_vault(path: str | None = Query(default=None)):
     """
     Lists the entries of a specific vault directory as a JSON list.
     """
-    target_dir = VAULT_PATH
+    resolved_vault = VAULT_PATH.resolve()
+    target_dir = resolved_vault
     if path:
-        # Prevent directory traversal attacks
-        safe_path = (VAULT_PATH / path).resolve()
-        if not safe_path.is_relative_to(VAULT_PATH):
+        clean_path = path.strip()
+        # Reject absolute and drive-letter paths upfront
+        if (
+            clean_path.startswith(("/", "\\"))
+            or os.path.isabs(clean_path)
+            or bool(re.match(r"^[a-zA-Z]:", clean_path))
+            or Path(clean_path).is_absolute()
+            or bool(Path(clean_path).drive)
+        ):
+            raise HTTPException(status_code=400, detail="Invalid directory path")
+        # Prevent directory traversal attacks by resolving both sides
+        safe_path = (resolved_vault / clean_path).resolve()
+        if not safe_path.is_relative_to(resolved_vault):
             raise HTTPException(status_code=400, detail="Invalid directory path")
         target_dir = safe_path
 
@@ -176,13 +248,17 @@ async def list_vault(path: str | None = Query(default=None)):
     entries = []
     try:
         for item in sorted(target_dir.iterdir(), key=lambda e: (e.is_file(), e.name.lower())):
+            # Skip items resolving outside the vault (symlink protection)
+            if not item.resolve().is_relative_to(resolved_vault):
+                continue
+
             if item.is_dir() and item.name in IGNORE_DIRS:
                 continue
             
             if item.name.startswith("."):
                 continue
 
-            rel_path = str(item.relative_to(VAULT_PATH)).replace("\\", "/")
+            rel_path = str(item.resolve().relative_to(resolved_vault)).replace("\\", "/")
             entry_type = "directory" if item.is_dir() else "file"
             
             if entry_type == "file" and not item.name.endswith(".md"):
@@ -220,8 +296,19 @@ async def generate_podcast(req: GeneratePodcastRequest):
     if not note_path.strip():
         raise HTTPException(status_code=400, detail="Path cannot be empty.")
 
-    note_file = (VAULT_PATH / note_path).resolve()
-    if not note_file.is_relative_to(VAULT_PATH):
+    clean_path = note_path.strip()
+    if (
+        clean_path.startswith(("/", "\\"))
+        or os.path.isabs(clean_path)
+        or bool(re.match(r"^[a-zA-Z]:", clean_path))
+        or Path(clean_path).is_absolute()
+        or bool(Path(clean_path).drive)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+
+    resolved_vault = VAULT_PATH.resolve()
+    note_file = (resolved_vault / clean_path).resolve()
+    if not note_file.is_relative_to(resolved_vault):
         raise HTTPException(status_code=400, detail="Invalid file path.")
 
     if not note_file.exists() or not note_file.is_file():
@@ -271,8 +358,22 @@ async def download_podcast(path: str = Query(..., description="Relative path fro
     """
     Streams or downloads the generated podcast MP3.
     """
-    note_file = (VAULT_PATH / path).resolve()
-    if not note_file.is_relative_to(VAULT_PATH):
+    if not path.strip():
+        raise HTTPException(status_code=400, detail="Path cannot be empty.")
+
+    clean_path = path.strip()
+    if (
+        clean_path.startswith(("/", "\\"))
+        or os.path.isabs(clean_path)
+        or bool(re.match(r"^[a-zA-Z]:", clean_path))
+        or Path(clean_path).is_absolute()
+        or bool(Path(clean_path).drive)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid note path.")
+
+    resolved_vault = VAULT_PATH.resolve()
+    note_file = (resolved_vault / clean_path).resolve()
+    if not note_file.is_relative_to(resolved_vault):
         raise HTTPException(status_code=400, detail="Invalid note path.")
 
     audio_file = note_file.with_suffix(".mp3")

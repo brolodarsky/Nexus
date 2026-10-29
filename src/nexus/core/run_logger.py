@@ -255,11 +255,25 @@ def get_run(run_id: str) -> Optional[dict[str, Any]]:
 
     Returns:
         Full JSON dictionary of the run snapshot, or None if not found
+
+    Raises:
+        ValueError: If run_id contains path separators ('/' or '\\') or '..'
     """
+    if not run_id or not isinstance(run_id, str):
+        return None
+
+    # Path traversal guard: reject path separators ('/' and '\\') and parent directory navigation ('..')
+    if "/" in run_id or "\\" in run_id or ".." in run_id:
+        raise ValueError(f"Invalid run_id '{run_id}': cannot contain path separators or '..'")
+
     runs_dir = _ensure_runs_dir()
+    resolved_runs_dir = runs_dir.resolve()
     
-    # Check direct filename match
-    direct_path = runs_dir / run_id
+    # Check direct filename match within runs_dir containment boundary
+    direct_path = (runs_dir / run_id).resolve()
+    if not direct_path.is_relative_to(resolved_runs_dir):
+        raise ValueError(f"Invalid run_id '{run_id}': escapes runs directory")
+
     if direct_path.is_file() and direct_path.suffix == ".json":
         with open(direct_path, "r", encoding="utf-8") as f:
             return json.load(f)

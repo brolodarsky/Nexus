@@ -22,6 +22,43 @@ def read_toc_content() -> str:
         return f"Error reading Table of Contents: {str(e)}"
 
 
+def _resolve_vault_dir(rel_path: Optional[str]) -> Tuple[Optional[Path], Optional[str]]:
+    """Resolves a folder path against VAULT_PATH, enforcing containment within VAULT_PATH.resolve().
+
+    Rejects absolute paths, drive-letter paths, directory traversal escapes, and non-directories.
+    Returns (resolved_dir_path, None) on success or (None, error_message) on failure.
+    """
+    resolved_vault = VAULT_PATH.resolve()
+    if not rel_path:
+        return resolved_vault, None
+
+    clean = rel_path.strip()
+    # Reject absolute and Windows drive-letter paths upfront before Path construction
+    if (
+        clean.startswith(("/", "\\"))
+        or os.path.isabs(clean)
+        or bool(re.match(r"^[a-zA-Z]:", clean))
+        or Path(clean).is_absolute()
+        or bool(Path(clean).drive)
+    ):
+        return None, f"Error: Refusing to access path outside the Vault: '{rel_path}'"
+
+    # .resolve() collapses any '..' components and evaluates symlinks to their canonical target
+    resolved_dir = (resolved_vault / clean).resolve()
+    # is_relative_to guarantees resolved_dir is strictly inside the Vault root directory
+    if not resolved_dir.is_relative_to(resolved_vault):
+        return None, f"Error: Refusing to access path outside the Vault: '{rel_path}'"
+
+    if not resolved_dir.exists() or not resolved_dir.is_dir():
+        return (
+            None,
+            f"Error: Path '{rel_path}' does not exist or is not a directory. "
+            f"Call with no arguments to see available folders.",
+        )
+
+    return resolved_dir, None
+
+
 # Optional[str] / Optional[int] are union types (str | None, int | None) allowing callers to omit path/depth limits.
 def get_directory_tree(
     path: Optional[str] = None,
@@ -36,16 +73,9 @@ def get_directory_tree(
         show_files: If True, include files in the output.
         max_depth: Optional maximum folder depth to expand as separate lines; deeper child folders collapse inline.
     """
-    if path:
-        # The `/` operator on a pathlib.Path object joins path segments cleanly across OS platforms.
-        start_path = VAULT_PATH / path
-        if not start_path.exists() or not start_path.is_dir():
-            return (
-                f"Error: Path '{path}' does not exist or is not a directory. "
-                f"Call with no arguments to see available folders."
-            )
-    else:
-        start_path = VAULT_PATH
+    start_path, err = _resolve_vault_dir(path)
+    if err:
+        return err
 
     lines: List[str] = []
     # Start recursive traversal at depth=1 (immediate children of start_path).
@@ -61,7 +91,7 @@ def get_directory_tree(
     if not lines:
         return f"No contents found at '{path or 'Vault root'}'."
 
-    header = f"{path}/" if path else "Vault/"
+    header = f"{path.strip()}/" if path else "Vault/"
     return header + "\n" + "\n".join(lines)
 
 
@@ -81,16 +111,29 @@ def _build_tree(
         # Ignore OS-protected folders rather than crashing the entire tree traversal.
         return
 
-    # List comprehensions filter entries into directories (excluding IGNORE_DIRS like .git) and files.
-    dirs = [e for e in entries if e.is_dir() and e.name not in IGNORE_DIRS]
-    files = [e for e in entries if e.is_file()] if show_files else []
+    resolved_vault = VAULT_PATH.resolve()
+    # List comprehensions filter entries into directories (excluding IGNORE_DIRS and symlinks escaping the Vault) and files.
+    dirs = [
+        e for e in entries
+        if e.is_dir()
+        and e.name not in IGNORE_DIRS
+        and e.resolve().is_relative_to(resolved_vault)
+    ]
+    files = [
+        e for e in entries
+        if e.is_file()
+        and e.resolve().is_relative_to(resolved_vault)
+    ] if show_files else []
 
     for d in dirs:
         # When max_depth is reached, collapse immediate child folders inline (e.g. `dir/ [sub1, sub2]`) to save vertical lines.
         if max_depth is not None and current_depth >= max_depth:
             try:
                 sub_dirs = sorted(
-                    e.name for e in d.iterdir() if e.is_dir() and e.name not in IGNORE_DIRS
+                    e.name for e in d.iterdir()
+                    if e.is_dir()
+                    and e.name not in IGNORE_DIRS
+                    and e.resolve().is_relative_to(resolved_vault)
                 )
             except PermissionError:
                 sub_dirs = []
@@ -161,7 +204,7 @@ def read_note_content(
     try:
         content = resolved_path.read_text(encoding="utf-8")
         try:
-            rel_path = resolved_path.relative_to(VAULT_PATH)
+            rel_path = resolved_path.relative_to(VAULT_PATH.resolve())
         except ValueError:
             rel_path = resolved_path
 
@@ -185,82 +228,146 @@ def resolve_vault_note_path(note_path: str, domain_path: Optional[str] = None) -
 
     Supports exact relative paths (e.g. '3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md'),
     paths omitting '.md', or unique base filenames (e.g. 'Job Hunt War Room').
+    Enforces strict containment within VAULT_PATH (or the domain directory if domain_path is provided).
     """
-    search_root = (VAULT_PATH / domain_path) if domain_path else VAULT_PATH
-    clean_input = note_path.strip().lstrip("/\\")
+    if not note_path or not note_path.strip():
+        return None, "Error: Path cannot be empty."
 
-    if os.path.isabs(note_path) and not note_path.startswith(("/", "\\")):
-        target_path = Path(note_path)
+    clean_input = note_path.strip()
+    # Reject absolute and Windows drive-letter paths upfront (e.g., 'C:\\Windows\\win.ini', '/etc/passwd', '\\boot.ini')
+    if (
+        clean_input.startswith(("/", "\\"))
+        or os.path.isabs(clean_input)
+        or bool(re.match(r"^[a-zA-Z]:", clean_input))
+        or Path(clean_input).is_absolute()
+        or bool(Path(clean_input).drive)
+    ):
+        return None, f"Error: Refusing to access path outside the Vault: '{note_path}'"
+
+    # If clean_input begins with 'Vault/' or 'Vault\\', strip the redundant prefix for resolution
+    norm_input = clean_input
+    if norm_input.replace("\\", "/").startswith("Vault/"):
+        norm_input = norm_input[6:]
+
+    resolved_vault = VAULT_PATH.resolve()
+
+    if domain_path:
+        clean_domain = domain_path.strip()
+        if (
+            clean_domain.startswith(("/", "\\"))
+            or os.path.isabs(clean_domain)
+            or bool(re.match(r"^[a-zA-Z]:", clean_domain))
+            or Path(clean_domain).is_absolute()
+            or bool(Path(clean_domain).drive)
+        ):
+            return None, f"Error: Refusing to access path outside the Vault: '{domain_path}'"
+        resolved_domain = (resolved_vault / clean_domain.lstrip("/\\")).resolve()
+        if not resolved_domain.is_relative_to(resolved_vault):
+            return None, f"Error: Refusing to access path outside the Vault: '{domain_path}'"
+        search_root = resolved_domain
+        resolved_root = resolved_domain
     else:
-        # Try relative to search_root first
-        target_path = search_root / clean_input
-        if not target_path.exists() and not target_path.with_suffix(".md").exists() and domain_path:
-            # Fall back to relative to VAULT_PATH in case caller provided a full vault-relative path
-            vault_target = VAULT_PATH / clean_input
-            if vault_target.exists() or vault_target.with_suffix(".md").exists():
-                target_path = vault_target
+        search_root = resolved_vault
+        resolved_root = resolved_vault
 
-        if not target_path.exists() and not target_path.name.endswith(".md"):
-            target_path = target_path.with_suffix(".md")
+    # Candidate 1: Direct path relative to search_root
+    target_path = search_root / norm_input
+    # .resolve() collapses '..' segments and follows symlinks to their canonical target on disk
+    resolved_target = target_path.resolve()
+    # Path.is_relative_to (Python 3.9+): True only if resolved_target is within resolved_root
+    if not resolved_target.is_relative_to(resolved_root):
+        err_msg = (
+            f"Error: Cannot read {note_path}. Restricted to the {domain_path} domain."
+            if domain_path
+            else f"Error: Refusing to access path outside the Vault: '{note_path}'"
+        )
+        return None, err_msg
 
-    if target_path.exists() and target_path.is_file():
-        if domain_path:
-            try:
-                resolved_target = target_path.resolve()
-                resolved_domain = search_root.resolve()
-                if not resolved_target.is_relative_to(resolved_domain):
-                    return None, f"Error: Cannot read {note_path}. Restricted to the {domain_path} domain."
-            except Exception:
-                pass
-        return target_path, None
+    if resolved_target.exists() and resolved_target.is_file():
+        return resolved_target, None
+
+    # Candidate 2: Try appending '.md' if not already present
+    if not norm_input.endswith(".md"):
+        target_md = search_root / f"{norm_input}.md"
+        resolved_md = target_md.resolve()
+        if not resolved_md.is_relative_to(resolved_root):
+            err_msg = (
+                f"Error: Cannot read {note_path}. Restricted to the {domain_path} domain."
+                if domain_path
+                else f"Error: Refusing to access path outside the Vault: '{note_path}'"
+            )
+            return None, err_msg
+        if resolved_md.exists() and resolved_md.is_file():
+            return resolved_md, None
+
+    # Candidate 3: If domain_path is set, caller might have passed a full vault-relative path
+    if domain_path:
+        vault_target = (resolved_vault / norm_input).resolve()
+        if vault_target.is_relative_to(resolved_root) and vault_target.exists() and vault_target.is_file():
+            return vault_target, None
+        if not norm_input.endswith(".md"):
+            vault_target_md = (resolved_vault / f"{norm_input}.md").resolve()
+            if vault_target_md.is_relative_to(resolved_root) and vault_target_md.exists() and vault_target_md.is_file():
+                return vault_target_md, None
 
     # Fallback: search by base filename across search_root
-    base_name = os.path.basename(clean_input)
+    base_name = os.path.basename(norm_input)
     if not base_name.endswith(".md"):
         base_name += ".md"
 
     found_paths: List[Path] = []
     for root, dirs, files in os.walk(search_root):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        dirs[:] = [
+            d for d in dirs
+            if d not in IGNORE_DIRS
+            and (Path(root) / d).resolve().is_relative_to(resolved_root)
+        ]
         for file in files:
-            if file == base_name or file == os.path.basename(clean_input):
-                found_paths.append(Path(root) / file)
+            if file == base_name or file == os.path.basename(norm_input):
+                candidate_file = (Path(root) / file).resolve()
+                if candidate_file.is_relative_to(resolved_root) and candidate_file.is_file():
+                    found_paths.append(candidate_file)
 
     if not found_paths:
         scope = f" in {domain_path}" if domain_path else ""
         return None, f"File not found{scope}: {note_path}. Try using search to find the correct path."
     elif len(found_paths) == 1:
-        return found_paths[0], None
+        resolved_match = found_paths[0].resolve()
+        if not resolved_match.is_relative_to(resolved_root):
+            return None, f"Error: Refusing to access path outside the Vault: '{note_path}'"
+        return resolved_match, None
     else:
-        rel_paths = [str(p.relative_to(VAULT_PATH)) for p in found_paths]
+        rel_paths = [str(p.relative_to(resolved_vault)).replace("\\", "/") for p in found_paths]
         scope = f" in {domain_path}" if domain_path else ""
         return None, f"Multiple files found for {note_path}{scope}. Please be more specific. Matches:\n" + "\n".join(rel_paths)
 
 
 def search_within(keyword: str, root_path: Optional[str] = None, tags: Optional[List[str]] = None) -> str:
     """Searches notes in the vault for a keyword string."""
-    if root_path:
-        search_root = VAULT_PATH / root_path
-        if not search_root.exists() or not search_root.is_dir():
-            return (
-                f"Error: Path '{root_path}' does not exist or is not a directory. "
-                f"Call get_directory_tree() to see available folders."
-            )
-    else:
-        search_root = VAULT_PATH
+    search_root, err = _resolve_vault_dir(root_path)
+    if err:
+        return err
 
+    resolved_vault = VAULT_PATH.resolve()
     results = []
     keyword_lower = keyword.lower()
     tags_lower = {t.lower() for t in tags} if tags else None
     
     for root, dirs, files in os.walk(search_root):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        dirs[:] = [
+            d for d in dirs
+            if d not in IGNORE_DIRS
+            and (Path(root) / d).resolve().is_relative_to(resolved_vault)
+        ]
         
         for file in files:
             if not file.endswith('.md'):
                 continue
                 
-            filepath = Path(root) / file
+            filepath = (Path(root) / file).resolve()
+            if not filepath.is_relative_to(resolved_vault):
+                continue
+
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -277,7 +384,7 @@ def search_within(keyword: str, root_path: Optional[str] = None, tags: Optional[
                     end = min(len(content), idx + len(keyword) + 40)
                     snippet = content[start:end].replace('\n', ' ')
                     
-                    rel_path = filepath.relative_to(VAULT_PATH)
+                    rel_path = filepath.relative_to(resolved_vault)
                     results.append(f"- {rel_path}: \"...{snippet}...\"")
             except Exception:
                 pass
@@ -316,15 +423,11 @@ def get_recent_modifications(
         limit: Maximum number of modified documents to return (default: 50).
         markdown_only: If True, only include `.md` notes; otherwise include all non-hidden Vault documents (excluding `.gitkeep`).
     """
-    if root_path:
-        search_root = VAULT_PATH / root_path
-        if not search_root.exists() or not search_root.is_dir():
-            return (
-                f"Error: Path '{root_path}' does not exist or is not a directory. "
-                f"Call get_directory_tree() to see available folders."
-            )
-    else:
-        search_root = VAULT_PATH
+    search_root, err = _resolve_vault_dir(root_path)
+    if err:
+        return err
+
+    resolved_vault = VAULT_PATH.resolve()
 
     # Resolve the local cutoff datetime based on caller arguments (hours -> since_date -> today at midnight).
     now_local = datetime.now()
@@ -351,7 +454,11 @@ def get_recent_modifications(
 
     for root, dirs, files in os.walk(search_root):
         # Mutating dirs[:] in-place prunes IGNORE_DIRS (e.g. .git, .obsidian, Audio) so os.walk never descends into them.
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        dirs[:] = [
+            d for d in dirs
+            if d not in IGNORE_DIRS
+            and (Path(root) / d).resolve().is_relative_to(resolved_vault)
+        ]
 
         for file in files:
             # Skip hidden dotfiles (e.g. .gitkeep, .DS_Store) that carry no user content.
@@ -360,7 +467,10 @@ def get_recent_modifications(
             if markdown_only and not file.endswith(".md"):
                 continue
 
-            filepath = Path(root) / file
+            filepath = (Path(root) / file).resolve()
+            if not filepath.is_relative_to(resolved_vault):
+                continue
+
             try:
                 stat_info = filepath.stat()
             except OSError:
@@ -369,7 +479,7 @@ def get_recent_modifications(
 
             if stat_info.st_mtime >= cutoff_ts:
                 # Forward-slash relative path keeps output uniform across Windows and POSIX platforms.
-                rel_path = str(filepath.relative_to(VAULT_PATH)).replace("\\", "/")
+                rel_path = str(filepath.relative_to(resolved_vault)).replace("\\", "/")
                 # Compare creation timestamp (st_ctime) against cutoff_ts to distinguish newly created vs. edited notes.
                 is_new = stat_info.st_ctime >= cutoff_ts
                 matched_files.append((stat_info.st_mtime, is_new, rel_path, stat_info.st_size))
@@ -491,4 +601,3 @@ if __name__ == "__main__":
                 markdown_only=args.md_only,
             )
         )
-
