@@ -167,3 +167,4 @@ export interface PinNoteModalProps {
   pinnedPaths: string[];
   onTogglePin: (path: string) => void;
 }
+

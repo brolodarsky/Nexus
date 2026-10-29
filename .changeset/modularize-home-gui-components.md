@@ -16,3 +16,4 @@ type: minor
 - Refactored `gui/src/app/page.tsx` from a monolithic 933-line file into a lean ~230-line route orchestrator delegating all presentation to `@/components/home`.
 - Resolved all ESLint warnings and guarded initial hydration with `queueMicrotask` to avoid cascading renders in React 19.
 - Updated `Project - Nexus GUI.md` and `Build Log - Nexus GUI.md` with the new component hierarchy.
+

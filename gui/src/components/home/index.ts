@@ -16,3 +16,4 @@ export type { PinnedNoteCardProps } from "./types";
 export type { PinnedCardGridProps } from "./types";
 export type { PinnedNotesReaderProps } from "./types";
 export type { PinNoteModalProps } from "./types";
+
