@@ -6,6 +6,13 @@ import glob
 import argparse
 from datetime import datetime
 
+# Configure UTF-8 encoding for standard output/error on Windows terminals to prevent charmap encoding errors
+# sys.stdout.reconfigure() dynamically changes stream encoding without re-opening file descriptors
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 CHANGELOG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "CHANGELOG.md"))
 CHANGELOG_RECENT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "CHANGELOG-RECENT.md"))
 CHANGESET_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".changeset"))
