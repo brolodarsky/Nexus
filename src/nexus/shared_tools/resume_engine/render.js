@@ -1,12 +1,10 @@
 const fs = require('fs');
 const path = require('path');
-const readline = require('readline');
-const { execSync } = require('child_process');
 const { chromium } = require('playwright');
 const { marked } = require('marked');
 
 // ---------------------------------------------------------------------------
-// Scan directories for renderable documents
+// Directory Paths & Discovery
 // ---------------------------------------------------------------------------
 const PORTFOLIO_DIR = path.resolve(__dirname, '../../../../Vault/3. Operations/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence');
 const RESUMES_DIR = path.join(PORTFOLIO_DIR, 'Resumes');
@@ -31,70 +29,16 @@ function findRenderableFiles() {
 }
 
 // ---------------------------------------------------------------------------
-// Interactive file picker
-// ---------------------------------------------------------------------------
-function createInterface() {
-    return readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-    });
-}
-
-async function promptFileSelection(files) {
-    const rl = createInterface();
-
-    console.log('\n  Resume Engine - Document Renderer');
-    console.log('  ---------------------------------\n');
-    console.log('  Found renderable documents:\n');
-
-    files.forEach((f, i) => {
-        const rel = path.relative(PORTFOLIO_DIR, f);
-        console.log(`    [${i + 1}] ${rel}`);
-    });
-
-    console.log(`\n    [a] Render all`);
-    console.log(`    [q] Quit\n`);
-
-    return new Promise((resolve) => {
-        rl.question('  Select document(s) (comma-separated numbers, "a" for all): ', (answer) => {
-            rl.close();
-            const input = answer.trim().toLowerCase();
-
-            if (input === 'q') {
-                resolve([]);
-                return;
-            }
-
-            if (input === 'a') {
-                resolve(files);
-                return;
-            }
-
-            const indices = input.split(',').map(s => parseInt(s.trim(), 10) - 1);
-            const selected = indices
-                .filter(i => i >= 0 && i < files.length)
-                .map(i => files[i]);
-
-            if (selected.length === 0) {
-                console.log('  No valid selection. Exiting.');
-            }
-
-            resolve(selected);
-        });
-    });
-}
-
-// ---------------------------------------------------------------------------
-// Page measurement constants
-// Letter size at 96 DPI: 8.5" x 11" = 816px x 1056px
-// CSS @page margin: 0.3in on all sides = 28.8px each
-// Usable content height per page: 1056 - (2 * 28.8) = 998.4px
+// Page Budget & Geometry Constants
+// Standard Letter size at 96 DPI: 8.5" x 11" = 816px x 1056px
+// CSS @page margin: 0.3in = ~29px each side
+// Usable content height per Letter page: 1056 - (2 * 29) = 998px
 // ---------------------------------------------------------------------------
 const PAGE_HEIGHT_PX = 998;
-const PAGE_MARGIN_PX = 29; // 0.3in at 96 DPI
+const PAGE_MARGIN_PX = 29;
 
 // ---------------------------------------------------------------------------
-// Render a single markdown file to PDF and return page metrics
+// Render a single markdown file to PDF and return page geometry metrics
 // ---------------------------------------------------------------------------
 async function renderToPdf(mdPath, browser) {
     const cssPath = path.resolve(__dirname, 'style.css');
@@ -103,15 +47,15 @@ async function renderToPdf(mdPath, browser) {
     // Remove YAML frontmatter
     const contentWithoutFrontmatter = markdownContent.replace(/^---[\s\S]*?---\r?\n/, '');
 
-    // Remove Obsidian navigation links (the "Back to:" line with wiki-links)
+    // Remove Obsidian navigation links ("Back to:" lines with wiki-links)
     const contentClean = contentWithoutFrontmatter.replace(/^Back to:.*\r?\n?/m, '');
 
-    // Derive output filename from the source filename
+    // Derive output filenames from source markdown stem
     const baseName = path.basename(mdPath, '.md');
     const parentDir = path.dirname(mdPath);
 
     const outputPath = path.join(parentDir, `${baseName}.pdf`);
-    const downloadsPath = path.join(process.env.USERPROFILE, 'Downloads', `${baseName}.pdf`);
+    const downloadsPath = path.join(process.env.USERPROFILE || '', 'Downloads', `${baseName}.pdf`);
 
     const htmlContent = marked.parse(contentClean);
 
@@ -135,13 +79,13 @@ async function renderToPdf(mdPath, browser) {
 
     const page = await browser.newPage();
 
-    // Set viewport to match Letter width minus horizontal margins for accurate measurement
-    const usableWidth = 816 - (2 * PAGE_MARGIN_PX); // Letter width at 96 DPI minus margins
+    // Set viewport width to usable print area (Letter width minus horizontal margins)
+    const usableWidth = 816 - (2 * PAGE_MARGIN_PX);
     await page.setViewportSize({ width: usableWidth, height: 1056 });
 
     await page.setContent(fullHtml, { waitUntil: 'networkidle' });
 
-    // Measure content height before generating PDF
+    // Measure actual rendered scrollHeight before writing PDF
     const contentHeight = await page.evaluate(() => document.body.scrollHeight);
 
     await page.pdf({
@@ -152,12 +96,12 @@ async function renderToPdf(mdPath, browser) {
 
     await page.close();
 
-    // Calculate page metrics
+    // Calculate page geometry budget metrics
     const totalPages = Math.ceil(contentHeight / PAGE_HEIGHT_PX);
     const lastPageUsed = contentHeight - ((totalPages - 1) * PAGE_HEIGHT_PX);
     const lastPageFillPct = Math.round((lastPageUsed / PAGE_HEIGHT_PX) * 100);
     const roomRemainingPx = (totalPages * PAGE_HEIGHT_PX) - contentHeight;
-    // Approximate: 1 bullet point ≈ 45px at 0.8rem body + 1.0 line-height + margins
+    // 1 bullet point ≈ 45px at 0.8rem body text + margins
     const approxBulletsRemaining = Math.floor(roomRemainingPx / 45);
 
     let verdict;
@@ -178,54 +122,36 @@ async function renderToPdf(mdPath, browser) {
         verdict,
     };
 
-    // Copy to Downloads folder
-    try {
-        fs.copyFileSync(outputPath, downloadsPath);
-        console.log(`  PDF: ${outputPath}`);
-        console.log(`  Copy: ${downloadsPath}`);
-    } catch (copyErr) {
-        console.warn(`  Warning: Could not copy to Downloads: ${copyErr.message}`);
-        console.log(`  PDF: ${outputPath}`);
+    // Mirror copy to user's Downloads directory
+    if (downloadsPath) {
+        try {
+            fs.copyFileSync(outputPath, downloadsPath);
+            console.log(`  PDF: ${outputPath}`);
+            console.log(`  Copy: ${downloadsPath}`);
+        } catch (copyErr) {
+            console.warn(`  Warning: Could not copy to Downloads: ${copyErr.message}`);
+            console.log(`  PDF: ${outputPath}`);
+        }
     }
 
     return metrics;
 }
 
 // ---------------------------------------------------------------------------
-// Render a single markdown file to DOCX via the Python renderer
-// ---------------------------------------------------------------------------
-function renderToDocx(mdPath) {
-    const pythonPath = path.resolve(__dirname, '../../../../.venv/Scripts/python.exe');
-    const scriptPath = path.resolve(__dirname, 'render_docx.py');
-
-    try {
-        execSync(`"${pythonPath}" "${scriptPath}" "${mdPath}"`, { stdio: 'inherit' });
-    } catch (docxErr) {
-        console.error(`  DOCX error: ${docxErr.message}`);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Main Entrypoint — Supports interactive CLI, programmatic CLI args, and flags
+// Headless Compiler CLI Entrypoint
 // ---------------------------------------------------------------------------
 async function main() {
-    // Parse arguments: filter out execution flags (prefixed with --) and extract file path arguments
-    // process.argv.slice(2): Strips node runtime path and script file path
+    // Parse arguments: filter flags and capture target file paths
     const args = process.argv.slice(2);
     const flags = new Set(args.filter(arg => arg.startsWith('--')).map(arg => arg.toLowerCase()));
     const fileArgs = args.filter(arg => !arg.startsWith('--'));
 
-    const isPdfOnly = flags.has('--pdf-only');
-    const isDocxOnly = flags.has('--docx-only');
-    const isAll = flags.has('--all');
-
     let selected = [];
 
-    if (isAll) {
-        // --all flag: batch-render all discovered resumes and cover letters across the portfolio
+    if (flags.has('--all') || (fileArgs.length === 0 && !flags.has('--help'))) {
+        // Default to batch compiling all portfolio documents when invoked without args
         selected = findRenderableFiles();
     } else if (fileArgs.length > 0) {
-        // Positional file paths: resolve each target and verify physical disk presence
         for (const filePath of fileArgs) {
             const resolved = path.resolve(filePath);
             if (fs.existsSync(resolved)) {
@@ -234,51 +160,29 @@ async function main() {
                 console.error(`  Warning: File not found: ${resolved}`);
             }
         }
-    } else {
-        // Interactive terminal picker when invoked with no command line arguments
-        const files = findRenderableFiles();
-
-        if (files.length === 0) {
-            console.log('No renderable documents found.');
-            process.exit(0);
-        }
-
-        selected = await promptFileSelection(files);
     }
 
     if (!selected || selected.length === 0) {
+        console.log('No renderable documents found.');
         process.exit(0);
     }
 
-    console.log(`\n  Rendering ${selected.length} document(s)...\n`);
+    console.log(`\n  Compiling ${selected.length} document(s) to PDF...\n`);
 
-    // Headless Chromium browser instance only required if PDF rendering or metric measurement is needed
-    const needsBrowser = !isDocxOnly;
-    const browser = needsBrowser ? await chromium.launch() : null;
+    const browser = await chromium.launch();
     const allMetrics = [];
 
     for (const file of selected) {
         const baseName = path.basename(file, '.md');
         console.log(`  --- ${baseName} ---`);
-
-        // 1. PDF Compilation & Geometry Budget Measurement
-        if (browser && !isDocxOnly) {
-            const metrics = await renderToPdf(file, browser);
-            allMetrics.push(metrics);
-        }
-
-        // 2. Word DOCX Compilation
-        if (!isPdfOnly) {
-            renderToDocx(file);
-        }
+        const metrics = await renderToPdf(file, browser);
+        allMetrics.push(metrics);
         console.log('');
     }
 
-    if (browser) {
-        await browser.close();
-    }
+    await browser.close();
 
-    // Print human-readable page metrics summary table
+    // Summary table output
     if (allMetrics.length > 0) {
         console.log('  ' + '═'.repeat(60));
         console.log('  📐 PAGE METRICS');
@@ -298,7 +202,7 @@ async function main() {
         }
         console.log('  ' + '─'.repeat(60));
 
-        // Output machine-readable JSON for agent consumption and backend API parsing
+        // Machine-readable JSON output for Python service and API consumers
         console.log(`  [METRICS_JSON] ${JSON.stringify(allMetrics)}`);
     }
     console.log('');

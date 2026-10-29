@@ -17,5 +17,10 @@ type: minor
 - **Automated Test Suite (`tests/test_resume_engine_api.py`):** 8 unit and integration tests covering document discovery, path traversal sandbox enforcement (HTTP 403 / ValueError), document reading, and binary PDF streaming.
 
 ### Changed
-- **CLI Compiler Enhancements (`src/nexus/shared_tools/resume_engine/render.js`):** Extended `render.js` to accept CLI arguments for multiple files, `--pdf-only`, `--docx-only`, and `--all` flags, while fully preserving backward compatibility with the interactive terminal prompt.
+- **Headless Compiler Streamlining (`src/nexus/shared_tools/resume_engine/render.js`):** Refactored `render.js` into a dedicated headless Chromium PDF and page metrics compiler accepting CLI paths or batch flags (`--all`).
+- **Native Python Execution (`src/nexus/shared_tools/resume_engine/service.py`):** Replaced the indirect Node-to-Python subprocess hop for Word DOCX generation with direct Python invocation via `render_docx.render_docx()`.
 - **Updated `README.md`:** Added documentation for `src/nexus/api/routers/tools.py` and the Control Panel `/tools` page.
+
+### Removed
+- **Vestigial Terminal CLI Code (`src/nexus/shared_tools/resume_engine/render.js`):** Removed legacy interactive terminal prompt (`readline`, `promptFileSelection()`, `createInterface()`) now superseded by the `/tools` web studio.
+- **Obsolete Debug Scripts & Unused Packages:** Deleted unused `inspect_docx.js` and removed unneeded `html-to-docx` and `adm-zip` dependencies from `src/nexus/shared_tools/resume_engine/package.json`.

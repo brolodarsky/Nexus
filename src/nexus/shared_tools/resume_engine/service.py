@@ -236,87 +236,103 @@ def render_documents(
     file_paths: List[str],
     formats: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Execute the headless Chromium and docx compiler over target markdown files.
+    """Execute headless Chromium and native python-docx compilation over target markdown files.
 
-    Runs `node render.js` in a subprocess, parsing stdout for the embedded `[METRICS_JSON]`
-    line and updating the disk metrics cache with new page geometry measurements.
+    Runs `node render.js` in a subprocess for Chromium PDF compilation and page budget measurement,
+    and invokes `render_docx.render_docx()` natively in Python for Word document generation.
 
     Args:
         file_paths: List of absolute or relative paths to render (or ['all'] to batch compile all).
         formats: List of formats to emit, e.g. ['pdf', 'docx'], ['pdf'], or ['docx']. Default both.
 
     Returns:
-        Dict containing success flag, array of compiled document records, and raw execution logs.
+        Dict containing success flag, array of compiled document records, and execution logs.
     """
+    import io
+    from contextlib import redirect_stdout
+    from nexus.shared_tools.resume_engine.render_docx import render_docx
+
     formats = formats or ["pdf", "docx"]
     is_pdf = "pdf" in formats
     is_docx = "docx" in formats
 
-    # Build node render.js CLI invocation command
-    cmd = ["node", "render.js"]
-
-    if is_pdf and not is_docx:
-        cmd.append("--pdf-only")
-    elif is_docx and not is_pdf:
-        cmd.append("--docx-only")
-
-    # Handle batch all vs specific document selection
+    # Resolve target document paths
     resolved_paths: List[Path] = []
     if len(file_paths) == 1 and file_paths[0].strip().lower() == "all":
-        cmd.append("--all")
+        resolved_paths = [Path(p["path"]) for p in list_documents()]
     else:
         for fp in file_paths:
             safe = _validate_safe_path(fp)
             if not safe.exists():
                 raise FileNotFoundError(f"File not found for rendering: {safe}")
             resolved_paths.append(safe)
-            cmd.append(str(safe))
 
-    # Execute renderer with timeout guard
-    process = subprocess.run(
-        cmd,
-        cwd=str(ENGINE_DIR),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=60,
-    )
-
-    stdout = process.stdout or ""
-    stderr = process.stderr or ""
-    combined_logs = f"{stdout}\n{stderr}".strip()
-
-    # Parse machine-readable metrics emitted by render.js
+    log_chunks: List[str] = []
     metrics_list: List[Dict[str, Any]] = []
-    for line in stdout.splitlines():
-        if "[METRICS_JSON]" in line:
-            try:
-                raw_json = line.split("[METRICS_JSON]", 1)[1].strip()
-                metrics_list = json.loads(raw_json)
-            except Exception as parse_err:
-                print(f"[ResumeEngine] Metrics JSON parse error: {parse_err}", file=sys.stderr)
-            break
+    overall_success = True
 
-    # Update cache on disk for all newly measured documents
-    cache = _load_metrics_cache()
-    for metric_item in metrics_list:
-        file_stem = metric_item.get("file")
-        if file_stem:
-            cache[file_stem] = {
-                **metric_item,
-                "measured_at": datetime.now(timezone.utc).isoformat(),
-            }
-    _save_metrics_cache(cache)
+    # 1. PDF Compilation & Page Geometry Measurement via Headless Chromium
+    if is_pdf and resolved_paths:
+        cmd = ["node", "render.js"] + [str(p) for p in resolved_paths]
+        proc = subprocess.run(
+            cmd,
+            cwd=str(ENGINE_DIR),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        if proc.returncode != 0:
+            overall_success = False
+        log_chunks.append(proc.stdout or "")
+        if proc.stderr:
+            log_chunks.append(proc.stderr)
+
+        # Parse metrics emitted by Chromium renderer
+        for line in (proc.stdout or "").splitlines():
+            if "[METRICS_JSON]" in line:
+                try:
+                    raw_json = line.split("[METRICS_JSON]", 1)[1].strip()
+                    metrics_list = json.loads(raw_json)
+                except Exception as parse_err:
+                    print(f"[ResumeEngine] Metrics JSON parse error: {parse_err}", file=sys.stderr)
+                break
+
+        # Persist updated page budget measurements into disk cache
+        cache = _load_metrics_cache()
+        for metric_item in metrics_list:
+            file_stem = metric_item.get("file")
+            if file_stem:
+                cache[file_stem] = {
+                    **metric_item,
+                    "measured_at": datetime.now(timezone.utc).isoformat(),
+                }
+        _save_metrics_cache(cache)
+
+    # 2. Native Python Word .docx Compilation
+    if is_docx and resolved_paths:
+        docx_buf = io.StringIO()
+        with redirect_stdout(docx_buf):
+            for path_item in resolved_paths:
+                try:
+                    render_docx(str(path_item))
+                except Exception as docx_err:
+                    overall_success = False
+                    print(f"Error compiling DOCX for {path_item.name}: {docx_err}", file=sys.stderr)
+        docx_logs = docx_buf.getvalue().strip()
+        if docx_logs:
+            log_chunks.append(docx_logs)
+
+    combined_logs = "\n".join(chunk for chunk in log_chunks if chunk).strip()
 
     # Build output status records
+    cache = _load_metrics_cache()
     rendered_records: List[Dict[str, Any]] = []
     metric_lookup = {m.get("file"): m for m in metrics_list}
-
-    target_files = resolved_paths if resolved_paths else [Path(p["path"]) for p in list_documents()]
     downloads_dir = Path(os.environ.get("USERPROFILE", "~")) / "Downloads"
 
-    for path_item in target_files:
+    for path_item in resolved_paths:
         base_name = path_item.stem
         pdf_file = path_item.parent / f"{base_name}.pdf"
         docx_file = path_item.parent / f"{base_name}.docx"
@@ -335,11 +351,11 @@ def render_documents(
         })
 
     return {
-        "success": process.returncode == 0,
-        "exit_code": process.returncode,
+        "success": overall_success,
+        "exit_code": 0 if overall_success else 1,
         "results": rendered_records,
         "logs": combined_logs,
-        "error": None if process.returncode == 0 else "Rendering failed. Check execution logs.",
+        "error": None if overall_success else "Rendering completed with errors. Check execution logs.",
     }
 
 
