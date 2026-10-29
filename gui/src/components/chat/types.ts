@@ -44,7 +44,7 @@ export const FALLBACK_MODELS: ModelOption[] = [
     model_name: "gemini-4-argon",
     label: "Strong (gemini-4-argon)",
     short_label: "Strong",
-    description: "Deep reasoning & complex synthesis — Astra (gemini-4-argon)",
+    description: "Deep reasoning & complex synthesis — Argon (gemini-4-argon)",
   },
   {
     id: "low",

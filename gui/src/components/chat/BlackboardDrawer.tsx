@@ -41,11 +41,8 @@ export default function BlackboardDrawer({
         <div>
           <h2 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
             <span>📋</span>
-            <span>Shared Agent Blackboard</span>
+            <span>Agent Blackboard</span>
           </h2>
-          <p className="text-[0.68rem] text-text-muted mt-0.5">
-            Live findings from Flash subagents &amp; Astra
-          </p>
         </div>
         <div className="flex items-center gap-1.5">
           <button

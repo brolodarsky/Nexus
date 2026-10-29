@@ -25,24 +25,19 @@ export default function ChatMessageItem({ message }: ChatMessageItemProps) {
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${
-          isUser
-            ? "max-w-2xl bg-accent-cyan/10 border border-accent-cyan/20 text-text-primary"
-            : hasTrace
-              ? "max-w-4xl xl:max-w-5xl w-full glass-card text-text-primary"
-              : "max-w-3xl glass-card text-text-primary"
-        }`}
+        className={`rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${isUser
+          ? "max-w-2xl bg-accent-cyan/10 border border-accent-cyan/20 text-text-primary"
+          : hasTrace
+            ? "max-w-4xl xl:max-w-5xl w-full glass-card text-text-primary"
+            : "max-w-3xl glass-card text-text-primary"
+          }`}
       >
         {/* Assistant routing & model execution metadata pills */}
         {!isUser && message.agent && (
           <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.65rem] font-medium bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan">
               <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan" />
-              {message.agent === "career"
-                ? "Career Agent"
-                : message.agent === "librarian"
-                  ? "Librarian"
-                  : "NexusAgent"}
+              {"NexusAgent"}
               {message.domain && (
                 <span className="text-text-muted">• {message.domain}</span>
               )}
@@ -55,11 +50,10 @@ export default function ChatMessageItem({ message }: ChatMessageItemProps) {
 
             {(message.modelName || message.modelTier) && (
               <span
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-mono border ${
-                  message.modelTier === "strong"
-                    ? "bg-accent-violet/15 border-accent-violet/30 text-purple-300"
-                    : "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-                }`}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-mono border ${message.modelTier === "strong"
+                  ? "bg-accent-violet/15 border-accent-violet/30 text-purple-300"
+                  : "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                  }`}
                 title={`Executed on ${message.modelName ?? message.modelTier} (${message.modelTier ?? "default"} tier)`}
               >
                 <span>

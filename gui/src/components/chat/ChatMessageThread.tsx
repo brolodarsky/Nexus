@@ -14,9 +14,9 @@ import ChatMessageItem from "./ChatMessageItem";
 
 // Starter prompt suggestions displayed when a conversation has no messages yet
 const PROMPT_SUGGESTIONS: string[] = [
-  "What are my active projects?",
-  "Summarize my career strategy",
-  "What medical appointments are upcoming?",
+  "What do we got for today?",
+  "Do an email sweep.",
+  "What are my outstanding Missions?",
 ];
 
 // ChatMessageThreadProps: defines the state and callbacks needed to render the message stream
@@ -60,7 +60,7 @@ export default function ChatMessageThread({
         <div className="flex flex-col items-center justify-center h-full text-center opacity-60">
           <span className="text-5xl mb-4">🧠</span>
           <p className="text-text-secondary text-sm max-w-md">
-            Hi Bill! How can I help you today?
+            How can I help today?
           </p>
           <div className="flex flex-wrap gap-2 mt-6 justify-center">
             {PROMPT_SUGGESTIONS.map((example) => (

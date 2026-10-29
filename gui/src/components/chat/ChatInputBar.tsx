@@ -48,7 +48,7 @@ export default function ChatInputBar({
     if (!el) return;
     // Reset height temporarily so scrollHeight accurately reflects current content after deletions or wrapping
     el.style.height = "auto";
-    const minHeight = 56; // Roomy base height (~2 lines)
+    const minHeight = 10;
     const maxHeight = 240; // Max expansion limit (~10 lines) before vertical scrolling takes over
     const nextHeight = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
     el.style.height = `${nextHeight}px`;
@@ -73,17 +73,16 @@ export default function ChatInputBar({
     >
       <div className="glass-card p-3 rounded-2xl flex flex-col gap-2.5 border border-border-subtle focus-within:border-accent-cyan/40 transition-colors">
         <div className="flex items-start gap-3 px-1 pt-1">
-          <span className="text-lg text-text-muted select-none mt-1">💬</span>
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => onChangeInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Message Nexus (${activeModelLabel})...`}
+            placeholder={`Type message...`}
             disabled={loading}
-            rows={2}
+            rows={1}
             spellCheck={true}
-            className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none resize-none leading-relaxed disabled:opacity-50 min-h-[56px] max-h-60 overflow-y-auto"
+            className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none resize-none leading-relaxed disabled:opacity-50 max-h-60 overflow-y-auto"
             id="chat-input"
           />
         </div>
@@ -106,34 +105,27 @@ export default function ChatInputBar({
                   disabled={loading}
                   onClick={() => onSelectModelTier(opt.id)}
                   title={opt.description}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 disabled:opacity-50 ${
-                    isSelected
-                      ? isStrong
-                        ? "bg-accent-violet/20 text-purple-300 border border-accent-violet/40 shadow-sm"
-                        : "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40 shadow-sm"
-                      : "text-text-muted hover:text-text-primary border border-transparent"
-                  }`}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 disabled:opacity-50 ${isSelected
+                    ? isStrong
+                      ? "bg-accent-violet/20 text-purple-300 border border-accent-violet/40 shadow-sm"
+                      : "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40 shadow-sm"
+                    : "text-text-muted hover:text-text-primary border border-transparent"
+                    }`}
                 >
                   <span>
                     {isStrong ? "🧠" : opt.tier === "medium" ? "⚖️" : "⚡"}
                   </span>
                   <span>{opt.short_label}</span>
-                  <span className="hidden md:inline font-mono text-[0.65rem] opacity-75">
-                    ({opt.model_name})
-                  </span>
                 </button>
               );
             })}
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="hidden md:inline text-[0.7rem] text-text-muted select-none">
-              Enter ↵ to send • Shift + Enter ↵ for newline
-            </span>
             <button
               type="submit"
               disabled={loading || !input.trim()}
-              title="Send message (Enter)"
+              title="Send message (Enter) • Newline (Shift+Enter)"
               className="flex items-center justify-center w-9 h-9 rounded-xl bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
             >
               <svg

@@ -37,7 +37,7 @@ export default function ChatHeader({
             ? "bg-accent-cyan/15 border-accent-cyan/30 text-accent-cyan"
             : "bg-bg-tertiary border-border-subtle text-text-secondary hover:text-text-primary"
             }`}
-          title="Toggle Shared Subagent Blackboard"
+          title="Toggle Agent Blackboard"
         >
           <span>Subagent Board</span>
           <span className="px-1.5 py-0.2 rounded-full bg-bg-primary/60 text-[0.65rem] font-mono">
