@@ -29,21 +29,16 @@ export default function ChatHeader({
         <h1 className="text-xl font-bold tracking-tight">
           <span className="gradient-text">{title || "Chat"}</span>
         </h1>
-        <p className="text-text-secondary mt-0.5 text-xs">
-          Astra Primary Orchestrator • Flash Subagent Swarm • Shared Blackboard
-        </p>
       </div>
       <div className="flex items-center gap-2">
         <button
           onClick={onToggleBoard}
-          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 ${
-            showBoard
-              ? "bg-accent-cyan/15 border-accent-cyan/30 text-accent-cyan"
-              : "bg-bg-tertiary border-border-subtle text-text-secondary hover:text-text-primary"
-          }`}
+          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 ${showBoard
+            ? "bg-accent-cyan/15 border-accent-cyan/30 text-accent-cyan"
+            : "bg-bg-tertiary border-border-subtle text-text-secondary hover:text-text-primary"
+            }`}
           title="Toggle Shared Subagent Blackboard"
         >
-          <span>📋</span>
           <span>Subagent Board</span>
           <span className="px-1.5 py-0.2 rounded-full bg-bg-primary/60 text-[0.65rem] font-mono">
             {bulletinCount}
