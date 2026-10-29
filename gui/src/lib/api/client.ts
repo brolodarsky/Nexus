@@ -26,7 +26,7 @@ export class ApiError extends Error {
 }
 
 // Generic fetch wrapper providing uniform error handling, JSON serialization, and typing
-// <T>: Generic type parameter representing the expected shape of the response JSON (e.g., AgentStatus[], Conversation)
+// <T>: Generic type parameter representing the expected shape of the response JSON (e.g., Conversation[], ModelsCatalogResponse)
 // RequestInit: Built-in TypeScript interface for fetch options (method, headers, body, signal)
 // Promise<T>: Asynchronous handle that resolves with the parsed JSON data of type T
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {

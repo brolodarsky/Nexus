@@ -1,20 +1,10 @@
 /**
- * agents.ts — Agent status, chat operations, conversation history, model catalog, and run telemetry.
+ * agents.ts — Chat operations, conversation history, model catalog, and run telemetry.
  * Connects to FastAPI `/api/agents` routes.
  */
 
 import { apiFetch } from "./client";
 import type { TraceEvent } from "./stream";
-
-// Interface representing an agent's operational state in the Engine Dashboard
-export interface AgentStatus {
-  name: string;                                                         // Unique machine identifier (e.g. "career", "librarian")
-  display_name: string;                                                 // Human-readable label (e.g. "Career Agent")
-  status: "idle" | "running" | "waiting_hitl" | "not_built" | "error";  // Strict union of allowed lifecycle states
-  last_run: string | null;                                              // ISO-8601 UTC timestamp or null if never executed
-  error_count: number;                                                  // Running count of exceptions encountered
-  description: string;                                                  // Plain-text summary of agent capabilities
-}
 
 // Interface for synchronous chat response returned by POST /api/agents/ask
 export interface AskResponse {
@@ -130,11 +120,6 @@ export interface RunSnapshot {
   trace_events_count: number;
   trace_events: TraceEvent[];
   metadata: Record<string, unknown>;
-}
-
-// Retrieves runtime status for all registered swarm agents
-export async function getAgentStatus(): Promise<AgentStatus[]> {
-  return apiFetch<AgentStatus[]>("/api/agents/status");
 }
 
 // Fetches selectable per-turn model tiers and active provider catalog from GET /api/agents/models

@@ -59,45 +59,7 @@ class AskResponse(BaseModel):
     timestamp: str                      # ISO-8601 UTC timestamp
 
 
-# Pydantic schema for agent operational status displayed in the dashboard
-class AgentStatusEntry(BaseModel):
-    name: str               # Unique machine ID (e.g., "career")
-    display_name: str       # Human-friendly label (e.g., "Career Agent")
-    status: str             # Operational state: "idle" | "running" | "waiting_hitl" | "not_built"
-    last_run: str | None    # ISO-8601 timestamp of last execution or None
-    error_count: int        # Cumulative exceptions caught during execution
-    description: str        # Summary of agent responsibilities
-
-
-# ── Agent Registry ────────────────────────────────────────────
-# Registry reflecting the Single Universal Agent architecture (`NexusAgent`) + dynamic subagents.
-AGENT_REGISTRY = [
-    {
-        "name": "nexus",
-        "display_name": "NexusAgent",
-        "status": "idle",
-        "last_run": None,
-        "error_count": 0,
-        "description": "Single Universal Agent hydrated with Master Instructions, Section Instructions, and shared tools.",
-    },
-    {
-        "name": "subagent",
-        "display_name": "Dynamic Subagents",
-        "status": "idle",
-        "last_run": None,
-        "error_count": 0,
-        "description": "Ephemeral isolated workers spawned on demand via spawn_subagent(task_prompt).",
-    },
-]
-
-
 # ── Routes ────────────────────────────────────────────────────
-
-# Returns list of all registered swarm agents and their active states
-@router.get("/status", response_model=list[AgentStatusEntry])
-async def get_agent_status():
-    """Returns the status of all registered agents for dashboard monitoring."""
-    return AGENT_REGISTRY
 
 
 # Returns selectable model tiers and active provider metadata for per-turn model selection in the Chat UI
@@ -223,13 +185,8 @@ async def ask_brain(request: AskRequest):
             metadata={"model_tier": used_tier, "model_name": used_model},
         )
 
-        # Update last_run timestamps in the static registry
+        # Generate ISO-8601 UTC timestamp for chat response serialization
         now = datetime.now(timezone.utc).isoformat()
-        for agent in AGENT_REGISTRY:
-            if agent["name"] == "nexus":
-                agent["last_run"] = now
-            if any(tc.get("name") == "spawn_subagent" for tc in (result.get("tool_calls") or [])) and agent["name"] == "subagent":
-                agent["last_run"] = now
 
         return AskResponse(
             response=response_text,
@@ -287,12 +244,8 @@ def _run_pipeline(
         used_tier = result.get("model_tier")
         used_model = result.get("model_name")
 
+        # Generate ISO-8601 UTC timestamp for terminal SSE 'done' packet
         now = datetime.now(timezone.utc).isoformat()
-        for agent in AGENT_REGISTRY:
-            if agent["name"] == "nexus":
-                agent["last_run"] = now
-            if any(tc.get("name") == "spawn_subagent" for tc in (result.get("tool_calls") or [])) and agent["name"] == "subagent":
-                agent["last_run"] = now
                 
         # Persist assistant message along with full trace array to chats.db
         log_message(
