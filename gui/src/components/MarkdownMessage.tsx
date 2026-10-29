@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 // remarkGfm: Remark plugin enabling GitHub-Flavored Markdown (tables, task checkboxes `- [ ]`, strikethrough, autolinks)
 import remarkGfm from "remark-gfm";
 
-// Shared renderer used by the /ask chat stream and the /hitl Pre-Commit Preview tab.
+// Shared renderer used by the /chat stream and the /hitl Pre-Commit Preview tab.
 
 // ── Obsidian Wiki-Link & LaTeX Preprocessor & Rich Markdown Renderer ─
 

@@ -12,7 +12,7 @@ Why a Shared Blackboard?
   2. Parallel Swarm Coordination: When Astra spawns 3–5 Flash subagents concurrently in a single turn, every
      subagent's completed findings are automatically recorded onto the Message Board with timestamps and author
      attribution, eliminating artificial channel partitioning in favor of a unified bulletin stream.
-  3. Live GUI Bulletin Feed: The Next.js Control Panel (`/ask` & `/api/board`) renders a live situational feed
+  3. Live GUI Bulletin Feed: The Next.js Control Panel (`/chat` & `/api/board`) renders a live situational feed
      of all subagent bulletins alongside the main conversation thread.
 """
 import sqlite3

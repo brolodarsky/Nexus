@@ -1,7 +1,7 @@
 """
 board.py — FastAPI Router for the Shared Inter-Agent Blackboard (`/api/board`).
 
-Exposes REST endpoints so the Next.js Control Panel (`/ask` Live Bulletin Feed) and external clients
+Exposes REST endpoints so the Next.js Control Panel (`/chat` Live Bulletin Feed) and external clients
 can inspect, post, or clear situational bulletins published by Flash subagents and Astra.
 """
 from typing import Any, Dict, List, Optional
