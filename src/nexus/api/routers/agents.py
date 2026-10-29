@@ -2,17 +2,13 @@
 agents.py — Agent status and interaction routes.
 Bridges the Next.js frontend to the existing LangGraph multi-agent swarm.
 """
-# json: Standard library for serializing Python dictionaries to JSON strings for HTTP/SSE transport
+
 import json
-# queue: Thread-safe FIFO data structure used to pass events between background worker threads and async SSE generators
 import queue
-# threading: Standard library for spawning background OS threads for long-running synchronous agent invocations
 import threading
 import time
-# datetime & timezone: Provides UTC timestamp generation for message logs and event telemetry
 from datetime import datetime, timezone
 from typing import Optional
-
 # FastAPI primitives:
 # - APIRouter: Modular sub-application for grouping related routes under a common prefix (/api/agents)
 # - HTTPException: Raises structured HTTP error responses (e.g., 400 Bad Request, 500 Internal Server Error)
@@ -22,7 +18,6 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 # Pydantic BaseModel: Validates incoming request JSON payloads and serializes outgoing response schemas
 from pydantic import BaseModel
-
 # trace_bus: Global pub/sub event bus where LangGraph agents emit live trace events (tools, LLM calls)
 from nexus.core.trace import trace_bus
 # run_logger: Persists formatted execution run snapshots to logs/runs/ for observability and evals
@@ -36,7 +31,6 @@ from nexus.core.chats_db import (
 
 # APIRouter instance mounted in main.py under prefix="/api/agents"
 router = APIRouter()
-
 
 # ── Request / Response Models ─────────────────────────────────
 
@@ -377,20 +371,3 @@ async def get_agent_run(run_id: str):
     if not run_data:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
     return run_data
-
-
-# ── Unified Engine Dashboard Endpoint ─────────────────────────
-
-@router.get("/dashboard")
-async def get_engine_dashboard():
-    """
-    Returns consolidated real-time engine telemetry, including pending HITL items,
-    active conversation counts, agent execution statuses, and markdown summary.
-    """
-    from nexus.core.dashboard import get_dashboard_summary, generate_dashboard_markdown
-    summary = get_dashboard_summary()
-    markdown = generate_dashboard_markdown(summary)
-    return {
-        "summary": summary,
-        "markdown": markdown,
-    }
