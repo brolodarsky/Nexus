@@ -39,6 +39,9 @@ export const ACTIVE_CONV_STORAGE_KEY = "nexus_chat_active_conv_id";
 // LocalStorage key for persisting whether the left conversation history menu is collapsed across page navigation
 export const CHAT_SIDEBAR_COLLAPSED_KEY = "nexus_chat_sidebar_collapsed";
 
+// LocalStorage key for persisting whether the bottom message input bar is collapsed across page navigation
+export const CHAT_INPUT_COLLAPSED_KEY = "nexus_chat_input_collapsed";
+
 // LocalStorage key for persisting whether the right Subagent Blackboard drawer is open across page navigation
 export const CHAT_BOARD_OPEN_KEY = "nexus_chat_board_open";
 

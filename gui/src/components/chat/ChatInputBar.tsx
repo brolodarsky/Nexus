@@ -12,38 +12,45 @@ import type { ModelOption } from "@/lib/api";
 // ChatInputBarProps: defines controlled input state, model options, and event handlers for the chat composer
 // - input: current unsubmitted text inside the textarea
 // - loading: boolean disabling submission while an agent stream is active
+// - isCollapsed: boolean indicating whether the input bar is minimized to a compact rail to maximize thread space
 // - modelOptions: array of selectable ModelOption descriptors from `/api/agents/models`
 // - selectedModelTier: active model tier identifier ("strong", "medium", "low")
 // - activeModelLabel: human-readable label of the currently selected model tier
 // - inputRef: React RefObject pointing to the underlying HTMLTextAreaElement for programmatic focus and auto-sizing
 // - onChangeInput: callback updating the controlled `input` string state
 // - onSelectModelTier: callback updating and persisting the user's selected model tier
+// - onToggleCollapse: callback updating and persisting whether the input bar is minimized or expanded
 // - onSubmit: form submission handler triggered by clicking Send or pressing Enter
 export interface ChatInputBarProps {
   input: string;
   loading: boolean;
+  isCollapsed: boolean;
   modelOptions: ModelOption[];
   selectedModelTier: string;
   activeModelLabel: string;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   onChangeInput: (value: string) => void;
   onSelectModelTier: (tierId: string) => void;
+  onToggleCollapse: (collapsed: boolean) => void;
   onSubmit: (e?: React.FormEvent) => void;
 }
 
 export default function ChatInputBar({
   input,
   loading,
+  isCollapsed,
   modelOptions,
   selectedModelTier,
   activeModelLabel,
   inputRef,
   onChangeInput,
   onSelectModelTier,
+  onToggleCollapse,
   onSubmit,
 }: ChatInputBarProps) {
   // Auto-expand textarea height dynamically as the user types, bounded between a comfortable min and max height
   useEffect(() => {
+    if (isCollapsed) return;
     const el = inputRef.current;
     if (!el) return;
     // Reset height temporarily so scrollHeight accurately reflects current content after deletions or wrapping
@@ -52,7 +59,7 @@ export default function ChatInputBar({
     const maxHeight = 240; // Max expansion limit (~10 lines) before vertical scrolling takes over
     const nextHeight = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
     el.style.height = `${nextHeight}px`;
-  }, [input, inputRef]);
+  }, [input, inputRef, isCollapsed]);
 
   // Keyboard shortcut handler for multiline chat textarea:
   // - Enter (without Shift) triggers immediate submission
@@ -65,6 +72,72 @@ export default function ChatInputBar({
       }
     }
   };
+
+  // Render compact collapsed bottom rail if minimized by the user
+  if (isCollapsed) {
+    return (
+      <div className="px-8 py-2.5 border-t border-border-subtle shrink-0">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => onToggleCollapse(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onToggleCollapse(false);
+            }
+          }}
+          className="glass-card px-4 py-2 rounded-xl flex items-center justify-between gap-3 cursor-pointer hover:border-accent-cyan/40 hover:bg-bg-card-hover transition-all w-full text-xs text-text-muted hover:text-text-secondary select-none"
+          title="Click or press Enter to expand message bar"
+          aria-label="Expand message bar"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="text-sm shrink-0">💬</span>
+            <span className="truncate">
+              {input.trim() ? (
+                <span>
+                  <span className="text-accent-cyan font-medium">Draft:</span>{" "}
+                  <span className="text-text-primary">
+                    &ldquo;{input.slice(0, 60)}{input.length > 60 ? "…" : ""}&rdquo;
+                  </span>
+                </span>
+              ) : (
+                <span>Message bar collapsed — Click or press Enter to type</span>
+              )}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="px-2 py-0.5 rounded-md bg-bg-secondary/80 border border-border-subtle text-[0.7rem] font-mono text-text-muted">
+              {activeModelLabel}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleCollapse(false);
+              }}
+              className="p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-surface/50 transition-colors"
+              title="Expand message bar"
+              aria-label="Expand message bar"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="18 15 12 9 6 15" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form
@@ -85,6 +158,25 @@ export default function ChatInputBar({
             className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none resize-none leading-relaxed disabled:opacity-50 max-h-60 overflow-y-auto"
             id="chat-input"
           />
+          <button
+            type="button"
+            onClick={() => onToggleCollapse(true)}
+            title="Collapse message bar"
+            aria-label="Collapse message bar"
+            className="text-text-muted hover:text-text-primary p-1 rounded-lg hover:bg-bg-surface/50 transition-colors shrink-0"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
         </div>
 
         {/* Bottom toolbar inside input card: Per-turn model pills + send action */}

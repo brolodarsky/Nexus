@@ -35,6 +35,7 @@ import {
   ACTIVE_CONV_STORAGE_KEY,
   CHAT_SIDEBAR_COLLAPSED_KEY,
   CHAT_BOARD_OPEN_KEY,
+  CHAT_INPUT_COLLAPSED_KEY,
   extractTurnModelInfo,
   type Message,
 } from "@/components/chat";
@@ -51,6 +52,8 @@ export default function ChatPage() {
   const [showBoard, setShowBoard] = useState<boolean>(true);
   // isSidebarCollapsed: toggles the left conversation history menu between full width (w-64) and compact rail (w-14)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  // isInputCollapsed: toggles the bottom message bar between full multiline composer and compact collapsed rail
+  const [isInputCollapsed, setIsInputCollapsed] = useState<boolean>(false);
   // Per-turn model selection state: catalog of available models from `/api/agents/models` + currently selected tier
   const [modelOptions, setModelOptions] = useState<ModelOption[]>(FALLBACK_MODELS);
   const [selectedModelTier, setSelectedModelTier] = useState<string>("strong");
@@ -109,6 +112,16 @@ export default function ChatPage() {
         }
       } catch {
         // Gracefully fall back to default open drawer if storage is inaccessible
+      }
+
+      // Restore bottom message bar collapse state from localStorage so panel choice survives tab navigation
+      try {
+        const savedInputCollapsed = localStorage.getItem(CHAT_INPUT_COLLAPSED_KEY);
+        if (savedInputCollapsed !== null) {
+          setIsInputCollapsed(savedInputCollapsed === "true");
+        }
+      } catch {
+        // Gracefully fall back to default expanded state if storage is inaccessible
       }
       isHydratedRef.current = true;
     });
@@ -416,6 +429,62 @@ export default function ChatPage() {
     }
   }, []);
 
+  // handleToggleInputCollapse: memoized handler to toggle bottom message input bar between full composer and compact rail
+  const handleToggleInputCollapse = useCallback((collapsed?: boolean) => {
+    setIsInputCollapsed((prev) => {
+      const next = typeof collapsed === "boolean" ? collapsed : !prev;
+      try {
+        localStorage.setItem(CHAT_INPUT_COLLAPSED_KEY, String(next));
+      } catch {
+        // Ignore quota/privacy errors in restricted browser contexts
+      }
+      // If expanding, focus the input textarea on the next microtask so the user can type immediately
+      if (!next) {
+        queueMicrotask(() => {
+          inputRef.current?.focus();
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  // handleSelectPromptSuggestion: populates chat input, auto-expands the message bar if collapsed, and focuses textarea
+  const handleSelectPromptSuggestion = useCallback((suggestion: string) => {
+    setInput(suggestion);
+    setIsInputCollapsed(false);
+    try {
+      localStorage.setItem(CHAT_INPUT_COLLAPSED_KEY, "false");
+    } catch {
+      // Ignore quota errors in restricted browser contexts
+    }
+    queueMicrotask(() => {
+      inputRef.current?.focus();
+    });
+  }, []);
+
+  // Global keyboard shortcut: pressing '/' while viewing the thread expands the message bar and focuses the input
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const activeElement = document.activeElement;
+      const isEditing =
+        activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement ||
+        activeElement?.getAttribute("contenteditable") === "true";
+      if (!isEditing && e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setIsInputCollapsed(false);
+        try {
+          localStorage.setItem(CHAT_INPUT_COLLAPSED_KEY, "false");
+        } catch {
+          // Ignore quota errors
+        }
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
+
   // handleToggleBoard: memoized handler to toggle right Subagent Blackboard drawer and persist choice
   const handleToggleBoard = useCallback(() => {
     setShowBoard((prev) => {
@@ -466,6 +535,8 @@ export default function ChatPage() {
           showBoard={showBoard}
           bulletinCount={bulletins.length}
           onToggleBoard={handleToggleBoard}
+          isInputCollapsed={isInputCollapsed}
+          onToggleInputBar={() => handleToggleInputCollapse()}
         />
 
         <ChatMessageThread
@@ -473,18 +544,20 @@ export default function ChatPage() {
           loading={loading}
           liveTrace={liveTrace}
           activeModelLabel={activeModelLabel}
-          onSelectPromptSuggestion={setInput}
+          onSelectPromptSuggestion={handleSelectPromptSuggestion}
         />
 
         <ChatInputBar
           input={input}
           loading={loading}
+          isCollapsed={isInputCollapsed}
           modelOptions={modelOptions}
           selectedModelTier={selectedModelTier}
           activeModelLabel={activeModelLabel}
           inputRef={inputRef}
           onChangeInput={setInput}
           onSelectModelTier={handleSelectModelTier}
+          onToggleCollapse={handleToggleInputCollapse}
           onSubmit={handleSubmit}
         />
       </div>
