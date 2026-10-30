@@ -110,6 +110,7 @@ def log_run(
                     "parent_id": evt.get("parent_id", "nexus"),
                     "color": evt.get("color", "magenta"),
                     "model_tier": evt_data.get("model_tier", "low") if isinstance(evt_data, dict) else "low",
+                    "model_name": evt_data.get("model_name") if isinstance(evt_data, dict) else None,
                     "task_prompt": evt_data.get("task_prompt") or evt_data.get("context") or evt.get("message", ""),
                     "started_at": evt.get("timestamp"),
                     "ended_at": None,
@@ -132,6 +133,8 @@ def log_run(
                     sub_entry["task_prompt"] = evt_data["task_prompt"]
                 if evt_data.get("model_tier"):
                     sub_entry["model_tier"] = evt_data["model_tier"]
+                if evt_data.get("model_name"):
+                    sub_entry["model_name"] = evt_data["model_name"]
             elif evt_type == "tool_call" and isinstance(evt_data, dict):
                 sub_entry["tool_calls"].append({
                     "call_id": evt_data.get("call_id"),
@@ -170,6 +173,7 @@ def log_run(
             input_tokens=sub.get("input_tokens", 0),
             output_tokens=sub.get("output_tokens", 0),
             cached_tokens=sub.get("cached_tokens", 0),
+            model_name=sub.get("model_name"),
             tier=sub.get("model_tier", "low"),
         )
 
@@ -202,6 +206,7 @@ def log_run(
             calculate_cache_savings(
                 s.get("input_tokens", 0),
                 s.get("cached_tokens", 0),
+                model_name=s.get("model_name"),
                 tier=s.get("model_tier", "low"),
             )
             for s in subagents_map.values()

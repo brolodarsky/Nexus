@@ -114,8 +114,8 @@ export default function ChatSidebar({
           </button>
         </div>
 
-        {/* Quick New Chat Model Preset Buttons (Strong vs. Fast/Low-Cost opening) */}
-        <div className="flex items-center gap-1.5">
+        {/* Quick New Chat Model Preset Buttons (2-column grid for Gemini & Anthropic Strong/Fast presets) */}
+        <div className="grid grid-cols-2 gap-1.5">
           {modelOptions.map((opt) => {
             const isSelected = selectedModelTier === opt.id;
             const isStrong = opt.tier === "strong";
@@ -125,7 +125,7 @@ export default function ChatSidebar({
                 type="button"
                 onClick={() => onNewChat(opt.id)}
                 title={`Open new chat with ${opt.description}`}
-                className={`flex-1 py-1 px-2 rounded-lg text-[0.68rem] font-medium border transition-all flex items-center justify-center gap-1 ${isSelected
+                className={`py-1 px-2 rounded-lg text-[0.68rem] font-medium border transition-all flex items-center justify-center gap-1 ${isSelected
                   ? isStrong
                     ? "bg-accent-violet/15 border-accent-violet/40 text-purple-300"
                     : "bg-accent-cyan/15 border-accent-cyan/40 text-accent-cyan"

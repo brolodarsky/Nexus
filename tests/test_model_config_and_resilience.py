@@ -104,9 +104,26 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
     assert catalog["provider"] == "gemini"
     assert any(m["id"] == "strong" for m in catalog["models"])
     assert any(m["id"] == "low" for m in catalog["models"])
+    assert any(m["id"] == "claude-opus-4-5" and m["tier"] == "strong" and m["provider"] == "anthropic" for m in catalog["models"])
+    assert any(m["id"] == "claude-sonnet-4-5" and m["tier"] == "low" and m["provider"] == "anthropic" for m in catalog["models"])
 
     low_cfg = resolve_model_config("low")
     assert low_cfg["tier"] == "low"
+
+    opus_cfg = resolve_model_config("claude-opus-4-5")
+    assert opus_cfg["tier"] == "strong"
+    assert opus_cfg["provider"] == "anthropic"
+    assert opus_cfg["model_name"] == "claude-opus-4-5"
+
+    sonnet_cfg = resolve_model_config("claude-sonnet-4-5")
+    assert sonnet_cfg["tier"] == "low"
+    assert sonnet_cfg["provider"] == "anthropic"
+    assert sonnet_cfg["model_name"] == "claude-sonnet-4-5"
+
+    # Verify ChatAnthropic instantiation when selecting an Anthropic model
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    anthropic_llm = get_chat_model(tier="claude-opus-4-5")
+    assert getattr(anthropic_llm, "model", None) == "claude-opus-4-5"
 
     recorded_tiers: list[str | None] = []
     mock_llm = MagicMock()
@@ -123,3 +140,9 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
     state = {"messages": [HumanMessage(content="Quick question")]}
     call_model(state, config={"configurable": {"thread_id": "t1", "model_tier": "low"}})
     assert recorded_tiers == ["low"]
+
+    # Verify selecting an Anthropic model in call_model sets _active_turn_provider to "anthropic"
+    call_model(state, config={"configurable": {"thread_id": "t1", "model_tier": "claude-opus-4-5"}})
+    import nexus.agent.graph as graph_mod
+    assert graph_mod._active_turn_provider == "anthropic"
+    assert resolve_model_config(f"{graph_mod._active_turn_provider}:low")["model_name"] == "claude-sonnet-4-5"

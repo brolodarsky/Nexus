@@ -52,6 +52,7 @@ export const FALLBACK_MODELS: ModelOption[] = [
   {
     id: "strong",
     tier: "strong",
+    provider: "gemini",
     model_name: "gemini-4-argon",
     label: "Strong (gemini-4-argon)",
     short_label: "Strong",
@@ -60,10 +61,29 @@ export const FALLBACK_MODELS: ModelOption[] = [
   {
     id: "low",
     tier: "low",
+    provider: "gemini",
     model_name: "gemini-3.8-flash",
     label: "Fast (gemini-3.8-flash)",
     short_label: "Fast",
     description: "High-speed, low-cost execution — Flash (gemini-3.8-flash)",
+  },
+  {
+    id: "claude-opus-4-5",
+    tier: "strong",
+    provider: "anthropic",
+    model_name: "claude-opus-4-5",
+    label: "Opus 4.5 (claude-opus-4-5)",
+    short_label: "Opus 4.5",
+    description: "Anthropic deep reasoning & synthesis — Claude Opus 4.5 (claude-opus-4-5)",
+  },
+  {
+    id: "claude-sonnet-4-5",
+    tier: "low",
+    provider: "anthropic",
+    model_name: "claude-sonnet-4-5",
+    label: "Sonnet 4.5 (claude-sonnet-4-5)",
+    short_label: "Sonnet 4.5",
+    description: "Anthropic fast, low-cost execution — Claude Sonnet 4.5 (claude-sonnet-4-5)",
   },
 ];
 
@@ -155,10 +175,15 @@ export function extractTurnCost(
 
   // Calculate from accumulated tokens if explicit cost wasn't logged in legacy trace
   if (totalIn > 0 || totalOut > 0) {
-    const isLow = (modelTier === "low") || (modelName?.toLowerCase().includes("flash")) || false;
-    const inRate = isLow ? 0.10 : 1.25;
-    const cachedRate = isLow ? 0.025 : 0.3125;
-    const outRate = isLow ? 0.40 : 5.00;
+    const lowerName = (modelName || "").toLowerCase();
+    const isOpus = lowerName.includes("opus");
+    const isSonnet = lowerName.includes("sonnet");
+    const isLow = (modelTier === "low") || lowerName.includes("flash") || isSonnet;
+
+    // Resolve per-million-token pricing across Anthropic Claude and Google Gemini model families
+    const inRate = isOpus ? 5.00 : isSonnet ? 3.00 : isLow ? 0.10 : 1.25;
+    const cachedRate = isOpus ? 0.50 : isSonnet ? 0.30 : isLow ? 0.025 : 0.3125;
+    const outRate = isOpus ? 25.00 : isSonnet ? 15.00 : isLow ? 0.40 : 5.00;
 
     const uncachedIn = Math.max(0, totalIn - totalCached);
     const cost = ((uncachedIn * inRate) + (totalCached * cachedRate) + (totalOut * outRate)) / 1000000;

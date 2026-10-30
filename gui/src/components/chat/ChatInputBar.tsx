@@ -183,7 +183,7 @@ export default function ChatInputBar({
         <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap pt-2 border-t border-border-subtle/50 px-1">
           {/* Per-Turn Model Selector: segmented toggle pills + native select accessibility */}
           <div
-            className="flex items-center gap-1 p-1 rounded-xl bg-bg-secondary/80 border border-border-subtle shrink-0"
+            className="flex items-center gap-1 p-1 rounded-xl bg-bg-secondary/80 border border-border-subtle shrink-0 flex-wrap"
             role="group"
             aria-label="Select model for this turn"
           >

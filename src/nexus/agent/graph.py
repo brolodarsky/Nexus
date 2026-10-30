@@ -91,14 +91,17 @@ subagent_tracer = AgentTracer("Subagent", color="magenta", agent_id="subagent", 
 # Thread-safe serial counter and color palette so concurrent `spawn_subagent` worker threads get distinct IDs (`subagent-1`, `subagent-2`, ...)
 _subagent_counter_lock = threading.Lock()
 _subagent_serial_counter = 0
+# Tracks the active parent turn's LLM provider (`"gemini"`, `"anthropic"`, `"openai"`) so spawned subagents match the turn's provider family
+_active_turn_provider: Optional[str] = None
 _SUBAGENT_COLORS = ["magenta", "yellow", "green", "blue"]
 
 
 def reset_subagent_counter() -> None:
     """Resets the subagent serial number counter at the start of a new parent agent run so subagents start cleanly at #1."""
-    global _subagent_serial_counter
+    global _subagent_serial_counter, _active_turn_provider
     with _subagent_counter_lock:
         _subagent_serial_counter = 0
+        _active_turn_provider = None
 
 
 def _next_subagent_tracer(tier: str) -> tuple[int, str, AgentTracer]:
@@ -254,22 +257,27 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
                     cost-efficient execution; pass `"medium"` or `"strong"` only for complex synthesis subtasks.
     """
     effective_tier: ModelTier = model_tier if model_tier in ("low", "medium", "strong") else "low"
+    # Match the parent turn's provider when chatting on Anthropic (e.g. `"anthropic:low"` -> `claude-sonnet-4-5`)
+    sub_tier_arg = f"anthropic:{effective_tier}" if _active_turn_provider == "anthropic" else effective_tier
+    sub_resolved = resolve_model_config(sub_tier_arg)
+    sub_model_name = sub_resolved["model_name"]
     serial, sub_id, local_tracer = _next_subagent_tracer(effective_tier)
     t0 = time.time()
 
     # Emit full, untruncated task_prompt so the Thinking Panel, Graph View, and Run Logs capture 100% of the prompt
     local_tracer.agent_start(
-        f"Subtask #{serial} ({effective_tier}): {task_prompt}",
+        f"Subtask #{serial} ({effective_tier} · {sub_model_name}): {task_prompt}",
         metadata={
             "serial": serial,
             "subagent_id": sub_id,
             "model_tier": effective_tier,
+            "model_name": sub_model_name,
             "task_prompt": task_prompt,
         },
     )
 
     # Build an ephemeral, stateless subagent client (no checkpointer needed; lives only for this subtask)
-    sub_base_llm = get_chat_model(tier=effective_tier, temperature=0.0)
+    sub_base_llm = get_chat_model(tier=sub_tier_arg, temperature=0.0)
     sub_llm = sub_base_llm.bind_tools(CORE_TOOLS)
     sub_tool_node = ToolNode(CORE_TOOLS)
 
@@ -293,9 +301,9 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
 
     while True:
         turn_idx += 1
-        local_tracer.llm_call(metadata={"turn": turn_idx, "model_tier": effective_tier})
+        local_tracer.llm_call(metadata={"turn": turn_idx, "model_tier": effective_tier, "model_name": sub_model_name})
         ai_msg = sub_llm.invoke(sub_messages)
-        _log_token_usage(local_tracer, ai_msg, tier=effective_tier)
+        _log_token_usage(local_tracer, ai_msg, model_name=sub_model_name, tier=effective_tier)
         sub_messages.append(ai_msg)
 
         if not getattr(ai_msg, "tool_calls", None):
@@ -429,6 +437,10 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     resolved_model = resolve_model_config(requested_tier)
     effective_tier = resolved_model["tier"]
     active_model_name = resolved_model["model_name"]
+    active_provider = resolved_model["provider"]
+
+    global _active_turn_provider
+    _active_turn_provider = active_provider
 
     # Resolve `get_chat_model(tier=requested_tier)` dynamically on each turn so UI model switches and `.env` edits apply immediately
     nexus_tracer.llm_call(metadata={"model_tier": effective_tier, "model_name": active_model_name})
@@ -438,21 +450,23 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     except Exception as e:
         err_msg = str(e)
         # Check if the failure is a deadline / timeout error from the provider gateway (e.g. 504 DEADLINE_EXCEEDED)
-        # Occurs when heavy reasoning models (`gemini-4-argon`) exceed HTTP deadlines on long conversation histories.
+        # Occurs when heavy reasoning models (`gemini-4-argon`, `claude-opus-4-5`) exceed HTTP deadlines on long conversation histories.
         is_deadline_or_timeout = any(
             token in err_msg.lower() or token in type(e).__name__.lower()
             for token in ("504", "deadline_exceeded", "timeout", "timed out")
         )
         # Resilient Tier Fallback: If the active strong/medium model hits a deadline timeout, fallback to the high-throughput
-        # low-latency tier (`gemini-3.8-flash` / `low`) to preserve the user's conversation session without crashing.
+        # low-latency tier (`gemini-3.8-flash` / `claude-sonnet-4-5` / `low`) to preserve the user's conversation session without crashing.
         if is_deadline_or_timeout and effective_tier != "low":
+            fallback_tier_arg = "anthropic:low" if active_provider == "anthropic" else "low"
+            fallback_resolved = resolve_model_config(fallback_tier_arg)
             nexus_tracer.info(
                 f"⚠️ Primary model tier ({effective_tier} · {active_model_name}) exceeded deadline (504 DEADLINE_EXCEEDED). "
-                "Gracefully falling back to low-latency tier (Flash) to complete the turn..."
+                f"Gracefully falling back to low-latency tier ({fallback_resolved['model_name']}) to complete the turn..."
             )
-            fallback_llm = get_chat_model(tier="low", temperature=0.0)
+            fallback_llm = get_chat_model(tier=fallback_tier_arg, temperature=0.0)
             response = fallback_llm.bind_tools(TOOLS).invoke(messages_for_llm)
-            active_model_name = "gemini-3.8-flash"
+            active_model_name = fallback_resolved["model_name"]
             effective_tier = "low"
         else:
             raise e

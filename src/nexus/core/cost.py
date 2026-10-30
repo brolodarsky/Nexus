@@ -98,6 +98,30 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
         "cached": 0.55,
         "output": 4.40,
     },
+
+    # ── Anthropic Claude Family ───────────────────────────────────────────────
+    # Fast / Low-Tier Option: Claude Sonnet 4.5 ($3.00 in / $0.30 cached [90% discount] / $15.00 out)
+    "claude-sonnet-4-5": {
+        "input": 3.00,      # $3.00 / 1M prompt tokens
+        "cached": 0.30,     # $0.30 / 1M cached tokens (90% discount)
+        "output": 15.00,    # $15.00 / 1M completion tokens
+    },
+    "claude-sonnet-4.5": {
+        "input": 3.00,
+        "cached": 0.30,
+        "output": 15.00,
+    },
+    # Deep Reasoning / Strong-Tier Option: Claude Opus 4.5 ($5.00 in / $0.50 cached [90% discount] / $25.00 out)
+    "claude-opus-4-5": {
+        "input": 5.00,      # $5.00 / 1M prompt tokens
+        "cached": 0.50,     # $0.50 / 1M cached tokens (90% discount)
+        "output": 25.00,    # $25.00 / 1M completion tokens
+    },
+    "claude-opus-4.5": {
+        "input": 5.00,
+        "cached": 0.50,
+        "output": 25.00,
+    },
 }
 
 # Fallback baseline pricing by standardized tier when model name is unmapped
@@ -148,6 +172,10 @@ def resolve_model_pricing(
                 base_rates = MODEL_PRICING["gemini-3.8-flash"]
             elif "mini" in clean_model:
                 base_rates = MODEL_PRICING["gpt-5.4-mini"]
+            elif "sonnet" in clean_model:
+                base_rates = MODEL_PRICING["claude-sonnet-4-5"]
+            elif "opus" in clean_model:
+                base_rates = MODEL_PRICING["claude-opus-4-5"]
             elif "terra" in clean_model or "4o" in clean_model:
                 base_rates = MODEL_PRICING["gpt-5.6-terra"]
             elif "argon" in clean_model or "pro" in clean_model:
@@ -165,7 +193,11 @@ def resolve_model_pricing(
 
     # 6. Apply context-length tier step-up (2x pricing above 128k tokens for Gemini Pro / Argon family)
     # Google AI Studio and Gemini API double prompt and output rates when the prompt context window exceeds 128k tokens.
-    is_stepup_eligible = (
+    # Anthropic Claude and OpenAI models maintain flat pricing across their standard 200k/128k context windows.
+    is_non_gemini_provider = any(
+        tok in clean_model for tok in ("claude", "opus", "sonnet", "haiku", "gpt", "o1", "o3")
+    )
+    is_stepup_eligible = not is_non_gemini_provider and (
         clean_model in ("gemini-4-argon", "gemini-2.5-pro", "gemini-1.5-pro")
         or "argon" in clean_model
         or "pro" in clean_model

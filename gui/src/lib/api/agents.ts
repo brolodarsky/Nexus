@@ -21,11 +21,12 @@ export interface AskResponse {
 
 // Interface describing a single selectable model/tier option in the Chat UI
 export interface ModelOption {
-  id: string;                 // Selection key passed as `model_tier` (e.g. "strong", "medium", "low")
+  id: string;                 // Selection key passed as `model_tier` (e.g. "strong", "low", "claude-opus-4-5", "claude-sonnet-4-5")
   tier: "low" | "medium" | "strong" | string; // Capability/cost tier
-  model_name: string;         // Concrete LLM identifier (e.g. "gemini-4-argon", "gemini-3.8-flash")
-  label: string;              // Full dropdown label (e.g. "Strong (gemini-4-argon)")
-  short_label: string;        // Compact pill label (e.g. "Strong", "Fast")
+  provider?: string;          // LLM provider family ("gemini", "anthropic", "openai")
+  model_name: string;         // Concrete LLM identifier (e.g. "gemini-4-argon", "claude-opus-4-5")
+  label: string;              // Full dropdown label (e.g. "Strong (gemini-4-argon)", "Opus 4.5 (claude-opus-4-5)")
+  short_label: string;        // Compact pill label (e.g. "Strong", "Fast", "Opus 4.5", "Sonnet 4.5")
   description: string;        // Tooltip/helper description of model strength and role
 }
 

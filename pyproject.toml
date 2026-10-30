@@ -72,6 +72,7 @@ dependencies = [
     "justext==3.0.2",
     "kubernetes==35.0.0",
     "langchain==1.2.15",
+    "langchain-anthropic>=1.4.1",
     "langchain-classic==1.0.4",
     "langchain-community==0.4.1",
     "langchain-core==1.2.31",
