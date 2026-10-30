@@ -81,7 +81,7 @@ export default function ChatMessageThread({
         <ChatMessageItem key={i} message={msg} />
       ))}
 
-      {/* Live thinking panel while streaming */}
+      {/* Live thinking panel while streaming (collapsed by default to prevent visual jumpiness during live token delivery) */}
       {loading && (
         <div className="flex justify-start">
           <div className="glass-card px-5 py-3.5 text-sm text-text-secondary max-w-4xl xl:max-w-5xl w-full">
@@ -106,7 +106,7 @@ export default function ChatMessageThread({
             <ThinkingPanel
               events={liveTrace}
               isLive={true}
-              defaultExpanded={true}
+              defaultExpanded={false}
             />
           </div>
         </div>

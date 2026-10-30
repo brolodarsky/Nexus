@@ -775,16 +775,20 @@ export function AgentGraphView({
 
 // ── Collapsible & Expandable Thinking Panel (Used in Chat Thread) ────────────
 
+// ThinkingPanel: Collapsible agent execution trace drawer for both streaming and historical turns.
+// - events: TraceEvent[] — Lossless chronological array of trace events (tool calls, LLM responses, agent boundaries).
+// - isLive: boolean — Distinguishes between active SSE streaming execution and completed historical runs.
+// - defaultExpanded: boolean — Initial disclosure state; defaults to false so live runs and message history start collapsed.
 export function ThinkingPanel({
   events,
   isLive,
-  defaultExpanded = true,
+  defaultExpanded = false,
 }: {
   events: TraceEvent[];
   isLive: boolean;
   defaultExpanded?: boolean;
 }) {
-  // Never auto-collapse when a run finishes so the user never loses visibility of steps
+  // expanded: controls visibility of the inner graph/step visualization; initialized via defaultExpanded (default: false)
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [viewMode, setViewMode] = useState<"graph" | "steps" | "raw">("graph");
   const [expandAllSteps, setExpandAllSteps] = useState(true);
@@ -808,7 +812,11 @@ export function ThinkingPanel({
   return (
     <div className="mt-3 rounded-xl border border-border-subtle/80 bg-bg-secondary/50 overflow-hidden">
       {/* ── Top Control Bar ── */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 bg-bg-tertiary/60 border-b border-border-subtle/50">
+      <div
+        className={`flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 bg-bg-tertiary/60 ${
+          expanded ? "border-b border-border-subtle/50" : ""
+        }`}
+      >
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
