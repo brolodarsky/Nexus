@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -73,17 +74,62 @@ def audit_runs(backfill: bool = False, top_n: int = 5) -> Dict[str, Any]:
 
         total_runs += 1
         meta = data.get("metadata") or {}
-        model_name = meta.get("model_name") or "unknown"
-        model_tier = meta.get("model_tier") or "low"
         tok = meta.get("token_usage") or {}
 
+        # 1. Resolve model name and capability tier
+        # Prioritize explicit metadata; fall back to inspecting agent reasoning strings or default to "strong"
+        raw_model_name = meta.get("model_name")
+        raw_model_tier = meta.get("model_tier")
+        reasoning_str = str(data.get("reasoning") or "").lower()
+
+        if raw_model_name and raw_model_tier and raw_model_name != "unknown":
+            model_name = raw_model_name
+            model_tier = raw_model_tier
+        elif "gemini-4-argon" in reasoning_str or "strong" in reasoning_str:
+            model_name = raw_model_name or "gemini-4-argon"
+            model_tier = raw_model_tier or "strong"
+        elif "gemini-3.8-flash" in reasoning_str or "flash" in reasoning_str or "low" in reasoning_str:
+            model_name = raw_model_name or "gemini-3.8-flash"
+            model_tier = raw_model_tier or "low"
+        elif "gemini-2.5-pro" in reasoning_str or "medium" in reasoning_str:
+            model_name = raw_model_name or "gemini-2.5-pro"
+            model_tier = raw_model_tier or "medium"
+        else:
+            # Nexus default primary agent tier is "strong" (gemini-4-argon)
+            model_name = raw_model_name or "gemini-4-argon"
+            model_tier = raw_model_tier or "strong"
+
+        # 2. Extract token usage (from token_usage metadata, or fall back to parsing trace telemetry)
         in_tok = int(tok.get("input_tokens", 0) or 0)
         out_tok = int(tok.get("output_tokens", 0) or 0)
         cached_tok = int(tok.get("cached_tokens", 0) or 0)
 
-        # Check if cost is already persisted or needs calculation
-        existing_cost = data.get("cost_usd") or tok.get("cost_usd")
-        if existing_cost is not None:
+        # Legacy run recovery: parse tokens from trace info events or formatted message strings
+        if in_tok == 0 and out_tok == 0:
+            for evt in data.get("trace_events") or []:
+                e_type = evt.get("type")
+                e_data = evt.get("data") or {}
+                if e_type == "info" and isinstance(e_data, dict):
+                    in_tok += int(e_data.get("input_tokens", 0) or 0)
+                    out_tok += int(e_data.get("output_tokens", 0) or 0)
+                    cached_tok += int(e_data.get("cached_tokens", 0) or 0)
+                elif in_tok == 0 and e_type == "info" and isinstance(evt.get("message"), str):
+                    m = re.search(
+                        r"Tokens:\s*([\d,]+)\s*in\s*\(([\d,]+)\s*cached.*?\)\s*\|\s*([\d,]+)\s*out",
+                        evt["message"],
+                    )
+                    if m:
+                        in_tok += int(m.group(1).replace(",", ""))
+                        cached_tok += int(m.group(2).replace(",", ""))
+                        out_tok += int(m.group(3).replace(",", ""))
+
+        # 3. Check if cost is already persisted with valid non-zero metadata, or needs recalculation
+        has_valid_meta = meta.get("model_name") not in (None, "unknown", "")
+        existing_cost = data.get("cost_usd") if has_valid_meta else None
+        if existing_cost is None or existing_cost == 0.0:
+            existing_cost = tok.get("cost_usd") if has_valid_meta else None
+
+        if existing_cost is not None and existing_cost > 0.0:
             cost_usd = float(existing_cost)
         else:
             cost_usd = calculate_token_cost(
@@ -94,8 +140,8 @@ def audit_runs(backfill: bool = False, top_n: int = 5) -> Dict[str, Any]:
                 tier=model_tier,
             )
 
-        existing_savings = tok.get("cache_savings_usd")
-        if existing_savings is not None:
+        existing_savings = tok.get("cache_savings_usd") if has_valid_meta else None
+        if existing_savings is not None and existing_savings > 0.0:
             savings_usd = float(existing_savings)
         else:
             savings_usd = calculate_cache_savings(
@@ -105,12 +151,25 @@ def audit_runs(backfill: bool = False, top_n: int = 5) -> Dict[str, Any]:
                 tier=model_tier,
             )
 
-        # Optional in-place backfill
-        if backfill and (data.get("cost_usd") is None or tok.get("cost_usd") is None):
+        # 4. Optional in-place backfill
+        needs_backfill = (
+            data.get("cost_usd") in (None, 0.0)
+            or tok.get("cost_usd") in (None, 0.0)
+            or not has_valid_meta
+            or not tok.get("input_tokens")
+        )
+        if backfill and needs_backfill:
             data["cost_usd"] = cost_usd
-            if "token_usage" in meta:
-                meta["token_usage"]["cost_usd"] = cost_usd
-                meta["token_usage"]["cache_savings_usd"] = savings_usd
+            meta["model_name"] = model_name
+            meta["model_tier"] = model_tier
+            meta["token_usage"] = {
+                "input_tokens": in_tok,
+                "output_tokens": out_tok,
+                "cached_tokens": cached_tok,
+                "total_tokens": in_tok + out_tok,
+                "cost_usd": cost_usd,
+                "cache_savings_usd": savings_usd,
+            }
             data["metadata"] = meta
             try:
                 with open(file_path, "w", encoding="utf-8") as f:

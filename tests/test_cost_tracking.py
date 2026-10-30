@@ -46,6 +46,41 @@ def test_resolve_model_pricing():
     assert strong_rates == TIER_FALLBACK_PRICING["strong"]
 
 
+def test_context_stepup_pricing_threshold():
+    """Verifies that Gemini Pro / Argon rates double when prompt context exceeds 128k tokens."""
+    # Context <= 128k tokens: standard rates apply ($1.25 in / $0.3125 cached / $5.00 out)
+    standard_rates = resolve_model_pricing("gemini-4-argon", input_tokens=100_000)
+    assert standard_rates["input"] == 1.25
+    assert standard_rates["cached"] == 0.3125
+    assert standard_rates["output"] == 5.00
+
+    # Context > 128k tokens: 2x step-up rates apply ($2.50 in / $0.625 cached / $10.00 out)
+    stepup_rates = resolve_model_pricing("gemini-4-argon", input_tokens=150_000)
+    assert stepup_rates["input"] == 2.50
+    assert stepup_rates["cached"] == 0.625
+    assert stepup_rates["output"] == 10.00
+
+    # Flash models do NOT double above 128k context (flat rate across entire window)
+    flash_stepup = resolve_model_pricing("gemini-3.8-flash", input_tokens=150_000)
+    assert flash_stepup["input"] == 0.10
+    assert flash_stepup["cached"] == 0.025
+    assert flash_stepup["output"] == 0.40
+
+    # Verify calculate_token_cost applies 2x rates above 128k
+    # 200k input total (150k cached @ $0.625/1M, 50k uncached @ $2.50/1M) + 10k output @ $10.00/1M:
+    # Uncached: 50,000 * 2.50 / 1M = $0.125
+    # Cached:   150,000 * 0.625 / 1M = $0.09375
+    # Output:   10,000 * 10.00 / 1M = $0.100
+    # Expected: 0.125 + 0.09375 + 0.100 = $0.31875
+    cost = calculate_token_cost(
+        input_tokens=200_000,
+        output_tokens=10_000,
+        cached_tokens=150_000,
+        model_name="gemini-4-argon",
+    )
+    assert cost == 0.31875
+
+
 def test_calculate_token_cost_uncached():
     """Verifies cost computation for purely uncached token usage."""
     # 1,000,000 input tokens on Flash @ $0.10/1M = $0.10

@@ -17,6 +17,13 @@ from typing import Any, Dict, Optional
 # - "input": Standard prompt tokens evaluated without cache hit
 # - "cached": Cached prompt tokens (Google Gemini context cache or OpenAI prompt cache)
 # - "output": Generated candidate/completion tokens
+
+# Context threshold (128k tokens) above which frontier Pro / Argon models scale to 2x pricing tier
+# Google AI Studio and Gemini API double prompt and output rates when the prompt context window exceeds 128k tokens.
+CONTEXT_STEPUP_THRESHOLD: int = 128_000
+CONTEXT_STEPUP_MULTIPLIER: float = 2.0
+
+# Base pricing per 1M tokens (for context <= 128k tokens)
 MODEL_PRICING: Dict[str, Dict[str, float]] = {
     # ── Google Gemini Family ──────────────────────────────────────────────────
     # Fast / Low-Latency Tier: Gemini Flash family
@@ -104,48 +111,74 @@ TIER_FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
 def resolve_model_pricing(
     model_name: Optional[str] = None,
     tier: Optional[str] = None,
+    input_tokens: int = 0,
 ) -> Dict[str, float]:
     """
     Resolves the exact or fuzzy pricing rates ($ / 1M tokens) for a given model or tier.
+
+    When prompt context exceeds `CONTEXT_STEPUP_THRESHOLD` (128,000 tokens), Google Gemini API
+    doubles prompt input, cached token, and candidate output rates for the Pro / Argon reasoning family.
     
     Args:
         model_name: Concrete model identifier (e.g. 'gemini-4-argon', 'gpt-5.4-mini')
         tier: Standardized capability tier ('low', 'medium', 'strong')
+        input_tokens: Total prompt context length in tokens used to check for the >128k step-up threshold
 
     Returns:
         Dict with keys 'input', 'cached', 'output' containing rates per 1M tokens.
     """
     clean_model = (model_name or "").strip().lower()
     clean_tier = (tier or "").strip().lower()
+    base_rates: Optional[Dict[str, float]] = None
 
     # 1. Exact match in catalog
     if clean_model in MODEL_PRICING:
-        return MODEL_PRICING[clean_model]
+        base_rates = MODEL_PRICING[clean_model]
 
     # 2. Fuzzy substring match in catalog (only if clean_model is non-empty)
-    if clean_model:
+    elif clean_model:
         for key, rates in MODEL_PRICING.items():
             if key in clean_model or clean_model in key:
-                return rates
+                base_rates = rates
+                break
 
         # 3. Model family heuristic patterns
-        if "flash" in clean_model:
-            return MODEL_PRICING["gemini-3.8-flash"]
-        if "mini" in clean_model:
-            return MODEL_PRICING["gpt-5.4-mini"]
-        if "terra" in clean_model or "4o" in clean_model:
-            return MODEL_PRICING["gpt-5.6-terra"]
-        if "argon" in clean_model or "pro" in clean_model:
-            return MODEL_PRICING["gemini-4-argon"]
-        if "sol" in clean_model or "o1" in clean_model:
-            return MODEL_PRICING["gpt-5.6-sol"]
+        if base_rates is None:
+            if "flash" in clean_model:
+                base_rates = MODEL_PRICING["gemini-3.8-flash"]
+            elif "mini" in clean_model:
+                base_rates = MODEL_PRICING["gpt-5.4-mini"]
+            elif "terra" in clean_model or "4o" in clean_model:
+                base_rates = MODEL_PRICING["gpt-5.6-terra"]
+            elif "argon" in clean_model or "pro" in clean_model:
+                base_rates = MODEL_PRICING["gemini-4-argon"]
+            elif "sol" in clean_model or "o1" in clean_model:
+                base_rates = MODEL_PRICING["gpt-5.6-sol"]
 
     # 4. Fall back to standardized tier
-    if clean_tier in TIER_FALLBACK_PRICING:
-        return TIER_FALLBACK_PRICING[clean_tier]
+    if base_rates is None:
+        if clean_tier in TIER_FALLBACK_PRICING:
+            base_rates = TIER_FALLBACK_PRICING[clean_tier]
+        else:
+            # 5. Default safe fallback (strong tier)
+            base_rates = TIER_FALLBACK_PRICING["strong"]
 
-    # 5. Default safe fallback (strong tier)
-    return TIER_FALLBACK_PRICING["strong"]
+    # 6. Apply context-length tier step-up (2x pricing above 128k tokens for Gemini Pro / Argon family)
+    # Google AI Studio and Gemini API double prompt and output rates when the prompt context window exceeds 128k tokens.
+    is_stepup_eligible = (
+        clean_model in ("gemini-4-argon", "gemini-2.5-pro", "gemini-1.5-pro")
+        or "argon" in clean_model
+        or "pro" in clean_model
+        or (clean_tier in ("strong", "medium") and "flash" not in clean_model and "mini" not in clean_model)
+    )
+    if input_tokens > CONTEXT_STEPUP_THRESHOLD and is_stepup_eligible:
+        return {
+            "input": round(base_rates["input"] * CONTEXT_STEPUP_MULTIPLIER, 6),
+            "cached": round(base_rates["cached"] * CONTEXT_STEPUP_MULTIPLIER, 6),
+            "output": round(base_rates["output"] * CONTEXT_STEPUP_MULTIPLIER, 6),
+        }
+
+    return base_rates
 
 
 def calculate_token_cost(
@@ -160,6 +193,7 @@ def calculate_token_cost(
 
     Deducts `cached_tokens` from `input_tokens` so cached tokens are billed at
     their discounted cache rate and only net uncached prompt tokens pay full price.
+    Applies the >128k context tier step-up if `input_tokens` exceeds 128,000 for Pro/Argon models.
 
     Args:
         input_tokens: Total prompt token count (including cached tokens)
@@ -171,7 +205,7 @@ def calculate_token_cost(
     Returns:
         Total estimated cost in USD rounded to 6 decimal places.
     """
-    rates = resolve_model_pricing(model_name=model_name, tier=tier)
+    rates = resolve_model_pricing(model_name=model_name, tier=tier, input_tokens=input_tokens)
 
     # Prompt tokens that were NOT served from cache
     uncached_input = max(0, int(input_tokens or 0) - int(cached_tokens or 0))
@@ -195,8 +229,9 @@ def calculate_cache_savings(
 ) -> float:
     """
     Calculates the USD amount saved by prompt caching vs paying full input price.
+    Applies the >128k context tier step-up if `input_tokens` exceeds 128,000 for Pro/Argon models.
     """
-    rates = resolve_model_pricing(model_name=model_name, tier=tier)
+    rates = resolve_model_pricing(model_name=model_name, tier=tier, input_tokens=input_tokens)
     cached_count = min(int(input_tokens or 0), max(0, int(cached_tokens or 0)))
     # Difference between full input rate and discounted cached rate
     discount_per_million = rates["input"] - rates["cached"]
