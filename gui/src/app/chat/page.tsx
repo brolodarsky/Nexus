@@ -535,8 +535,6 @@ export default function ChatPage() {
           showBoard={showBoard}
           bulletinCount={bulletins.length}
           onToggleBoard={handleToggleBoard}
-          isInputCollapsed={isInputCollapsed}
-          onToggleInputBar={() => handleToggleInputCollapse()}
         />
 
         <ChatMessageThread
