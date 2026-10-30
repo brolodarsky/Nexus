@@ -91,17 +91,19 @@ export default function AuditPage() {
 
   // Token metrics parsed from run metadata
   const tokenMetrics = useMemo(() => {
-    if (!activeSnapshot?.metadata?.token_usage) return null;
-    const u = activeSnapshot.metadata.token_usage as Record<string, number>;
+    if (!activeSnapshot) return null;
+    const u = (activeSnapshot.metadata?.token_usage ?? {}) as Record<string, number>;
     const input = u.input_tokens ?? 0;
     const output = u.output_tokens ?? 0;
     const cached = u.cached_tokens ?? 0;
-    const total = u.total_tokens ?? input + output;
+    const total = u.total_tokens ?? (input + output);
     const cacheHitPct = input > 0 ? Math.round((cached / input) * 100) : 0;
     const costUsd =
       typeof activeSnapshot.cost_usd === "number"
         ? activeSnapshot.cost_usd
-        : (typeof u.cost_usd === "number" ? u.cost_usd : null);
+        : typeof (activeSnapshot.metadata as Record<string, unknown> | undefined)?.cost_usd === "number"
+          ? ((activeSnapshot.metadata as Record<string, unknown>).cost_usd as number)
+          : (typeof u.cost_usd === "number" ? u.cost_usd : null);
     const savingsUsd = typeof u.cache_savings_usd === "number" ? u.cache_savings_usd : null;
     return { input, output, cached, total, cacheHitPct, costUsd, savingsUsd };
   }, [activeSnapshot]);

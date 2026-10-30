@@ -10,7 +10,7 @@
 import MarkdownMessage from "@/components/MarkdownMessage";
 // ThinkingPanel: Lossless agent execution trace viewer with Graph View, full step payloads, and raw JSON
 import { ThinkingPanel } from "@/components/AgentTraceVisualizer";
-import type { Message } from "./types";
+import { extractTurnCost, type Message } from "./types";
 
 // ChatMessageItemProps: props for rendering a single conversation turn bubble
 // - message: Message object containing role, markdown content, agent/model metadata, and optional trace events
@@ -21,6 +21,9 @@ export interface ChatMessageItemProps {
 export default function ChatMessageItem({ message }: ChatMessageItemProps) {
   const isUser = message.role === "user";
   const hasTrace = Boolean(message.trace && message.trace.length > 0);
+  const effectiveCost =
+    message.costUsd ??
+    extractTurnCost(message.trace, null, message.modelName, message.modelTier);
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -67,13 +70,13 @@ export default function ChatMessageItem({ message }: ChatMessageItemProps) {
               </span>
             )}
 
-            {message.costUsd != null && message.costUsd > 0 && (
+            {effectiveCost != null && effectiveCost > 0 && (
               <span
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-mono border bg-amber-500/10 border-amber-500/30 text-amber-300"
-                title={`Estimated inference cost: $${message.costUsd.toFixed(4)} USD`}
+                title={`Estimated inference cost: $${effectiveCost.toFixed(4)} USD`}
               >
                 <span>💰</span>
-                <span>${message.costUsd < 0.01 ? message.costUsd.toFixed(4) : message.costUsd.toFixed(3)}</span>
+                <span>${effectiveCost < 0.01 ? effectiveCost.toFixed(4) : effectiveCost.toFixed(3)}</span>
               </span>
             )}
           </div>

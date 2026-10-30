@@ -259,7 +259,8 @@ def list_runs(limit: int = 50, agent: Optional[str] = None) -> list[dict[str, An
         List of run summary dictionaries including full query, response, subagent count, and trace step count
     """
     runs_dir = _ensure_runs_dir()
-    json_files = sorted(runs_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # Sort by ISO-prefixed filename (YYYYMMDDTHHMMSSZ_*) descending so newest runs are strictly first
+    json_files = sorted(runs_dir.glob("*.json"), key=lambda p: p.name, reverse=True)
     
     summaries = []
     for p in json_files:
@@ -392,7 +393,8 @@ def get_latest_run() -> Optional[dict[str, Any]]:
         Full JSON dictionary of the latest run, or None if no runs exist
     """
     runs_dir = _ensure_runs_dir()
-    json_files = sorted(runs_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # Sort by ISO-prefixed filename (YYYYMMDDTHHMMSSZ_*) descending so newest runs are strictly first
+    json_files = sorted(runs_dir.glob("*.json"), key=lambda p: p.name, reverse=True)
     if not json_files:
         return None
     with open(json_files[0], "r", encoding="utf-8") as f:

@@ -191,7 +191,7 @@ export default function ChatPage() {
         setMessages(
           history.map((entry) => {
             const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
-            const costUsd = extractTurnCost(entry.trace);
+            const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
             return {
               role: entry.role,
               content: entry.content,
@@ -366,7 +366,7 @@ export default function ChatPage() {
             );
             const costUsd =
               (typeof doneEvt.cost_usd === "number" ? doneEvt.cost_usd : null) ??
-              extractTurnCost(liveTraceRef.current);
+              extractTurnCost(liveTraceRef.current, null, modelName, modelTier);
             const assistantMsg: Message = {
               role: "assistant",
               content: event.response ?? "",

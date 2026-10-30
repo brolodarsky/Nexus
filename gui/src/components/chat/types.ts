@@ -97,26 +97,75 @@ export function extractTurnModelInfo(
   return { modelTier: null, modelName: null };
 }
 
-// Extracts the estimated turn inference cost from explicit metadata or trace info events
+// Extracts or calculates the estimated turn inference cost from explicit metadata or trace info events
 export function extractTurnCost(
   trace?: TraceEvent[],
-  explicitCost?: number | null
+  explicitCost?: number | null,
+  modelName?: string | null,
+  modelTier?: string | null
 ): number | null {
-  if (typeof explicitCost === "number") {
+  if (typeof explicitCost === "number" && !isNaN(explicitCost) && explicitCost > 0) {
     return explicitCost;
   }
   if (!trace || trace.length === 0) {
     return null;
   }
+
   let totalCost = 0.0;
-  let found = false;
+  let foundExplicit = false;
+  let totalIn = 0;
+  let totalOut = 0;
+  let totalCached = 0;
+
   for (const evt of trace) {
-    if (evt.type === "info" && evt.data && typeof evt.data.cost_usd === "number") {
-      totalCost += evt.data.cost_usd;
-      found = true;
+    if (evt.type === "info" && evt.data) {
+      const d = evt.data as Record<string, unknown>;
+      if (typeof d.cost_usd === "number" && !isNaN(d.cost_usd) && d.cost_usd > 0) {
+        totalCost += d.cost_usd;
+        foundExplicit = true;
+      }
+      if (typeof d.input_tokens === "number") {
+        totalIn += d.input_tokens;
+      }
+      if (typeof d.output_tokens === "number") {
+        totalOut += d.output_tokens;
+      }
+      if (typeof d.cached_tokens === "number") {
+        totalCached += d.cached_tokens;
+      }
+    }
+    if (evt.type === "info" && typeof evt.message === "string") {
+      const m = evt.message.match(/Tokens:\s*([\d,]+)\s*in\s*\(([\d,]+)\s*cached.*?\)\s*\|\s*([\d,]+)\s*out/i);
+      if (m && totalIn === 0 && totalOut === 0) {
+        totalIn += parseInt(m[1].replace(/,/g, ""), 10) || 0;
+        totalCached += parseInt(m[2].replace(/,/g, ""), 10) || 0;
+        totalOut += parseInt(m[3].replace(/,/g, ""), 10) || 0;
+      }
+      const costM = evt.message.match(/~\$([\d.]+)/);
+      if (costM && !foundExplicit) {
+        totalCost += parseFloat(costM[1]);
+        foundExplicit = true;
+      }
     }
   }
-  return found ? Math.round(totalCost * 10000) / 10000 : null;
+
+  if (foundExplicit && totalCost > 0) {
+    return Math.round(totalCost * 10000) / 10000;
+  }
+
+  // Calculate from accumulated tokens if explicit cost wasn't logged in legacy trace
+  if (totalIn > 0 || totalOut > 0) {
+    const isLow = (modelTier === "low") || (modelName?.toLowerCase().includes("flash")) || false;
+    const inRate = isLow ? 0.10 : 1.25;
+    const cachedRate = isLow ? 0.025 : 0.3125;
+    const outRate = isLow ? 0.40 : 5.00;
+
+    const uncachedIn = Math.max(0, totalIn - totalCached);
+    const cost = ((uncachedIn * inRate) + (totalCached * cachedRate) + (totalOut * outRate)) / 1000000;
+    return Math.round(cost * 10000) / 10000;
+  }
+
+  return null;
 }
 
 
