@@ -37,6 +37,7 @@ import {
   CHAT_BOARD_OPEN_KEY,
   CHAT_INPUT_COLLAPSED_KEY,
   extractTurnModelInfo,
+  extractTurnCost,
   type Message,
 } from "@/components/chat";
 
@@ -190,6 +191,7 @@ export default function ChatPage() {
         setMessages(
           history.map((entry) => {
             const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
+            const costUsd = extractTurnCost(entry.trace);
             return {
               role: entry.role,
               content: entry.content,
@@ -198,6 +200,7 @@ export default function ChatPage() {
               confidence: entry.confidence,
               modelTier,
               modelName,
+              costUsd,
               trace: entry.trace,
               timestamp: new Date(entry.timestamp),
             };
@@ -361,6 +364,9 @@ export default function ChatPage() {
               (doneEvt.model_tier as string | null) ?? null,
               (doneEvt.model_name as string | null) ?? null
             );
+            const costUsd =
+              (typeof doneEvt.cost_usd === "number" ? doneEvt.cost_usd : null) ??
+              extractTurnCost(liveTraceRef.current);
             const assistantMsg: Message = {
               role: "assistant",
               content: event.response ?? "",
@@ -370,6 +376,7 @@ export default function ChatPage() {
               confidence: (doneEvt.confidence as number | null) ?? null,
               modelTier: modelTier ?? turnModelOption?.tier ?? selectedModelTier,
               modelName: modelName ?? turnModelOption?.model_name ?? null,
+              costUsd,
               trace: liveTraceRef.current,
             };
             setMessages((msgs) => [...msgs, assistantMsg]);

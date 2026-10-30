@@ -93,6 +93,7 @@ export interface AgentGraphNode {
   inputTokens: number;
   outputTokens: number;
   cachedTokens: number;
+  costUsd: number;
   toolCallsCount: number;
   events: TraceEvent[];           // All trace steps belonging to this specific agent instance
 }
@@ -136,6 +137,7 @@ export function buildAgentExecutionGraph(events: TraceEvent[]): {
       inputTokens: 0,
       outputTokens: 0,
       cachedTokens: 0,
+      costUsd: 0,
       toolCallsCount: 0,
       events: [],
     };
@@ -236,7 +238,16 @@ export function buildAgentExecutionGraph(events: TraceEvent[]): {
         typeof data.response === "string" ? data.response : evt.message;
       node.finalResponse = respText;
     } else if (evt.type === "info") {
-      // Parse token metrics from either structured `data` or `"Tokens: 13,625 in (0 cached, 0%) | 371 out"`
+      // Parse token and cost metrics from either structured `data` or `"Tokens: 13,625 in (0 cached, 0%) | 371 out · ~$0.0042"`
+      if (typeof data.cost_usd === "number") {
+        node.costUsd = (node.costUsd ?? 0) + data.cost_usd;
+      } else if (evt.message?.includes("~$")) {
+        const costMatch = evt.message.match(/~\$([\d.]+)/);
+        if (costMatch) {
+          node.costUsd = (node.costUsd ?? 0) + parseFloat(costMatch[1]);
+        }
+      }
+
       if (typeof data.input_tokens === "number") {
         node.inputTokens += data.input_tokens;
         node.outputTokens += typeof data.output_tokens === "number" ? data.output_tokens : 0;
@@ -555,6 +566,11 @@ export function AgentGraphView({
                       {(rootNode.inputTokens + rootNode.outputTokens).toLocaleString()} tok
                     </span>
                   )}
+                  {rootNode.costUsd > 0 && (
+                    <span className="text-amber-300">
+                      💰 ${rootNode.costUsd < 0.01 ? rootNode.costUsd.toFixed(4) : rootNode.costUsd.toFixed(3)}
+                    </span>
+                  )}
                   <span
                     className={`px-1.5 py-0.2 rounded-full text-[0.6rem] uppercase ${
                       rootNode.status === "done"
@@ -649,6 +665,11 @@ export function AgentGraphView({
                               {(sub.inputTokens + sub.outputTokens).toLocaleString()} tok
                             </span>
                           )}
+                          {sub.costUsd > 0 && (
+                            <span className="text-amber-300">
+                              💰 ${sub.costUsd < 0.01 ? sub.costUsd.toFixed(4) : sub.costUsd.toFixed(3)}
+                            </span>
+                          )}
                         </div>
                       </button>
                     );
@@ -676,13 +697,20 @@ export function AgentGraphView({
                 {selectedNode.toolCallsCount} tool calls)
               </span>
             </div>
-            {selectedNode.inputTokens > 0 && (
-              <span className="text-[0.68rem] font-mono px-2 py-0.5 rounded bg-bg-tertiary text-accent-cyan">
-                Tokens: {selectedNode.inputTokens.toLocaleString()} in (
-                {selectedNode.cachedTokens.toLocaleString()} cached) |{" "}
-                {selectedNode.outputTokens.toLocaleString()} out
-              </span>
-            )}
+            <div className="flex items-center gap-2 flex-wrap">
+              {selectedNode.costUsd > 0 && (
+                <span className="text-[0.68rem] font-mono px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300">
+                  Cost: ${selectedNode.costUsd < 0.01 ? selectedNode.costUsd.toFixed(4) : selectedNode.costUsd.toFixed(3)}
+                </span>
+              )}
+              {selectedNode.inputTokens > 0 && (
+                <span className="text-[0.68rem] font-mono px-2 py-0.5 rounded bg-bg-tertiary text-accent-cyan">
+                  Tokens: {selectedNode.inputTokens.toLocaleString()} in (
+                  {selectedNode.cachedTokens.toLocaleString()} cached) |{" "}
+                  {selectedNode.outputTokens.toLocaleString()} out
+                </span>
+              )}
+            </div>
           </div>
 
           {/* 1. Full Untruncated Prompt Dispatched to this Agent / Subagent */}

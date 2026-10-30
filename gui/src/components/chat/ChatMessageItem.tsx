@@ -66,6 +66,16 @@ export default function ChatMessageItem({ message }: ChatMessageItemProps) {
                 <span>{message.modelName ?? message.modelTier}</span>
               </span>
             )}
+
+            {message.costUsd != null && message.costUsd > 0 && (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-mono border bg-amber-500/10 border-amber-500/30 text-amber-300"
+                title={`Estimated inference cost: $${message.costUsd.toFixed(4)} USD`}
+              >
+                <span>💰</span>
+                <span>${message.costUsd < 0.01 ? message.costUsd.toFixed(4) : message.costUsd.toFixed(3)}</span>
+              </span>
+            )}
           </div>
         )}
 

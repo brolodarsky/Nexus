@@ -98,7 +98,12 @@ export default function AuditPage() {
     const cached = u.cached_tokens ?? 0;
     const total = u.total_tokens ?? input + output;
     const cacheHitPct = input > 0 ? Math.round((cached / input) * 100) : 0;
-    return { input, output, cached, total, cacheHitPct };
+    const costUsd =
+      typeof activeSnapshot.cost_usd === "number"
+        ? activeSnapshot.cost_usd
+        : (typeof u.cost_usd === "number" ? u.cost_usd : null);
+    const savingsUsd = typeof u.cache_savings_usd === "number" ? u.cache_savings_usd : null;
+    return { input, output, cached, total, cacheHitPct, costUsd, savingsUsd };
   }, [activeSnapshot]);
 
   return (
@@ -193,6 +198,11 @@ export default function AuditPage() {
                     <span className="px-1.5 py-0.2 rounded bg-bg-primary/60 text-cyan-300">
                       {r.agent_name || "nexus"}
                     </span>
+                    {typeof r.cost_usd === "number" && r.cost_usd > 0 && (
+                      <span className="text-amber-300 font-bold">
+                        💰 ${r.cost_usd < 0.01 ? r.cost_usd.toFixed(4) : r.cost_usd.toFixed(3)}
+                      </span>
+                    )}
                     {r.subagents_count !== undefined && r.subagents_count > 0 && (
                       <span className="px-1.5 py-0.2 rounded bg-fuchsia-500/20 text-fuchsia-300">
                         ⚡ {r.subagents_count} subagent{r.subagents_count === 1 ? "" : "s"}
@@ -258,6 +268,19 @@ export default function AuditPage() {
                       <span className="text-text-primary font-bold">
                         {activeSnapshot.latency_seconds}s
                       </span>
+                    </div>
+                  )}
+                  {tokenMetrics?.costUsd != null && (
+                    <div className="glass-card px-3 py-1.5 flex items-center gap-1.5">
+                      <span className="text-text-muted">Cost:</span>
+                      <span className="text-amber-300 font-bold">
+                        ${tokenMetrics.costUsd < 0.01 ? tokenMetrics.costUsd.toFixed(4) : tokenMetrics.costUsd.toFixed(3)}
+                      </span>
+                      {tokenMetrics.savingsUsd != null && tokenMetrics.savingsUsd > 0 && (
+                        <span className="text-emerald-400 text-[0.68rem]" title="Estimated amount saved from prompt context caching">
+                          (saved ${tokenMetrics.savingsUsd.toFixed(3)})
+                        </span>
+                      )}
                     </div>
                   )}
                   {tokenMetrics && (
@@ -396,6 +419,11 @@ export default function AuditPage() {
                               </div>
                             </div>
                             <div className="flex items-center gap-2 font-mono text-[0.68rem]">
+                              {typeof sub.cost_usd === "number" && sub.cost_usd > 0 && (
+                                <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold">
+                                  💰 ${sub.cost_usd < 0.01 ? sub.cost_usd.toFixed(4) : sub.cost_usd.toFixed(3)}
+                                </span>
+                              )}
                               <span className="px-2 py-0.5 rounded bg-bg-tertiary text-text-secondary">
                                 🔧 {sub.tool_calls?.length ?? 0} tool calls
                               </span>

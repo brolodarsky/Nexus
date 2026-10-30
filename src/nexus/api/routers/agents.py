@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 # Pydantic BaseModel: Validates incoming request JSON payloads and serializes outgoing response schemas
 from pydantic import BaseModel
 # trace_bus: Global pub/sub event bus where LangGraph agents emit live trace events (tools, LLM calls)
+from nexus.core.cost import calculate_token_cost
 from nexus.core.trace import trace_bus
 # run_logger: Persists formatted execution run snapshots to logs/runs/ for observability and evals
 from nexus.core.run_logger import log_run, list_runs, get_run
@@ -50,6 +51,7 @@ class AskResponse(BaseModel):
     reasoning: str | None = None        # Router explanation for domain selection
     model_tier: str | None = None       # Effective model tier used for this turn ("strong", "medium", "low")
     model_name: str | None = None       # Concrete provider model identifier (e.g., "gemini-4-argon", "gemini-3.8-flash")
+    cost_usd: float | None = None       # Estimated USD inference cost for this execution turn
     timestamp: str                      # ISO-8601 UTC timestamp
 
 
@@ -172,6 +174,26 @@ async def ask_brain(request: AskRequest):
             metadata={"model_tier": used_tier, "model_name": used_model},
         )
 
+        # Compute turn cost from trace events
+        turn_cost_usd = sum(
+            float(e.get("data", {}).get("cost_usd", 0.0) or 0.0)
+            for e in trace_events
+            if e.get("type") == "info"
+        )
+        if not turn_cost_usd:
+            tot_in = sum(int(e.get("data", {}).get("input_tokens", 0) or 0) for e in trace_events if e.get("type") == "info")
+            tot_out = sum(int(e.get("data", {}).get("output_tokens", 0) or 0) for e in trace_events if e.get("type") == "info")
+            tot_cached = sum(int(e.get("data", {}).get("cached_tokens", 0) or 0) for e in trace_events if e.get("type") == "info")
+            if tot_in or tot_out:
+                turn_cost_usd = calculate_token_cost(
+                    input_tokens=tot_in,
+                    output_tokens=tot_out,
+                    cached_tokens=tot_cached,
+                    model_name=used_model,
+                    tier=used_tier,
+                )
+        turn_cost_formatted = round(turn_cost_usd, 4) if turn_cost_usd else None
+
         # Generate ISO-8601 UTC timestamp for chat response serialization
         now = datetime.now(timezone.utc).isoformat()
 
@@ -183,6 +205,7 @@ async def ask_brain(request: AskRequest):
             reasoning=result.get("reasoning"),
             model_tier=used_tier,
             model_name=used_model,
+            cost_usd=turn_cost_formatted,
             timestamp=now,
         )
     except Exception as e:
@@ -260,6 +283,26 @@ def _run_pipeline(
             metadata={"model_tier": used_tier, "model_name": used_model},
         )
 
+        # Compute turn cost from trace events
+        turn_cost_usd = sum(
+            float(e.get("data", {}).get("cost_usd", 0.0) or 0.0)
+            for e in trace_events
+            if e.get("type") == "info"
+        )
+        if not turn_cost_usd:
+            tot_in = sum(int(e.get("data", {}).get("input_tokens", 0) or 0) for e in trace_events if e.get("type") == "info")
+            tot_out = sum(int(e.get("data", {}).get("output_tokens", 0) or 0) for e in trace_events if e.get("type") == "info")
+            tot_cached = sum(int(e.get("data", {}).get("cached_tokens", 0) or 0) for e in trace_events if e.get("type") == "info")
+            if tot_in or tot_out:
+                turn_cost_usd = calculate_token_cost(
+                    input_tokens=tot_in,
+                    output_tokens=tot_out,
+                    cached_tokens=tot_cached,
+                    model_name=used_model,
+                    tier=used_tier,
+                )
+        turn_cost_formatted = round(turn_cost_usd, 4) if turn_cost_usd else None
+
         # Push terminal 'done' event to thread queue to complete the SSE stream
         event_queue.put({
             "type": "done",
@@ -270,6 +313,7 @@ def _run_pipeline(
             "reasoning": result.get("reasoning"),
             "model_tier": used_tier,
             "model_name": used_model,
+            "cost_usd": turn_cost_formatted,
             "timestamp": now,
         })
     except Exception as e:

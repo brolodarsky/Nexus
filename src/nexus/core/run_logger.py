@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from nexus.core.cost import calculate_cache_savings, calculate_token_cost
+
 # Root logs directory located at the project workspace root
 RUNS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "logs" / "runs"
 
@@ -86,10 +88,16 @@ def log_run(
         evt_data = evt.get("data") or {}
 
         # Aggregate token counts from structured info events or message strings
+        in_tok = 0
+        out_tok = 0
+        cached_tok = 0
         if evt_type == "info" and isinstance(evt_data, dict) and ("input_tokens" in evt_data or "output_tokens" in evt_data):
-            total_in_tokens += int(evt_data.get("input_tokens", 0) or 0)
-            total_out_tokens += int(evt_data.get("output_tokens", 0) or 0)
-            total_cached_tokens += int(evt_data.get("cached_tokens", 0) or 0)
+            in_tok = int(evt_data.get("input_tokens", 0) or 0)
+            out_tok = int(evt_data.get("output_tokens", 0) or 0)
+            cached_tok = int(evt_data.get("cached_tokens", 0) or 0)
+            total_in_tokens += in_tok
+            total_out_tokens += out_tok
+            total_cached_tokens += cached_tok
 
         # Group isolated subagent lifecycles by their unique agent_id (or agent label for legacy traces)
         is_sub = str(evt_agent_id).startswith("subagent") or str(evt.get("agent", "")).lower().startswith("subagent")
@@ -106,11 +114,19 @@ def log_run(
                     "started_at": evt.get("timestamp"),
                     "ended_at": None,
                     "final_response": None,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cached_tokens": 0,
+                    "cost_usd": 0.0,
                     "tool_calls": [],
                     "steps": [],
                 }
             sub_entry = subagents_map[sub_key]
             sub_entry["steps"].append(evt)
+            if in_tok or out_tok:
+                sub_entry["input_tokens"] += in_tok
+                sub_entry["output_tokens"] += out_tok
+                sub_entry["cached_tokens"] += cached_tok
             if evt_type == "agent_start" and isinstance(evt_data, dict):
                 if evt_data.get("task_prompt"):
                     sub_entry["task_prompt"] = evt_data["task_prompt"]
@@ -147,12 +163,60 @@ def log_run(
                 sub_entry["ended_at"] = evt.get("timestamp")
 
     merged_metadata = dict(metadata or {})
+
+    # Compute individual subagent costs
+    for sub in subagents_map.values():
+        sub["cost_usd"] = calculate_token_cost(
+            input_tokens=sub.get("input_tokens", 0),
+            output_tokens=sub.get("output_tokens", 0),
+            cached_tokens=sub.get("cached_tokens", 0),
+            tier=sub.get("model_tier", "low"),
+        )
+
+    # Calculate root agent and aggregate run costs
+    sub_in = sum(s.get("input_tokens", 0) for s in subagents_map.values())
+    sub_out = sum(s.get("output_tokens", 0) for s in subagents_map.values())
+    sub_cached = sum(s.get("cached_tokens", 0) for s in subagents_map.values())
+
+    root_in = max(0, total_in_tokens - sub_in)
+    root_out = max(0, total_out_tokens - sub_out)
+    root_cached = max(0, total_cached_tokens - sub_cached)
+
+    root_cost = calculate_token_cost(
+        input_tokens=root_in,
+        output_tokens=root_out,
+        cached_tokens=root_cached,
+        model_name=merged_metadata.get("model_name"),
+        tier=merged_metadata.get("model_tier"),
+    )
+    total_run_cost = round(root_cost + sum(s.get("cost_usd", 0.0) for s in subagents_map.values()), 6)
+
+    total_cache_savings = round(
+        calculate_cache_savings(
+            root_in,
+            root_cached,
+            model_name=merged_metadata.get("model_name"),
+            tier=merged_metadata.get("model_tier"),
+        )
+        + sum(
+            calculate_cache_savings(
+                s.get("input_tokens", 0),
+                s.get("cached_tokens", 0),
+                tier=s.get("model_tier", "low"),
+            )
+            for s in subagents_map.values()
+        ),
+        6,
+    )
+
     if total_in_tokens or total_out_tokens:
         merged_metadata["token_usage"] = {
             "input_tokens": total_in_tokens,
             "output_tokens": total_out_tokens,
             "cached_tokens": total_cached_tokens,
             "total_tokens": total_in_tokens + total_out_tokens,
+            "cost_usd": total_run_cost,
+            "cache_savings_usd": total_cache_savings,
         }
 
     snapshot = {
@@ -165,6 +229,7 @@ def log_run(
         "reasoning": reasoning,
         "input_query": query,
         "output_response": response,
+        "cost_usd": total_run_cost,
         "latency_seconds": round(latency_seconds, 3) if latency_seconds is not None else None,
         "dpfh_injected_files": dpfh_injected_files or [],
         "tool_calls": tool_calls or [],
@@ -222,7 +287,21 @@ def list_runs(limit: int = 50, agent: Optional[str] = None) -> list[dict[str, An
 
             full_query = data.get("input_query", "")
             full_response = data.get("output_response", "")
-                
+            
+            cost_usd = data.get("cost_usd")
+            if cost_usd is None:
+                tok = (data.get("metadata") or {}).get("token_usage") or {}
+                if tok.get("cost_usd") is not None:
+                    cost_usd = tok.get("cost_usd")
+                elif tok.get("input_tokens") or tok.get("output_tokens"):
+                    cost_usd = calculate_token_cost(
+                        input_tokens=tok.get("input_tokens", 0),
+                        output_tokens=tok.get("output_tokens", 0),
+                        cached_tokens=tok.get("cached_tokens", 0),
+                        model_name=(data.get("metadata") or {}).get("model_name"),
+                        tier=(data.get("metadata") or {}).get("model_tier"),
+                    )
+
             summaries.append({
                 "run_id": data.get("run_id"),
                 "filename": p.name,
@@ -235,6 +314,7 @@ def list_runs(limit: int = 50, agent: Optional[str] = None) -> list[dict[str, An
                 "query_preview": full_query,
                 "response_preview": full_response,
                 "latency_seconds": data.get("latency_seconds"),
+                "cost_usd": cost_usd,
                 "tool_calls_count": len(data.get("tool_calls", [])),
                 "subagents_count": subagents_count,
                 "trace_events_count": data.get("trace_events_count", len(trace_evts)),
@@ -244,6 +324,23 @@ def list_runs(limit: int = 50, agent: Optional[str] = None) -> list[dict[str, An
             continue
 
     return summaries
+
+
+def _enrich_snapshot_cost(data: dict[str, Any]) -> dict[str, Any]:
+    """Ensures older run snapshots loaded from disk have cost_usd computed."""
+    if data.get("cost_usd") is None:
+        tok = (data.get("metadata") or {}).get("token_usage") or {}
+        if tok.get("cost_usd") is not None:
+            data["cost_usd"] = tok.get("cost_usd")
+        elif tok.get("input_tokens") or tok.get("output_tokens"):
+            data["cost_usd"] = calculate_token_cost(
+                input_tokens=tok.get("input_tokens", 0),
+                output_tokens=tok.get("output_tokens", 0),
+                cached_tokens=tok.get("cached_tokens", 0),
+                model_name=(data.get("metadata") or {}).get("model_name"),
+                tier=(data.get("metadata") or {}).get("model_tier"),
+            )
+    return data
 
 
 def get_run(run_id: str) -> Optional[dict[str, Any]]:
@@ -276,13 +373,13 @@ def get_run(run_id: str) -> Optional[dict[str, Any]]:
 
     if direct_path.is_file() and direct_path.suffix == ".json":
         with open(direct_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return _enrich_snapshot_cost(json.load(f))
             
     # Search by run_id in filename or contents
     for p in runs_dir.glob("*.json"):
         if run_id in p.name:
             with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
+                return _enrich_snapshot_cost(json.load(f))
                 
     return None
 
@@ -299,4 +396,4 @@ def get_latest_run() -> Optional[dict[str, Any]]:
     if not json_files:
         return None
     with open(json_files[0], "r", encoding="utf-8") as f:
-        return json.load(f)
+        return _enrich_snapshot_cost(json.load(f))

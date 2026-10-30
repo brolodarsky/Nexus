@@ -14,6 +14,7 @@ import type { ModelOption, TraceEvent } from "@/lib/api";
 // - confidence: optional router confidence score (0.0 to 1.0)
 // - modelTier: capability tier executed for this turn ("strong", "medium", "low")
 // - modelName: concrete LLM identifier (e.g., "gemini-4-argon", "gemini-3.8-flash")
+// - costUsd: estimated USD inference cost for this execution turn
 // - trace: optional array of lossless SSE TraceEvent payloads for ThinkingPanel inspection
 export interface Message {
   role: "user" | "assistant";
@@ -24,6 +25,7 @@ export interface Message {
   confidence?: number | null;
   modelTier?: string | null;
   modelName?: string | null;
+  costUsd?: number | null;
   trace?: TraceEvent[];
 }
 
@@ -94,4 +96,27 @@ export function extractTurnModelInfo(
   }
   return { modelTier: null, modelName: null };
 }
+
+// Extracts the estimated turn inference cost from explicit metadata or trace info events
+export function extractTurnCost(
+  trace?: TraceEvent[],
+  explicitCost?: number | null
+): number | null {
+  if (typeof explicitCost === "number") {
+    return explicitCost;
+  }
+  if (!trace || trace.length === 0) {
+    return null;
+  }
+  let totalCost = 0.0;
+  let found = false;
+  for (const evt of trace) {
+    if (evt.type === "info" && evt.data && typeof evt.data.cost_usd === "number") {
+      totalCost += evt.data.cost_usd;
+      found = true;
+    }
+  }
+  return found ? Math.round(totalCost * 10000) / 10000 : null;
+}
+
 

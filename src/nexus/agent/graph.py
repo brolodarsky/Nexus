@@ -25,7 +25,7 @@ from pathlib import Path
 # - Annotated: Attaches reducer metadata (`add_messages`) to state keys
 # - Sequence: Immutable ordered sequence of LangChain `BaseMessage` objects
 # - Literal: Constrains conditional edge return strings to an explicit set of node names
-from typing import Annotated, Any, Literal, Sequence, TypedDict
+from typing import Annotated, Any, Literal, Optional, Sequence, TypedDict
 
 # LangChain message primitives:
 # - AIMessage: Assistant responses (either conversational text or tool call requests)
@@ -51,6 +51,7 @@ from langgraph.prebuilt import ToolNode
 from langchain_openai import ChatOpenAI
 
 from nexus.core.config import settings
+from nexus.core.cost import calculate_token_cost
 from nexus.core.constants import (
     AI_MODEL_LOW,
     AI_MODEL_MEDIUM,
@@ -177,27 +178,47 @@ def extract_message_text(msg: BaseMessage | None) -> str:
     return str(raw_content)
 
 
-def _log_token_usage(tracer: AgentTracer, ai_msg: BaseMessage) -> dict[str, int]:
-    """Extracts and logs prompt token counts, cached token hits (`cache_read`), and output tokens from an AIMessage."""
+def _log_token_usage(
+    tracer: AgentTracer,
+    ai_msg: BaseMessage,
+    model_name: Optional[str] = None,
+    tier: Optional[str] = None,
+) -> dict[str, Any]:
+    """Extracts and logs prompt token counts, cached token hits (`cache_read`), output tokens, and estimated USD cost from an AIMessage."""
     usage = getattr(ai_msg, "usage_metadata", None)
     if not isinstance(usage, dict):
-        return {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
+        return {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0}
     in_tok = int(usage.get("input_tokens", 0) or 0)
     out_tok = int(usage.get("output_tokens", 0) or 0)
     details = usage.get("input_token_details") or {}
     cached_tok = int(details.get("cache_read", 0) or 0) if isinstance(details, dict) else 0
+    cost_usd = calculate_token_cost(
+        input_tokens=in_tok,
+        output_tokens=out_tok,
+        cached_tokens=cached_tok,
+        model_name=model_name,
+        tier=tier,
+    )
     if in_tok or out_tok:
         cache_pct = int((cached_tok / in_tok) * 100) if in_tok > 0 else 0
         tracer.info(
-            f"Tokens: {in_tok:,} in ({cached_tok:,} cached, {cache_pct}%) | {out_tok:,} out",
+            f"Tokens: {in_tok:,} in ({cached_tok:,} cached, {cache_pct}%) | {out_tok:,} out · ~${cost_usd:.4f}",
             data={
                 "input_tokens": in_tok,
                 "output_tokens": out_tok,
                 "cached_tokens": cached_tok,
                 "cache_pct": cache_pct,
+                "cost_usd": cost_usd,
+                "model_name": model_name,
+                "model_tier": tier,
             },
         )
-    return {"input_tokens": in_tok, "output_tokens": out_tok, "cached_tokens": cached_tok}
+    return {
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "cached_tokens": cached_tok,
+        "cost_usd": cost_usd,
+    }
 
 
 # ── Dynamic Subagent Spawner (`spawn_subagent`) ──────────────────────────────
@@ -274,7 +295,7 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
         turn_idx += 1
         local_tracer.llm_call(metadata={"turn": turn_idx, "model_tier": effective_tier})
         ai_msg = sub_llm.invoke(sub_messages)
-        _log_token_usage(local_tracer, ai_msg)
+        _log_token_usage(local_tracer, ai_msg, tier=effective_tier)
         sub_messages.append(ai_msg)
 
         if not getattr(ai_msg, "tool_calls", None):
@@ -431,11 +452,13 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
             )
             fallback_llm = get_chat_model(tier="low", temperature=0.0)
             response = fallback_llm.bind_tools(TOOLS).invoke(messages_for_llm)
+            active_model_name = "gemini-3.8-flash"
+            effective_tier = "low"
         else:
             raise e
 
-    # Log input tokens, cached prompt tokens (`cache_read`), and output tokens to console and SSE trace bus
-    _log_token_usage(nexus_tracer, response)
+    # Log input tokens, cached prompt tokens (`cache_read`), output tokens, and estimated cost to console and SSE trace bus
+    _log_token_usage(nexus_tracer, response, model_name=active_model_name, tier=effective_tier)
 
     # 3. Emit trace telemetry for either tool invocations or final conversational text
     if hasattr(response, "tool_calls") and response.tool_calls:

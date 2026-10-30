@@ -131,6 +131,7 @@ This repository distinguishes between capabilities and constraints that define h
 | Script | Purpose | Usage |
 |---|---|---|
 | `audit_career_drift.py` | Performs deterministic Tier-1 drift audit across the 3.1 career cluster. | `python scripts/audit_career_drift.py` |
+| `audit_run_costs.py` | Parses execution run snapshots, calculates token costs & prompt-caching savings ($ USD), and backfills legacy snapshots. | `python scripts/audit_run_costs.py [--backfill] [--top 10]` |
 | `release.py` | Compiles `.changeset/*.md` fragments into the changelog and bumps version. | `python scripts/release.py` |
 | `sync_vault.py` | Automatically commits and pushes the nested Vault repository (The Nested Heart). | `python scripts/sync_vault.py` |
 | `src/nexus/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `nexus` |
