@@ -77,7 +77,7 @@ export default function AuditPage() {
     };
   }, [selectedRunId]);
 
-  // Filter runs based on search input (matching query, ID, or agent name)
+  // Filter runs based on search input (matching query, run_id, conversation thread_id, or agent name)
   const filteredRuns = useMemo(() => {
     if (!searchQuery.trim()) return runs;
     const q = searchQuery.toLowerCase();
@@ -85,7 +85,8 @@ export default function AuditPage() {
       (r) =>
         r.run_id.toLowerCase().includes(q) ||
         r.input_query?.toLowerCase().includes(q) ||
-        r.agent_name?.toLowerCase().includes(q)
+        r.agent_name?.toLowerCase().includes(q) ||
+        r.thread_id?.toLowerCase().includes(q)
     );
   }, [runs, searchQuery]);
 
@@ -134,7 +135,7 @@ export default function AuditPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search runs by query, ID, or agent..."
+              placeholder="Search runs by query, run ID, or conversation..."
               className="w-full text-xs px-3 py-1.5 rounded-lg bg-bg-primary/70 border border-border-subtle text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-cyan"
             />
             {searchQuery && (
@@ -197,8 +198,16 @@ export default function AuditPage() {
                   </p>
 
                   <div className="flex items-center gap-2 flex-wrap text-[0.62rem] font-mono text-text-muted pt-1 border-t border-border-subtle/30">
-                    <span className="px-1.5 py-0.2 rounded bg-bg-primary/60 text-cyan-300">
-                      {r.agent_name || "nexus"}
+                    {/* Display truncated Conversation ID (thread_id) with full UUID tooltip; falls back to agent name for threadless runs */}
+                    <span
+                      className="px-1.5 py-0.5 rounded bg-bg-primary/60 text-cyan-300"
+                      title={r.thread_id && r.thread_id !== "unspecified" ? `Conversation ID: ${r.thread_id}` : `Agent: ${r.agent_name || "nexus"}`}
+                    >
+                      {r.thread_id && r.thread_id !== "unspecified"
+                        ? (r.agent_name && r.agent_name !== "nexus"
+                            ? `${r.agent_name} • conv: ${r.thread_id.slice(0, 8)}`
+                            : `conv: ${r.thread_id.slice(0, 8)}`)
+                        : (r.agent_name || "nexus")}
                     </span>
                     {typeof r.cost_usd === "number" && r.cost_usd > 0 && (
                       <span className="text-amber-300 font-bold">
