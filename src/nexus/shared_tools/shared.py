@@ -489,7 +489,53 @@ def update_calendar_event(
     return f"✅ Event updated: '{res.get('summary')}' (ID: {res.get('id')})."
 
 
-# ── 5. On-Demand Shared CLI Tool Runner ──────────────────────────────────────
+# ── 5. Live Web Search & On-Demand Shared CLI Tool Runner ────────────────────
+
+# Signature breakdown:
+# - query: Search string sent to Tavily (avoid hardcoding stale year anchors unless looking for historical data)
+# - max_results: Bounded result count (default 5)
+# - search_depth: "basic" (fast lookup) or "advanced" (deep extraction for clinical/technical/company research)
+# - topic: "general", "news", or "finance"
+# - include_domains / exclude_domains: Optional domain filter lists (e.g. ["pubmed.ncbi.nlm.nih.gov"])
+@tool
+def search_web(
+    query: str,
+    max_results: int = 5,
+    search_depth: str = "basic",
+    topic: str = "general",
+    include_domains: Optional[List[str]] = None,
+    exclude_domains: Optional[List[str]] = None,
+) -> str:
+    """Search the live web via Tavily for up-to-date information, documentation, company/JD intel, or peer-reviewed studies.
+
+    Returns a clean Markdown digest containing a synthesized summary and numbered results with exact source URLs
+    and snippets. Always cite the exact study, documentation, or article URL returned—never link bare domain homepages.
+
+    CONTEXT HYGIENE DIRECTIVE: Running 1–2 targeted `search_web` queries directly for quick fact verification is fine.
+    However, when conducting broad multi-query web research, company/market scouting, or combining `search_web` with
+    full-page scraping (`nexus.shared_tools.read_webpage`), delegate the research sweep to parallel
+    `spawn_subagent(task_prompt, model_tier="low")` workers so raw web snippets do not bloat your primary context window.
+
+    Args:
+        query: Search query string (e.g. "Palantir Forward Deployed Software Engineer compensation NYC", "fluoxetine CYP2D6 interaction PubMed").
+        max_results: Maximum number of results to return (1-15, default: 5).
+        search_depth: "basic" for fast standard lookups (default) or "advanced" for deeper academic/technical extraction.
+        topic: Category filter — "general" (default), "news", or "finance".
+        include_domains: Optional list of domains to restrict search to (e.g. ["pubmed.ncbi.nlm.nih.gov", "pmc.ncbi.nlm.nih.gov"]).
+        exclude_domains: Optional list of domains to exclude from results.
+    """
+    from nexus.shared_tools.web_search import execute_web_search, format_search_results_as_markdown
+
+    data = execute_web_search(
+        query=query,
+        max_results=max_results,
+        search_depth=search_depth,
+        topic=topic,
+        include_domains=include_domains,
+        exclude_domains=exclude_domains,
+    )
+    return format_search_results_as_markdown(data)
+
 
 @tool
 def run_shared_tool_cli(module: str, cli_args: Optional[List[str]] = None) -> str:

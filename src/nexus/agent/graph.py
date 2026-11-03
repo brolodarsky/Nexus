@@ -78,6 +78,7 @@ from nexus.shared_tools.shared import (
     read_file,
     run_shared_tool_cli,
     search_vault,
+    search_web,
     update_calendar_event,
 )
 
@@ -134,8 +135,8 @@ class NexusAgentState(TypedDict):
 # ── Core Tool Set (Shared by Parent NexusAgent and Subagents) ────────────────
 
 # Most-used deterministic tools bound directly so the agent can navigate, read, surgically edit,
-# check recent modifications, inspect emails/calendar, post/read bulletins on the Shared Blackboard,
-# or invoke any other `[CLI]` tool on demand.
+# check recent modifications, search the live web, inspect emails/calendar, post/read bulletins on the
+# Shared Blackboard, or invoke any other `[CLI]` tool on demand.
 CORE_TOOLS = [
     read_file,
     modify_file,
@@ -144,6 +145,7 @@ CORE_TOOLS = [
     get_vault_structure,
     search_vault,
     get_recent_modifications,
+    search_web,
     fetch_emails,
     get_calendar_schedule,
     create_calendar_event,
