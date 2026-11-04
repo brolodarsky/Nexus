@@ -80,7 +80,7 @@ export default function BlackboardDrawer({
           <div className="text-center py-12 px-4 opacity-60">
             <div className="text-2xl mb-2">⚡</div>
             <p className="text-xs text-text-secondary">
-              No bulletins posted yet. When Astra dispatches Flash subagents for email, calendar, or Vault sweeps, their distilled reports land here automatically.
+              No bulletins posted yet. When primary agents dispatch subagents, their distilled reports land here automatically.
             </p>
           </div>
         ) : (
