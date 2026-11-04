@@ -91,6 +91,9 @@ export function askBrainStream(
       const decoder = new TextDecoder();
       let buffer = ""; // Temporary buffer to assemble split SSE packets across chunk boundaries
 
+      // Track whether a terminal packet ("done" or "error") was received to guard against abrupt disconnection
+      let receivedTerminal = false;
+
       while (true) {
         // reader.read() blocks until the next byte chunk arrives from FastAPI
         const { done, value } = await reader.read();
@@ -113,10 +116,12 @@ export function askBrainStream(
             try {
               const event: TraceEvent = JSON.parse(jsonStr);
 
-              // Route event to corresponding UI callback
+              // Route event to corresponding UI callback and flag terminal state
               if (event.type === "done") {
+                receivedTerminal = true;
                 callbacks.onDone(event);
               } else if (event.type === "error") {
+                receivedTerminal = true;
                 callbacks.onError(event.message);
               } else {
                 callbacks.onTrace(event); // Animate item into Thinking Panel
@@ -126,6 +131,38 @@ export function askBrainStream(
             }
           }
         }
+      }
+
+      // Flush any trailing multi-byte characters remaining in the TextDecoder buffer
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        for (const line of buffer.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6);
+          try {
+            const event: TraceEvent = JSON.parse(jsonStr);
+            if (event.type === "done") {
+              receivedTerminal = true;
+              callbacks.onDone(event);
+            } else if (event.type === "error") {
+              receivedTerminal = true;
+              callbacks.onError(event.message);
+            } else {
+              callbacks.onTrace(event);
+            }
+          } catch {
+            // Ignore malformed trailing chunks
+          }
+        }
+      }
+
+      // If the HTTP connection closed (done: true) without emitting a terminal "done" or "error" packet,
+      // and the stream was not intentionally cancelled by the user via AbortController,
+      // trigger onError so the UI clears the thinking spinner and alerts the user (e.g. backend worker reload).
+      if (!receivedTerminal && !controller.signal.aborted) {
+        callbacks.onError(
+          "Stream disconnected unexpectedly before agent finished. The backend process may have reloaded or encountered a network interruption."
+        );
       }
     } catch (err) {
       // Ignore AbortError when cancellation was intentionally triggered by the user
