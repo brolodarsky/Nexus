@@ -583,6 +583,7 @@ def post_to_board(
     content: str,
     author: str = "Subagent",
     pinned: bool = False,
+    thread_id: Optional[str] = None,
 ) -> str:
     """Post a structured situational bulletin onto the Shared Agent Blackboard (`blackboard.db`).
 
@@ -590,12 +591,14 @@ def post_to_board(
     (e.g. Gmail inbox sweep takeaways, Google Calendar schedule audits, Vault status discoveries,
     or mission progress) so the primary orchestrator (`NexusAgent` / Astra), peer subagents,
     and the GUI Bulletin Feed have live shared situational awareness without redundant API sweeps.
+    Bulletins are automatically scoped to the active conversation thread via ambient execution context.
 
     Args:
         title: Concise headline for the bulletin (e.g. "Oct 22 Multi-Inbox Gmail Triage" or "Wed Oct 21 Calendar Audit").
         content: Markdown summary of findings, actionable items, and key metadata.
         author: Identifier for the agent posting (e.g. "Flash: Gmail Sweep", "Flash: Calendar Audit", "Astra").
         pinned: Set True to pin high-priority standing bulletins to the top of the board.
+        thread_id: Optional explicit conversation/thread UUID override. If omitted, uses active thread context.
     """
     from nexus.core.blackboard import post_bulletin
 
@@ -604,6 +607,7 @@ def post_to_board(
         title=title,
         content=content,
         pinned=pinned,
+        thread_id=thread_id,
     )
     return f"📋 Bulletin #{bulletin_id} posted to Shared Blackboard: '{title}'."
 
@@ -611,18 +615,21 @@ def post_to_board(
 @tool
 def read_board(
     limit: int = 12,
+    thread_id: Optional[str] = None,
 ) -> str:
     """Read recent bulletins from the Shared Agent Blackboard (`blackboard.db`).
 
     Call this to inspect recent findings already gathered by Flash subagents
-    before launching duplicate external API sweeps.
+    before launching duplicate external API sweeps. Automatically scopes to
+    the active conversation thread via ambient execution context.
 
     Args:
         limit: Maximum number of recent bulletins to return (default: 12).
+        thread_id: Optional explicit conversation/thread UUID override to inspect a specific session.
     """
     from nexus.core.blackboard import format_board_digest
 
-    return format_board_digest(limit=limit)
+    return format_board_digest(limit=limit, thread_id=thread_id)
 
 
 # ── Backward-Compatible Factories (for any legacy callers) ───────────────────

@@ -98,12 +98,16 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Helper to fetch recent bulletins from `/api/board`
+  // Helper to fetch recent bulletins from `/api/board` scoped to active conversation
   const refreshBoard = useCallback(() => {
-    getBoardBulletins(25)
+    if (!activeConvId) {
+      setBulletins([]);
+      return;
+    }
+    getBoardBulletins(25, activeConvId)
       .then((res) => setBulletins(res.bulletins || []))
       .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
-  }, []);
+  }, [activeConvId]);
 
   // Fetch conversations, selectable model catalog, initial Blackboard bulletins, and restore draft state on mount
   useEffect(() => {
@@ -215,8 +219,7 @@ export default function ChatPage() {
         setProgrammaticInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
       }
     });
-    refreshBoard();
-  }, [refreshBoard, setProgrammaticInput]);
+  }, [setProgrammaticInput]);
 
   // Persist user's per-turn model selection preference and keep input focused for immediate typing
   const handleSelectModelTier = useCallback((tierId: string) => {
@@ -229,12 +232,20 @@ export default function ChatPage() {
     inputRef.current?.focus();
   }, []);
 
-  // Fetch messages when active conversation changes
+  // Fetch messages and sync Blackboard bulletins when active conversation changes
   useEffect(() => {
     if (!activeConvId) {
-      queueMicrotask(() => setMessages([]));
+      queueMicrotask(() => {
+        setMessages([]);
+        setBulletins([]);
+      });
       return;
     }
+    // Sync thread-isolated blackboard bulletins for this conversation
+    getBoardBulletins(25, activeConvId)
+      .then((res) => setBulletins(res.bulletins || []))
+      .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
+
     let cancelled = false;
     queueMicrotask(() => {
       if (!cancelled) setLoading(true);
@@ -639,9 +650,9 @@ export default function ChatPage() {
   );
 
   const handleClearBoard = useCallback(async () => {
-    await clearBoardBulletins();
+    await clearBoardBulletins(activeConvId);
     refreshBoard();
-  }, [refreshBoard]);
+  }, [activeConvId, refreshBoard]);
 
   const handleDismissBulletin = useCallback(
     async (id: number) => {
@@ -820,6 +831,7 @@ export default function ChatPage() {
       {showBoard && (
         <BlackboardDrawer
           bulletins={bulletins}
+          threadId={activeConvId}
           onRefresh={refreshBoard}
           onClear={handleClearBoard}
           onDismiss={handleDismissBulletin}

@@ -13,12 +13,14 @@ import type { BoardBulletin } from "@/lib/api";
 
 // BlackboardDrawerProps: defines bulletin items and action handlers for the right-side Blackboard drawer
 // - bulletins: array of BoardBulletin records fetched from GET /api/board
+// - threadId: optional active conversation/thread ID used for thread-scoped swarm isolation
 // - onRefresh: callback to re-fetch recent bulletins from the backend
 // - onClear: async callback to clear all unpinned bulletins and refresh the list
 // - onDismiss: async callback to delete a specific bulletin by ID and refresh the list
 // - onClose: callback to collapse/close the Blackboard drawer
 export interface BlackboardDrawerProps {
   bulletins: BoardBulletin[];
+  threadId?: string | null;
   onRefresh: () => void;
   onClear: () => Promise<void>;
   onDismiss: (id: number) => Promise<void>;
@@ -27,6 +29,7 @@ export interface BlackboardDrawerProps {
 
 const BlackboardDrawer = memo(function BlackboardDrawer({
   bulletins,
+  threadId,
   onRefresh,
   onClear,
   onDismiss,
@@ -81,7 +84,7 @@ const BlackboardDrawer = memo(function BlackboardDrawer({
           <div className="text-center py-12 px-4 opacity-60">
             <div className="text-2xl mb-2">⚡</div>
             <p className="text-xs text-text-secondary">
-              No bulletins posted yet. When primary agents dispatch subagents, their distilled reports land here automatically.
+              No bulletins posted for this conversation yet. When primary agents dispatch subagents, their distilled reports land here automatically.
             </p>
           </div>
         ) : (

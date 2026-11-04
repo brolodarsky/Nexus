@@ -188,3 +188,155 @@ def test_shared_tool_wrappers(temp_board_db: Path):
     res_read = read_board.invoke({"limit": 5})
     assert "Tool Post" in res_read
     assert "Posted via @tool" in res_read
+
+
+def test_thread_scoped_bulletins(temp_board_db: Path):
+    """Validates that bulletins posted to specific thread IDs are strictly isolated from one another."""
+    # Bulletin posted to Conversation A
+    b_a = blackboard.post_bulletin(
+        author="Flash: Gmail",
+        title="Thread A Triage",
+        content="3 urgent emails found in thread A.",
+        thread_id="conv_session_alpha",
+    )
+    # Bulletin posted to Conversation B
+    b_b = blackboard.post_bulletin(
+        author="Flash: Calendar",
+        title="Thread B Audit",
+        content="Calendar clear for thread B.",
+        thread_id="conv_session_beta",
+    )
+
+    # 1. Thread A should ONLY retrieve bulletin A
+    items_a = blackboard.get_bulletins(thread_id="conv_session_alpha")
+    assert len(items_a) == 1
+    assert items_a[0]["id"] == b_a
+    assert items_a[0]["title"] == "Thread A Triage"
+
+    # 2. Thread B should ONLY retrieve bulletin B
+    items_b = blackboard.get_bulletins(thread_id="conv_session_beta")
+    assert len(items_b) == 1
+    assert items_b[0]["id"] == b_b
+    assert items_b[0]["title"] == "Thread B Audit"
+
+    # 3. Empty thread ID query returns empty list (represents fresh/uninitiated conversation)
+    assert blackboard.get_bulletins(thread_id="") == []
+
+
+def test_thread_scoped_clear(temp_board_db: Path):
+    """Validates that clearing unpinned bulletins in one thread preserves unpinned bulletins in other threads."""
+    # Thread A has 1 pinned directive and 1 unpinned sweep
+    blackboard.post_bulletin(
+        author="Astra",
+        title="Thread A Directive",
+        content="Stay on task.",
+        pinned=True,
+        thread_id="conv_alpha",
+    )
+    blackboard.post_bulletin(
+        author="Subagent #1",
+        title="Thread A Unpinned Sweep",
+        content="Temporary audit.",
+        pinned=False,
+        thread_id="conv_alpha",
+    )
+
+    # Thread B has 1 unpinned sweep
+    b_b_id = blackboard.post_bulletin(
+        author="Subagent #2",
+        title="Thread B Unpinned Sweep",
+        content="Keep this alive.",
+        pinned=False,
+        thread_id="conv_beta",
+    )
+
+    # Clear unpinned bulletins strictly for Thread A
+    deleted_count = blackboard.clear_bulletins(thread_id="conv_alpha")
+    assert deleted_count == 1
+
+    # Thread A should retain only the pinned bulletin
+    items_a = blackboard.get_bulletins(thread_id="conv_alpha")
+    assert len(items_a) == 1
+    assert items_a[0]["pinned"] == 1
+    assert items_a[0]["title"] == "Thread A Directive"
+
+    # Thread B should remain completely untouched
+    items_b = blackboard.get_bulletins(thread_id="conv_beta")
+    assert len(items_b) == 1
+    assert items_b[0]["id"] == b_b_id
+    assert items_b[0]["title"] == "Thread B Unpinned Sweep"
+
+
+def test_ambient_execution_context_thread_scoping(temp_board_db: Path):
+    """Validates that `post_bulletin` and `read_board` automatically inherit and normalize the active HITL thread context."""
+    from nexus.core.hitl_queue import reset_hitl_execution_context, set_hitl_execution_context
+
+    # Simulate subagent execution context spawned by parent conversation `conv_999`
+    ctx_token = set_hitl_execution_context(
+        conversation_id="conv_999",
+        thread_id="conv_999:subagent_worker_7",
+        agent_id="sub_7",
+        agent_role="Subagent #7 (low)",
+    )
+
+    try:
+        # Posting without explicit thread_id should resolve and normalize to parent thread "conv_999"
+        b_id = blackboard.post_bulletin(
+            author="Subagent #7",
+            title="Auto Context Sweep",
+            content="Grounded observations.",
+        )
+        assert b_id > 0
+
+        # Querying with thread_id="conv_999" retrieves it
+        items = blackboard.get_bulletins(thread_id="conv_999")
+        assert len(items) == 1
+        assert items[0]["id"] == b_id
+        assert items[0]["thread_id"] == "conv_999"
+
+        # Reading board without arguments inside this context should automatically format for "conv_999"
+        digest = blackboard.format_board_digest()
+        assert "Auto Context Sweep" in digest
+        assert "Grounded observations." in digest
+    finally:
+        reset_hitl_execution_context(ctx_token)
+
+
+def test_schema_migration_adds_thread_id_column(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Validates that `init_board_db` gracefully adds the `thread_id` column and index to an existing legacy table."""
+    db_file = tmp_path / "legacy_board_no_thread.db"
+    monkeypatch.setattr(blackboard, "BOARD_DB_PATH", db_file)
+
+    # 1. Create table without thread_id column
+    conn = sqlite3.connect(db_file)
+    conn.execute(
+        """
+        CREATE TABLE bulletins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author TEXT NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            pinned INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute("INSERT INTO bulletins (author, title, content) VALUES ('OldWorker', 'Pre-Migration', 'Legacy Content')")
+    conn.commit()
+    conn.close()
+
+    # 2. Run init_board_db migration
+    blackboard.init_board_db()
+
+    # 3. Verify `thread_id` column and index now exist, and existing record has NULL thread_id
+    conn = sqlite3.connect(db_file)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(bulletins)").fetchall()]
+    indices = [r[1] for r in conn.execute("PRAGMA index_list(bulletins)").fetchall()]
+    rows = conn.execute("SELECT id, thread_id, title FROM bulletins").fetchall()
+    conn.close()
+
+    assert "thread_id" in cols
+    assert "idx_bulletins_thread_id" in indices
+    assert len(rows) == 1
+    assert rows[0][1] is None  # Existing legacy record has NULL thread_id
+    assert rows[0][2] == "Pre-Migration"

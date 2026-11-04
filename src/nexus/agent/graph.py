@@ -336,6 +336,7 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
                         author=f"Subagent #{serial} ({effective_tier})",
                         title=first_line,
                         content=final_text,
+                        thread_id=parent_convo,
                     )
                     local_tracer.info(
                         f"📋 Posted Bulletin #{bulletin_id} to Blackboard",

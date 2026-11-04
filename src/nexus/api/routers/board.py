@@ -20,6 +20,7 @@ class BulletinCreateRequest(BaseModel):
     title: str
     content: str
     pinned: bool = False
+    thread_id: Optional[str] = None
     # Optional legacy channel field tolerated for backward compatibility
     channel: Optional[str] = None
 
@@ -27,10 +28,11 @@ class BulletinCreateRequest(BaseModel):
 @router.get("")
 async def list_board_bulletins(
     limit: int = 25,
+    thread_id: Optional[str] = None,
     channel: Optional[str] = None,  # Tolerated for backward compatibility
 ) -> Dict[str, Any]:
-    """Return recent bulletins from the Shared Agent Blackboard (`blackboard.db`)."""
-    items: List[Dict[str, Any]] = get_bulletins(limit=limit)
+    """Return recent bulletins from the Shared Agent Blackboard (`blackboard.db`), optionally scoped to `thread_id`."""
+    items: List[Dict[str, Any]] = get_bulletins(limit=limit, thread_id=thread_id)
     return {"bulletins": items, "count": len(items)}
 
 
@@ -42,6 +44,7 @@ async def create_board_bulletin(req: BulletinCreateRequest) -> Dict[str, Any]:
         title=req.title,
         content=req.content,
         pinned=req.pinned,
+        thread_id=req.thread_id,
     )
     return {"status": "ok", "id": bulletin_id}
 
@@ -55,7 +58,10 @@ async def remove_board_bulletin(bulletin_id: int) -> Dict[str, Any]:
 
 
 @router.delete("")
-async def clear_board(channel: Optional[str] = None) -> Dict[str, Any]:
-    """Clear all unpinned bulletins from the blackboard."""
-    removed = clear_bulletins()
+async def clear_board(
+    thread_id: Optional[str] = None,
+    channel: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Clear unpinned bulletins from the blackboard, optionally scoped to `thread_id`."""
+    removed = clear_bulletins(thread_id=thread_id)
     return {"status": "ok", "deleted_count": removed}
