@@ -339,13 +339,74 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
                 posted_to_board = True
             local_tracer.tool_call(tc_name, tc.get("args", {}), call_id=tc_id)
 
-        tool_res = sub_tool_node.invoke({"messages": sub_messages})
+        tool_res = _invoke_tool_node_resilient(sub_tool_node, {"messages": sub_messages})
         for t_msg in tool_res.get("messages", []):
             t_name = getattr(t_msg, "name", "unknown")
             t_call_id = getattr(t_msg, "tool_call_id", None)
             t_content = extract_message_text(t_msg)
             local_tracer.tool_result(t_name, t_content, call_id=t_call_id)
             sub_messages.append(t_msg)
+
+
+# ── Helper: Resilient ToolNode Execution with Synchronous In-Thread Fallback ─
+
+# `node: ToolNode` is the LangGraph tool runner (`sub_tool_node` for subagents or `tool_node` for the parent agent).
+# `state_or_input: dict[str, Any]` is the state dict containing `"messages"` whose trailing `AIMessage` holds `tool_calls`.
+# `-> dict[str, Any]` returns `{"messages": [ToolMessage, ...]}` matching `ToolNode.invoke()` output shape.
+def _invoke_tool_node_resilient(node: ToolNode, state_or_input: dict[str, Any]) -> dict[str, Any]:
+    """Execute a LangGraph `ToolNode` with an automatic synchronous in-thread fallback if the thread pool is shut down.
+
+    Why this safeguard exists:
+    `ToolNode.invoke()` always dispatches tool calls through `ContextThreadPoolExecutor` (`concurrent.futures.ThreadPoolExecutor`).
+    When `uvicorn --reload` detects a `.py` file edit and initiates worker shutdown, Python's `threading._register_atexit(_python_exit)`
+    flags active `ThreadPoolExecutor` instances as `_shutdown = True` before daemon request threads finish.
+    Any subsequent `ToolNode.invoke()` call raises `RuntimeError('cannot schedule new futures after shutdown')`.
+    Catching that specific executor shutdown error and running the requested `@tool` callables sequentially on the current
+    thread allows synchronous tools (`read_file`, `search_vault`, `modify_file`) to complete cleanly instead of crashing mid-turn.
+    """
+    try:
+        return node.invoke(state_or_input)
+    except RuntimeError as exc:
+        if "cannot schedule new futures after" not in str(exc).lower():
+            raise
+        # Fallback: extract tool_calls from the trailing AIMessage and execute each tool sequentially on the current thread
+        messages = state_or_input.get("messages", [])
+        last_ai = messages[-1] if messages else None
+        tool_calls = getattr(last_ai, "tool_calls", None) or []
+        tools_by_name = getattr(node, "tools_by_name", {})
+        fallback_outputs: list[ToolMessage] = []
+        for tc in tool_calls:
+            tc_name = tc.get("name", "unknown")
+            tc_id = tc.get("id") or "fallback_call"
+            tc_args = tc.get("args") or {}
+            target_tool = tools_by_name.get(tc_name)
+            if target_tool is None:
+                fallback_outputs.append(
+                    ToolMessage(
+                        content=f"Error: Tool '{tc_name}' is not registered with ToolNode.",
+                        name=tc_name,
+                        tool_call_id=tc_id,
+                        status="error",
+                    )
+                )
+                continue
+            try:
+                # Invoke the StructuredTool directly on the current OS thread without spawning a Future
+                raw_out = target_tool.invoke(tc_args)
+                content_str = raw_out if isinstance(raw_out, str) else str(raw_out)
+                fallback_outputs.append(
+                    ToolMessage(content=content_str, name=tc_name, tool_call_id=tc_id)
+                )
+            except Exception as tool_exc:
+                fallback_outputs.append(
+                    ToolMessage(
+                        content=f"Error executing {tc_name}: {tool_exc}",
+                        name=tc_name,
+                        tool_call_id=tc_id,
+                        status="error",
+                    )
+                )
+        return {"messages": fallback_outputs}
 
 
 # ── Parent Agent Tool & Model Binding ────────────────────────────────────────
@@ -492,7 +553,7 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
 
 def traced_tool_node(state: NexusAgentState) -> dict:
     """Node: Executes requested tool calls and broadcasts full, untruncated tool results to console and SSE trace bus."""
-    result = tool_node.invoke(state)
+    result = _invoke_tool_node_resilient(tool_node, state)
     for msg in result.get("messages", []):
         tool_name = getattr(msg, "name", "unknown")
         call_id = getattr(msg, "tool_call_id", None)

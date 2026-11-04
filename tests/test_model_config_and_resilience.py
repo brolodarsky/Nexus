@@ -10,9 +10,10 @@ Tests:
 from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools import tool
 
 from nexus.agent.api import run_nexus_agent_with_trace
-from nexus.agent.graph import call_model
+from nexus.agent.graph import _invoke_tool_node_resilient, call_model
 from nexus.core.config import EngineSettings
 from nexus.core.constants import get_available_models, get_chat_model, resolve_model_config
 
@@ -146,3 +147,43 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
     import nexus.agent.graph as graph_mod
     assert graph_mod._active_turn_provider == "anthropic"
     assert resolve_model_config(f"{graph_mod._active_turn_provider}:low")["model_name"] == "claude-sonnet-4-5"
+
+
+def test_run_nexus_agent_with_trace_executor_shutdown_diagnostic_message(monkeypatch: pytest.MonkeyPatch):
+    """Verify run_nexus_agent_with_trace translates Python ThreadPoolExecutor shutdown errors into clear reload guidance."""
+    mock_graph = MagicMock()
+    mock_graph.invoke.side_effect = RuntimeError("cannot schedule new futures after shutdown")
+    monkeypatch.setattr("nexus.agent.api.nexus_graph", mock_graph)
+
+    res = run_nexus_agent_with_trace(query="peep that Tennr email", thread_id="test_shutdown_thread")
+    assert "interrupted mid-turn because the backend server reloaded or shut down" in res["response"]
+    assert "cannot schedule new futures after shutdown" not in res["response"]
+    assert res["confidence"] == 0.0
+
+
+def test_invoke_tool_node_resilient_fallback_on_executor_shutdown():
+    """Verify _invoke_tool_node_resilient executes tools synchronously in-thread when ToolNode's thread pool is shut down."""
+    @tool
+    def dummy_read(path: str) -> str:
+        """Read a dummy note."""
+        return f"contents of {path}"
+
+    mock_node = MagicMock()
+    mock_node.invoke.side_effect = RuntimeError("cannot schedule new futures after shutdown")
+    mock_node.tools_by_name = {"dummy_read": dummy_read}
+
+    ai_msg = AIMessage(
+        content="",
+        tool_calls=[{"name": "dummy_read", "args": {"path": "Mission - Tennr.md"}, "id": "call_123"}],
+    )
+    out = _invoke_tool_node_resilient(mock_node, {"messages": [ai_msg]})
+    assert len(out["messages"]) == 1
+    assert out["messages"][0].content == "contents of Mission - Tennr.md"
+    assert out["messages"][0].tool_call_id == "call_123"
+    assert out["messages"][0].name == "dummy_read"
+
+    # Unrelated RuntimeErrors must still propagate normally
+    mock_node.invoke.side_effect = RuntimeError("unrelated runtime failure")
+    with pytest.raises(RuntimeError, match="unrelated runtime failure"):
+        _invoke_tool_node_resilient(mock_node, {"messages": [ai_msg]})
+

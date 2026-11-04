@@ -117,6 +117,7 @@ def run_nexus_agent_with_trace(
     except Exception as e:
         nexus_tracer.info(f"❌ Error: {e}")
         err_str = str(e)
+        err_lower = err_str.lower()
         # Demystify 504 DEADLINE_EXCEEDED errors for chat users with clear remediation guidance
         if "504" in err_str or "DEADLINE_EXCEEDED" in err_str:
             user_msg = (
@@ -124,6 +125,13 @@ def run_nexus_agent_with_trace(
                 f"The AI provider took longer than the configured timeout to complete reasoning over the active "
                 f"conversation history. You can continue by sending your next prompt, or use `spawn_subagent` to isolate "
                 f"heavy file reading so raw notes do not inflate the conversation context."
+            )
+        # Demystify Python ThreadPoolExecutor shutdown errors caused by mid-turn `uvicorn --reload` worker restarts
+        elif "cannot schedule new futures after" in err_lower or "brokenthreadpool" in type(e).__name__.lower():
+            user_msg = (
+                f"⚠️ NexusAgent was interrupted mid-turn because the backend server reloaded or shut down "
+                f"(typically triggered when `.py` files are edited while a chat turn is in flight).\n\n"
+                f"The engine has restarted cleanly and your conversation history is intact—please re-send your prompt."
             )
         else:
             user_msg = f"❌ NexusAgent encountered an error: {e}"

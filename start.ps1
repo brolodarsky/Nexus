@@ -19,8 +19,11 @@ Write-Host ""
 
 # ── Start FastAPI backend ────────────────────────────────────
 Write-Host "  [1/2] Starting FastAPI backend on port 8000..." -ForegroundColor Yellow
+# --reload-dir scopes file watching strictly to `src/nexus` (ignoring tests/, scripts/, gui/, and Vault/).
+# --reload-exclude prevents standalone CLI scripts (e.g. export_conversation.py) and SQLite WAL/DB files from killing in-flight chat turns.
+# --timeout-graceful-shutdown gives active SSE streams up to 30s to finish before terminating the worker.
 $backend = Start-Process -FilePath $VENV_PYTHON `
-    -ArgumentList "-m", "uvicorn", "nexus.api.main:app", "--reload", "--port", "8000" `
+    -ArgumentList "-m", "uvicorn", "nexus.api.main:app", "--reload", "--reload-dir", "src/nexus", "--reload-exclude", "export_conversation.py", "--reload-exclude", "*.db*", "--reload-exclude", "*.sqlite*", "--timeout-graceful-shutdown", "30", "--port", "8000" `
     -WorkingDirectory $PROJECT_ROOT `
     -WindowStyle Hidden `
     -PassThru
