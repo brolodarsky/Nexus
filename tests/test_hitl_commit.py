@@ -332,3 +332,70 @@ def test_concurrent_modify_file_stacks_cleanly_into_single_transaction(root: Pat
     commit_res = hq.commit_transaction(tx["id"], root)
     assert commit_res["forced"] is False
     assert _read(vault / "ConcurrentNote.md") == "Header\n\nTask 1: Done\n\nMiddle Section\n\nTask 2: In Progress\n\nFooter\n"
+
+
+def test_hitl_execution_context_provenance_propagation_and_api(root: Path, client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    """Verifies that conversation_id, thread_id, agent_id, and agent_role propagate through ContextVar into hitl.db and HTTP responses."""
+    import nexus.shared_tools.shared as shared_module
+    import nexus.shared_tools.vault_reader as vr_module
+
+    vault = root / "Vault"
+    monkeypatch.setattr(shared_module, "VAULT_PATH", vault)
+    monkeypatch.setattr(vr_module, "VAULT_PATH", vault)
+
+    _write(root, "ProvenanceNote.md", "Initial line\n")
+
+    # 1. Set parent Commander context
+    parent_token = hq.set_hitl_execution_context(
+        conversation_id="6419ce02-64e7-4da3-a61e-0d78bec044a9",
+        thread_id="6419ce02-64e7-4da3-a61e-0d78bec044a9",
+        agent_id="nexus",
+        agent_role="Commander (strong)",
+    )
+    try:
+        # 2. Simulate nested subagent context override
+        sub_token = hq.set_hitl_execution_context(
+            conversation_id="6419ce02-64e7-4da3-a61e-0d78bec044a9",
+            thread_id="6419ce02-64e7-4da3-a61e-0d78bec044a9:subagent-1",
+            agent_id="subagent-1",
+            agent_role="Subagent #1 (low)",
+        )
+        try:
+            shared_module.modify_file.invoke({
+                "file_path": "ProvenanceNote.md",
+                "target": "Initial line",
+                "replacement": "Subagent edited line",
+                "reasoning": "Subagent provenance check",
+            })
+        finally:
+            hq.reset_hitl_execution_context(sub_token)
+
+        # Verify parent context was restored cleanly after subagent exit
+        restored = hq.get_hitl_execution_context()
+        assert restored["agent_id"] == "nexus"
+        assert restored["agent_role"] == "Commander (strong)"
+        assert restored["thread_id"] == "6419ce02-64e7-4da3-a61e-0d78bec044a9"
+    finally:
+        hq.reset_hitl_execution_context(parent_token)
+
+    # 3. Verify FastAPI /api/hitl/pending returns all 4 provenance fields
+    pending_res = client.get("/api/hitl/pending")
+    assert pending_res.status_code == 200
+    pending_list = pending_res.json()
+    assert len(pending_list) == 1
+    card = pending_list[0]
+    assert card["conversation_id"] == "6419ce02-64e7-4da3-a61e-0d78bec044a9"
+    assert card["thread_id"] == "6419ce02-64e7-4da3-a61e-0d78bec044a9:subagent-1"
+    assert card["agent_id"] == "subagent-1"
+    assert card["agent_role"] == "Subagent #1 (low)"
+    assert card["agent_name"] == "Subagent #1 (low)"
+
+    # 4. Approve and verify /api/hitl/revisions/recent also preserves provenance
+    approve_res = client.post(f"/api/hitl/{card['id']}/approve")
+    assert approve_res.status_code == 200
+    revs = client.get("/api/hitl/revisions/recent").json()
+    assert revs[0]["conversation_id"] == "6419ce02-64e7-4da3-a61e-0d78bec044a9"
+    assert revs[0]["thread_id"] == "6419ce02-64e7-4da3-a61e-0d78bec044a9:subagent-1"
+    assert revs[0]["agent_id"] == "subagent-1"
+    assert revs[0]["agent_role"] == "Subagent #1 (low)"
+

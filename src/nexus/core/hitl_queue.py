@@ -9,12 +9,56 @@ import os
 # defaultdict: Automatically instantiates a new RLock on first access for any unseen target file path.
 import threading
 from collections import defaultdict
+# contextvars.ContextVar: Thread- and async-safe context storage that automatically propagates across
+# LangGraph's `ContextThreadPoolExecutor` (`ToolNode`) while keeping parallel subagent branches isolated.
+from contextvars import ContextVar, Token
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 # DB_PATH: Resolves to `src/nexus/hitl.db`, the SQLite ledger for Two-Phase Commit (HITL) file mutations
 DB_PATH = Path(__file__).resolve().parent.parent / "hitl.db"
+
+# _hitl_execution_context: Holds the active turn/subagent provenance (`conversation_id`, `thread_id`,
+# `agent_id`, `agent_role`) so `modify_file` and `create_file` automatically record full lineage in `hitl.db`.
+_hitl_execution_context: ContextVar[Optional[Dict[str, Optional[str]]]] = ContextVar(
+    "hitl_execution_context",
+    default=None,
+)
+
+
+def set_hitl_execution_context(
+    conversation_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    agent_role: Optional[str] = None,
+) -> Token:
+    """Sets or updates the execution provenance (`conversation_id`, `thread_id`, `agent_id`, `agent_role`) in the current `ContextVar`.
+
+    Returns:
+        Token: A contextvars reset token that callers (e.g. `spawn_subagent`) can pass to `reset_hitl_execution_context(token)`
+        in a `finally` block so synchronous single-thread fallbacks cleanly restore the parent agent's provenance.
+    """
+    current = dict(_hitl_execution_context.get() or {})
+    if conversation_id is not None:
+        current["conversation_id"] = conversation_id
+    if thread_id is not None:
+        current["thread_id"] = thread_id
+    if agent_id is not None:
+        current["agent_id"] = agent_id
+    if agent_role is not None:
+        current["agent_role"] = agent_role
+    return _hitl_execution_context.set(current)
+
+
+def reset_hitl_execution_context(token: Token) -> None:
+    """Restores `_hitl_execution_context` to its prior snapshot using the `Token` returned by `set_hitl_execution_context`."""
+    _hitl_execution_context.reset(token)
+
+
+def get_hitl_execution_context() -> Dict[str, Optional[str]]:
+    """Returns a copy of the active HITL execution provenance (`conversation_id`, `thread_id`, `agent_id`, `agent_role`)."""
+    return dict(_hitl_execution_context.get() or {})
 
 # _file_mutation_locks: Per-target-file mutexes ensuring concurrent tool calls serialize their
 # inspection of pending staged state, surgical replacement, and transaction insertion/updates.
@@ -97,9 +141,20 @@ def init_db():
             proposed_content TEXT NOT NULL,
             reasoning TEXT,
             status TEXT DEFAULT 'pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            conversation_id TEXT,
+            thread_id TEXT,
+            agent_id TEXT,
+            agent_role TEXT
         )
     ''')
+    # Idempotent schema migration: add provenance columns to existing hitl.db files created before this schema version
+    cursor.execute("PRAGMA table_info(transactions)")
+    existing_cols = {row["name"] for row in cursor.fetchall()}
+    for col_name in ("conversation_id", "thread_id", "agent_id", "agent_role"):
+        if col_name not in existing_cols:
+            cursor.execute(f"ALTER TABLE transactions ADD COLUMN {col_name} TEXT")
+
     # revisions: Pre-commit snapshot ledger enabling one-click rollback of approved transactions.
     #   prior_content NULL      -> file did not exist before approval (rollback deletes it)
     #   applied_content         -> exact text written on approval (rollback refuses if disk drifted, unless forced)
@@ -184,8 +239,15 @@ def add_transaction(
     proposed_content: str,
     original_content: str = None,
     reasoning: str = None,
+    conversation_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    agent_role: Optional[str] = None,
 ) -> int:
     """Inserts a pending HITL transaction or coalesces in-place if `target_file` already has a pending edit.
+
+    Automatically enriches the row with `conversation_id`, `thread_id`, `agent_id`, and `agent_role` from
+    `get_hitl_execution_context()` when not explicitly supplied by the caller.
 
     Cumulative Overlay Stacking:
       - If `target_file` already has one or more `status = 'pending'` rows, we preserve the earliest
@@ -194,6 +256,13 @@ def add_transaction(
         and mark any older duplicate pending rows for that file as `'superseded'`.
       - This guarantees at most ONE pending review card per file in the HITL Control Panel.
     """
+    ctx = get_hitl_execution_context()
+    eff_convo_id = conversation_id if conversation_id is not None else ctx.get("conversation_id")
+    eff_thread_id = thread_id if thread_id is not None else ctx.get("thread_id")
+    eff_agent_id = agent_id if agent_id is not None else (ctx.get("agent_id") or ("nexus" if agent_name in ("nexus_agent", "nexus", "NexusAgent") else agent_name))
+    eff_agent_role = agent_role if agent_role is not None else (ctx.get("agent_role") or ("Commander" if agent_name in ("nexus_agent", "nexus", "NexusAgent") else agent_name))
+    eff_agent_name = ctx.get("agent_role") or agent_role or agent_name
+
     norm_target = _normalize_target_file(target_file)
     with get_file_mutation_lock(norm_target):
         conn = get_db_connection()
@@ -223,6 +292,11 @@ def add_transaction(
                 combined_reasoning = _merge_reasoning(combined_reasoning, row.get("reasoning"))
             combined_reasoning = _merge_reasoning(combined_reasoning, reasoning)
 
+            merged_convo_id = eff_convo_id or newest.get("conversation_id") or oldest.get("conversation_id")
+            merged_thread_id = eff_thread_id or newest.get("thread_id") or oldest.get("thread_id")
+            merged_agent_id = eff_agent_id or newest.get("agent_id") or oldest.get("agent_id")
+            merged_agent_role = eff_agent_role or newest.get("agent_role") or oldest.get("agent_role")
+
             cursor.execute(
                 '''
                 UPDATE transactions
@@ -232,16 +306,24 @@ def add_transaction(
                     original_content = ?,
                     proposed_content = ?,
                     reasoning = ?,
+                    conversation_id = ?,
+                    thread_id = ?,
+                    agent_id = ?,
+                    agent_role = ?,
                     created_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 ''',
                 (
-                    agent_name,
+                    eff_agent_name,
                     baseline_action,
                     norm_target,
                     baseline_original,
                     proposed_content,
                     combined_reasoning,
+                    merged_convo_id,
+                    merged_thread_id,
+                    merged_agent_id,
+                    merged_agent_role,
                     tx_id,
                 ),
             )
@@ -261,10 +343,22 @@ def add_transaction(
         cursor.execute(
             '''
             INSERT INTO transactions
-            (agent_name, action_type, target_file, original_content, proposed_content, reasoning, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+            (agent_name, action_type, target_file, original_content, proposed_content, reasoning, status,
+             conversation_id, thread_id, agent_id, agent_role)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
             ''',
-            (agent_name, action_type, norm_target, original_content, proposed_content, reasoning),
+            (
+                eff_agent_name,
+                action_type,
+                norm_target,
+                original_content,
+                proposed_content,
+                reasoning,
+                eff_convo_id,
+                eff_thread_id,
+                eff_agent_id,
+                eff_agent_role,
+            ),
         )
         tx_id = cursor.lastrowid
         conn.commit()
@@ -582,7 +676,8 @@ def get_recent_revisions(limit: int = 20) -> List[Dict[str, Any]]:
     cursor.execute(
         '''
         SELECT r.id, r.tx_id, r.target_file, r.rolled_back, r.created_at, r.rolled_back_at,
-               t.agent_name, t.action_type, t.reasoning
+               t.agent_name, t.action_type, t.reasoning,
+               t.conversation_id, t.thread_id, t.agent_id, t.agent_role
         FROM revisions r
         JOIN transactions t ON t.id = r.tx_id
         ORDER BY r.id DESC

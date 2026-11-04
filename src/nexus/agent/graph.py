@@ -63,6 +63,11 @@ from nexus.core.constants import (
 # inject_root_instructions: Dynamically loads and hydrates `Vault/Master Instructions.md` (<1ms disk read)
 from nexus.core.blackboard import post_bulletin
 from nexus.core.engine_constitution import inject_root_instructions
+from nexus.core.hitl_queue import (
+    get_hitl_execution_context,
+    reset_hitl_execution_context,
+    set_hitl_execution_context,
+)
 from nexus.core.trace import RESULT_TRUNCATE_LEN, AgentTracer, _truncate
 from nexus.shared_tools.shared import (
     create_calendar_event,
@@ -301,51 +306,66 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
     posted_to_board = False
     turn_idx = 0
 
-    while True:
-        turn_idx += 1
-        local_tracer.llm_call(metadata={"turn": turn_idx, "model_tier": effective_tier, "model_name": sub_model_name})
-        ai_msg = sub_llm.invoke(sub_messages)
-        _log_token_usage(local_tracer, ai_msg, model_name=sub_model_name, tier=effective_tier)
-        sub_messages.append(ai_msg)
+    # Propagate conversation_id from parent while scoping thread_id, agent_id, and agent_role to this subagent
+    parent_ctx = get_hitl_execution_context()
+    parent_convo = parent_ctx.get("conversation_id") or "nexus_primary"
+    parent_thread = parent_ctx.get("thread_id") or parent_convo
+    sub_thread_id = f"{parent_thread}:{sub_id}" if parent_thread else sub_id
+    sub_ctx_token = set_hitl_execution_context(
+        conversation_id=parent_convo,
+        thread_id=sub_thread_id,
+        agent_id=sub_id,
+        agent_role=f"Subagent #{serial} ({effective_tier})",
+    )
 
-        if not getattr(ai_msg, "tool_calls", None):
-            final_text = extract_message_text(ai_msg)
-            elapsed_sub = round(time.time() - t0, 2)
-            # Automatically publish the subagent's distilled report onto the Shared Blackboard if not already posted
-            if final_text.strip() and not posted_to_board:
-                first_line = task_prompt.strip().splitlines()[0][:120]
-                bulletin_id = post_bulletin(
-                    author=f"Subagent #{serial} ({effective_tier})",
-                    title=first_line,
-                    content=final_text,
-                )
-                local_tracer.info(
-                    f"📋 Posted Bulletin #{bulletin_id} to Blackboard",
-                    data={"bulletin_id": bulletin_id, "title": first_line},
-                )
-            local_tracer.llm_response(final_text, metadata={"turn": turn_idx, "latency_seconds": elapsed_sub})
-            local_tracer.agent_end(f"Completed in {elapsed_sub:.1f}s")
-            return final_text
+    try:
+        while True:
+            turn_idx += 1
+            local_tracer.llm_call(metadata={"turn": turn_idx, "model_tier": effective_tier, "model_name": sub_model_name})
+            ai_msg = sub_llm.invoke(sub_messages)
+            _log_token_usage(local_tracer, ai_msg, model_name=sub_model_name, tier=effective_tier)
+            sub_messages.append(ai_msg)
 
-        # If the LLM emitted intermediate thought/explanation alongside tool calls, trace that text too
-        intermediate_text = extract_message_text(ai_msg).strip()
-        if intermediate_text:
-            local_tracer.llm_response(intermediate_text, metadata={"turn": turn_idx, "intermediate": True})
+            if not getattr(ai_msg, "tool_calls", None):
+                final_text = extract_message_text(ai_msg)
+                elapsed_sub = round(time.time() - t0, 2)
+                # Automatically publish the subagent's distilled report onto the Shared Blackboard if not already posted
+                if final_text.strip() and not posted_to_board:
+                    first_line = task_prompt.strip().splitlines()[0][:120]
+                    bulletin_id = post_bulletin(
+                        author=f"Subagent #{serial} ({effective_tier})",
+                        title=first_line,
+                        content=final_text,
+                    )
+                    local_tracer.info(
+                        f"📋 Posted Bulletin #{bulletin_id} to Blackboard",
+                        data={"bulletin_id": bulletin_id, "title": first_line},
+                    )
+                local_tracer.llm_response(final_text, metadata={"turn": turn_idx, "latency_seconds": elapsed_sub})
+                local_tracer.agent_end(f"Completed in {elapsed_sub:.1f}s")
+                return final_text
 
-        for tc in ai_msg.tool_calls:
-            tc_name = tc.get("name", "unknown")
-            tc_id = tc.get("id")
-            if tc_name == "post_to_board":
-                posted_to_board = True
-            local_tracer.tool_call(tc_name, tc.get("args", {}), call_id=tc_id)
+            # If the LLM emitted intermediate thought/explanation alongside tool calls, trace that text too
+            intermediate_text = extract_message_text(ai_msg).strip()
+            if intermediate_text:
+                local_tracer.llm_response(intermediate_text, metadata={"turn": turn_idx, "intermediate": True})
 
-        tool_res = _invoke_tool_node_resilient(sub_tool_node, {"messages": sub_messages})
-        for t_msg in tool_res.get("messages", []):
-            t_name = getattr(t_msg, "name", "unknown")
-            t_call_id = getattr(t_msg, "tool_call_id", None)
-            t_content = extract_message_text(t_msg)
-            local_tracer.tool_result(t_name, t_content, call_id=t_call_id)
-            sub_messages.append(t_msg)
+            for tc in ai_msg.tool_calls:
+                tc_name = tc.get("name", "unknown")
+                tc_id = tc.get("id")
+                if tc_name == "post_to_board":
+                    posted_to_board = True
+                local_tracer.tool_call(tc_name, tc.get("args", {}), call_id=tc_id)
+
+            tool_res = _invoke_tool_node_resilient(sub_tool_node, {"messages": sub_messages})
+            for t_msg in tool_res.get("messages", []):
+                t_name = getattr(t_msg, "name", "unknown")
+                t_call_id = getattr(t_msg, "tool_call_id", None)
+                t_content = extract_message_text(t_msg)
+                local_tracer.tool_result(t_name, t_content, call_id=t_call_id)
+                sub_messages.append(t_msg)
+    finally:
+        reset_hitl_execution_context(sub_ctx_token)
 
 
 # ── Helper: Resilient ToolNode Execution with Synchronous In-Thread Fallback ─
@@ -536,6 +556,16 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
 
     # Log input tokens, cached prompt tokens (`cache_read`), output tokens, and estimated cost to console and SSE trace bus
     _log_token_usage(nexus_tracer, response, model_name=active_model_name, tier=effective_tier)
+
+    # Refresh HITL execution provenance so any tool calls executed next by `traced_tool_node` record exact session/agent metadata
+    active_thread_id = str(configurable.get("thread_id") or "nexus_primary")
+    active_convo_id = str(configurable.get("conversation_id") or active_thread_id)
+    set_hitl_execution_context(
+        conversation_id=active_convo_id,
+        thread_id=active_thread_id,
+        agent_id="nexus",
+        agent_role=f"Commander ({effective_tier})",
+    )
 
     # 3. Emit trace telemetry for either tool invocations or final conversational text
     if hasattr(response, "tool_calls") and response.tool_calls:

@@ -8,14 +8,18 @@ import { apiFetch, ApiError } from "./client";
 // Interface representing a pending file modification in the HITL transaction queue
 export interface Transaction {
   id: number;                 // Auto-incrementing primary key in hitl.db
-  agent_name: string;         // Agent that proposed the write (e.g. "CareerAgent")
-  action_type: string;        // Type of modification (e.g. "write_file", "append_note")
-  target_file: string;        // Absolute or vault-relative path to target file
+  agent_name: string;         // Display role/label of the proposing agent (e.g. "Commander (strong)")
+  action_type: string;        // Type of modification ("modify" | "create")
+  target_file: string;        // Vault-relative path to target file
   original_content: string | null; // Previous file content (for pre-commit diff preview)
   proposed_content: string;   // New content drafted by the agent
   reasoning: string | null;   // Plain-English explanation of why change is needed
   status: string;             // "pending" | "approved" | "rejected" | "rolled_back" | "superseded"
   created_at: string;         // ISO-8601 creation timestamp
+  conversation_id?: string | null; // Chat conversation UUID that triggered the edit
+  thread_id?: string | null;       // LangGraph checkpointer or subagent thread ID (e.g. "<conv_id>:subagent-1")
+  agent_id?: string | null;        // Machine identifier of the executing agent ("nexus" | "subagent-1")
+  agent_role?: string | null;      // Human-readable role ("Commander (strong)" | "Subagent #1 (low)")
 }
 
 // Structured 409 body returned when approve/rollback/rebase hits a commit-integrity conflict
@@ -41,6 +45,10 @@ export interface HitlRevision {
   agent_name: string;
   action_type: string;
   reasoning: string | null;
+  conversation_id?: string | null;
+  thread_id?: string | null;
+  agent_id?: string | null;
+  agent_role?: string | null;
 }
 
 // Result returned by approve / rollback

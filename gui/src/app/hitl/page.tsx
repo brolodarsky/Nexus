@@ -38,6 +38,17 @@ const DIFF_OPTIONS = {
   padding: { top: 16 },
 };
 
+// Formats a UUID or composite thread ID into a compact pill label while preserving subagent suffixes
+// (e.g. "6419ce02-64e7-...:subagent-1" -> "6419ce02:subagent-1")
+function formatShortId(rawId?: string | null): string | null {
+  if (!rawId) return null;
+  if (rawId.includes(":")) {
+    const [prefix, suffix] = rawId.split(":", 2);
+    return `${prefix.slice(0, 8)}:${suffix}`;
+  }
+  return rawId.length > 12 ? rawId.slice(0, 8) : rawId;
+}
+
 export default function HitlPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
@@ -266,7 +277,7 @@ export default function HitlPage() {
                     ? "bg-accent-amber/20 text-accent-amber border border-accent-amber/50 shadow-[0_0_10px_rgba(251,191,36,0.2)] font-bold"
                     : "text-text-muted hover:text-text-primary hover:bg-background-light/40"
                 }`}
-                title={`Ticket #${tx.id} [${tx.agent_name}] ${tx.target_file.split("/").pop()}`}
+                title={`Ticket #${tx.id} [${tx.agent_role || tx.agent_name}] ${tx.target_file.split("/").pop()}`}
               >
                 #{tx.id}
               </button>
@@ -328,12 +339,40 @@ export default function HitlPage() {
                       <h3 className="font-semibold text-sm text-text-primary truncate" title={tx.target_file}>
                         {tx.target_file.split("/").pop() || tx.target_file}
                       </h3>
-                      {/* Secondary Header: Proposing Agent & Action Type */}
+                      {/* Secondary Header: Agent Role, Agent ID & Action Type */}
                       <div className="flex items-center gap-1.5 text-xs text-text-muted truncate mt-1">
-                        <span className="truncate">{tx.agent_name}</span>
+                        <span className="truncate font-medium text-text-secondary">
+                          {tx.agent_role || tx.agent_name}
+                        </span>
+                        {tx.agent_id && (
+                          <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-background-light/60 text-text-muted shrink-0">
+                            {tx.agent_id}
+                          </span>
+                        )}
                         <span>·</span>
-                        <span className="capitalize">{tx.action_type}</span>
+                        <span className="capitalize shrink-0">{tx.action_type}</span>
                       </div>
+                      {/* Provenance Row: Conversation ID & Thread ID pills */}
+                      {(tx.conversation_id || tx.thread_id) && (
+                        <div className="flex items-center flex-wrap gap-1.5 mt-1.5 text-[10px] font-mono text-text-muted">
+                          {tx.conversation_id && (
+                            <span
+                              className="px-1.5 py-0.5 rounded bg-background-light/40 border border-background-light/80"
+                              title={`Conversation ID: ${tx.conversation_id}`}
+                            >
+                              conv: {formatShortId(tx.conversation_id)}
+                            </span>
+                          )}
+                          {tx.thread_id && tx.thread_id !== tx.conversation_id && (
+                            <span
+                              className="px-1.5 py-0.5 rounded bg-background-light/40 border border-background-light/80"
+                              title={`Thread ID: ${tx.thread_id}`}
+                            >
+                              thread: {formatShortId(tx.thread_id)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </button>
                   </li>
                 ))}
@@ -420,13 +459,40 @@ export default function HitlPage() {
             <div className="p-6 border-b border-background-light shrink-0">
               <div className="flex justify-between items-start mb-4">
                 <div>
-                  {/* Top metadata badge: Ticket # and proposing Agent / action type */}
-                  <div className="flex items-center gap-2 mb-1.5">
+                  {/* Top metadata badge bar: Ticket #, Agent Role, Agent ID, Conversation ID, Thread ID, and Action Type */}
+                  <div className="flex items-center flex-wrap gap-2 mb-1.5">
                     <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-accent-amber/20 text-accent-amber border border-accent-amber/40 shadow-xs">
                       Ticket #{selectedTx.id}
                     </span>
+                    <span className="text-xs font-medium text-text-secondary">
+                      {selectedTx.agent_role || selectedTx.agent_name}
+                    </span>
+                    {selectedTx.agent_id && (
+                      <span
+                        className="px-1.5 py-0.5 text-[11px] font-mono rounded bg-background-light/60 text-text-muted border border-background-light"
+                        title={`Agent ID: ${selectedTx.agent_id}`}
+                      >
+                        agent: {selectedTx.agent_id}
+                      </span>
+                    )}
+                    {selectedTx.conversation_id && (
+                      <span
+                        className="px-1.5 py-0.5 text-[11px] font-mono rounded bg-background-light/60 text-text-muted border border-background-light"
+                        title={`Conversation ID: ${selectedTx.conversation_id}`}
+                      >
+                        conv: {formatShortId(selectedTx.conversation_id)}
+                      </span>
+                    )}
+                    {selectedTx.thread_id && (
+                      <span
+                        className="px-1.5 py-0.5 text-[11px] font-mono rounded bg-background-light/60 text-text-muted border border-background-light"
+                        title={`Thread ID: ${selectedTx.thread_id}`}
+                      >
+                        thread: {formatShortId(selectedTx.thread_id)}
+                      </span>
+                    )}
                     <span className="text-xs text-text-muted">
-                      {selectedTx.agent_name} · <span className="capitalize">{selectedTx.action_type}</span>
+                      · <span className="capitalize">{selectedTx.action_type}</span>
                     </span>
                   </div>
                   {/* Primary Header: Target Note Filename */}

@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 
 from nexus.agent.graph import extract_message_text, nexus_graph, nexus_tracer, reset_subagent_counter
 from nexus.core.constants import resolve_model_config
+from nexus.core.hitl_queue import reset_hitl_execution_context, set_hitl_execution_context
 
 
 # Optional[dict] and Optional[str] allow callers to omit metadata filters, explicit thread IDs, or per-turn model overrides.
@@ -56,8 +57,20 @@ def run_nexus_agent_with_trace(
         if filter_str:
             user_prompt = f"[Context Filter Hint: {filter_str}]\n\n{query}"
 
-    # Pass `model_tier` inside LangGraph `configurable` so `call_model` resolves the chosen model for this turn
-    config = {"configurable": {"thread_id": active_thread, "model_tier": model_tier}}
+    # Pass `model_tier` and provenance inside LangGraph `configurable` so `call_model` and HITL tools resolve active context
+    config = {
+        "configurable": {
+            "thread_id": active_thread,
+            "conversation_id": active_thread,
+            "model_tier": model_tier,
+        }
+    }
+    ctx_token = set_hitl_execution_context(
+        conversation_id=active_thread,
+        thread_id=active_thread,
+        agent_id="nexus",
+        agent_role=f"Commander ({effective_tier})",
+    )
     t0 = time.time()
 
     try:
@@ -147,6 +160,8 @@ def run_nexus_agent_with_trace(
             "tool_calls": [],
             "final_state": {"messages": []},
         }
+    finally:
+        reset_hitl_execution_context(ctx_token)
 
 
 def run_nexus_agent(
@@ -187,11 +202,20 @@ def execute_vault_query(
     Used by `src/nexus/evals/runner.py` to inspect message history, tool calls, and token usage.
     """
     active_thread = thread_id or f"eval_{int(time.time() * 1000)}"
-    config = {"configurable": {"thread_id": active_thread, "model_tier": model_tier}}
-    return nexus_graph.invoke(
-        {"messages": [HumanMessage(content=query)]},
-        config=config,
+    config = {"configurable": {"thread_id": active_thread, "conversation_id": active_thread, "model_tier": model_tier}}
+    ctx_token = set_hitl_execution_context(
+        conversation_id=active_thread,
+        thread_id=active_thread,
+        agent_id="nexus",
+        agent_role="Commander",
     )
+    try:
+        return nexus_graph.invoke(
+            {"messages": [HumanMessage(content=query)]},
+            config=config,
+        )
+    finally:
+        reset_hitl_execution_context(ctx_token)
 
 
 if __name__ == "__main__":
