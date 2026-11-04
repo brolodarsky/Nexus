@@ -20,6 +20,7 @@ import type { Conversation, ModelOption } from "@/lib/api";
 // - onNewChat: callback to start a blank conversation, optionally pre-selecting a model tier
 // - onDeleteChat: callback to delete a conversation thread without triggering row selection
 // - onUpdateTitle: optional callback invoked when the user saves an edited conversation title
+// - onAutoGenerateTitle: optional async callback to auto-generate a smart AI title for a conversation
 export interface ChatSidebarProps {
   conversations: Conversation[];
   activeConvId: string | null;
@@ -31,6 +32,7 @@ export interface ChatSidebarProps {
   onNewChat: (initialTier?: string) => void;
   onDeleteChat: (id: string, e: React.MouseEvent) => void;
   onUpdateTitle?: (id: string, newTitle: string) => void;
+  onAutoGenerateTitle?: (id: string) => Promise<void> | void;
 }
 
 export default function ChatSidebar({
@@ -44,9 +46,12 @@ export default function ChatSidebar({
   onNewChat,
   onDeleteChat,
   onUpdateTitle,
+  onAutoGenerateTitle,
 }: ChatSidebarProps) {
   // editingId: tracks which conversation UUID is currently in inline title editing mode (or null if none)
   const [editingId, setEditingId] = useState<string | null>(null);
+  // generatingId: tracks which conversation UUID is currently having an AI title generated
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
   // editTitle: holds the draft title string being actively typed in the rename input
   const [editTitle, setEditTitle] = useState<string>("");
   // editInputRef: HTMLInputElement reference used to auto-focus and auto-select existing title text on mount
@@ -256,6 +261,28 @@ export default function ChatSidebar({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                   </svg>
                 </button>
+                {onAutoGenerateTitle && (
+                  <button
+                    type="button"
+                    disabled={generatingId === conv.id}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setGeneratingId(conv.id);
+                      try {
+                        await onAutoGenerateTitle(conv.id);
+                      } finally {
+                        setGeneratingId(null);
+                      }
+                    }}
+                    className={`p-1 text-text-muted hover:text-accent-violet hover:bg-bg-secondary rounded transition-colors text-xs ${
+                      generatingId === conv.id ? "animate-pulse text-accent-violet" : ""
+                    }`}
+                    title="Auto-generate title with AI"
+                    aria-label="Auto-generate title with AI"
+                  >
+                    ✨
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={(e) => onDeleteChat(conv.id, e)}

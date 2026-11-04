@@ -124,8 +124,8 @@ export default function ChatHeader({
             </button>
           </div>
         ) : (
-          // Standard Display Mode: Title with hover rename pencil and AI auto-generate sparkle
-          <div className="flex items-center gap-2 group min-w-0">
+          // Standard Display Mode: Title with always-visible rename pencil and AI auto-generate sparkle pill
+          <div className="flex items-center gap-3 min-w-0">
             <h1
               className={`text-xl font-bold tracking-tight truncate ${activeConvId ? "cursor-pointer hover:opacity-90" : ""}`}
               onClick={handleStartEdit}
@@ -134,12 +134,12 @@ export default function ChatHeader({
               <span className="gradient-text">{title || "Chat"}</span>
             </h1>
 
-            {activeConvId && (
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+            {activeConvId ? (
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={handleStartEdit}
-                  className="p-1 rounded text-text-muted hover:text-accent-cyan hover:bg-bg-tertiary transition-colors"
+                  className="p-1.5 rounded-lg text-text-muted hover:text-accent-cyan hover:bg-bg-tertiary transition-colors"
                   title="Rename Chat"
                   aria-label="Rename Chat"
                 >
@@ -152,15 +152,29 @@ export default function ChatHeader({
                     type="button"
                     disabled={isGenerating}
                     onClick={handleAutoTitle}
-                    className={`p-1 rounded text-text-muted hover:text-accent-violet hover:bg-bg-tertiary transition-colors text-xs ${
-                      isGenerating ? "animate-pulse text-accent-violet" : ""
+                    className={`text-xs px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1.5 font-medium ${
+                      isGenerating
+                        ? "bg-accent-violet/20 border-accent-violet/40 text-purple-300 animate-pulse"
+                        : "bg-accent-violet/10 border-accent-violet/30 text-purple-300 hover:bg-accent-violet/20 hover:border-accent-violet/50"
                     }`}
-                    title="Auto-generate concise title with AI"
+                    title="Auto-generate concise conversation title with AI"
                     aria-label="Auto-generate title with AI"
                   >
-                    ✨
+                    <span className="text-xs">✨</span>
+                    <span>{isGenerating ? "Generating..." : "Auto-title"}</span>
                   </button>
                 )}
+              </div>
+            ) : (
+              // Blank draft state: renders a subtle disabled pill so users see the capability upfront
+              <div className="flex items-center gap-1.5 shrink-0 opacity-40">
+                <span
+                  className="text-xs px-2.5 py-1 rounded-lg border border-border-subtle bg-bg-tertiary/40 text-text-muted flex items-center gap-1.5 cursor-not-allowed select-none"
+                  title="Send a message first to generate title with AI"
+                >
+                  <span className="text-xs">✨</span>
+                  <span>Auto-title</span>
+                </span>
               </div>
             )}
           </div>

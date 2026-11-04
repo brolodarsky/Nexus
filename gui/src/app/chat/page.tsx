@@ -589,6 +589,7 @@ export default function ChatPage() {
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
         onUpdateTitle={handleUpdateTitle}
+        onAutoGenerateTitle={handleAutoGenerateTitle}
       />
 
       {/* ── Main Chat Area ──────────────────────────────────── */}
