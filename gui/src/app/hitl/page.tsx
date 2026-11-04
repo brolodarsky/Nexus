@@ -107,7 +107,7 @@ export default function HitlPage() {
     setError(null);
     try {
       const res = await approveHitl(selectedTx.id, force);
-      setNotice(`Applied #${selectedTx.id} → ${res.target_file.split("/").pop()}${res.forced ? " (forced)" : ""}. Undo is available below.`);
+      setNotice(`Applied Ticket #${selectedTx.id} → ${res.target_file.split("/").pop()}${res.forced ? " (forced)" : ""}. Undo is available below.`);
       setConflict(null);
       setView("diff");
       await fetchPending();
@@ -147,7 +147,7 @@ export default function HitlPage() {
     setError(null);
     try {
       const res = await rebaseHitl(selectedTx.id);
-      setNotice(`#${selectedTx.id}: ${res.message}. Review the updated diff, then approve.`);
+      setNotice(`Ticket #${selectedTx.id}: ${res.message}. Review the updated diff, then approve.`);
       setConflict(null);
       setView("diff");
       await fetchPending(selectedTx.id);
@@ -168,7 +168,7 @@ export default function HitlPage() {
     setError(null);
     try {
       await rollbackHitl(rev.tx_id, force);
-      setNotice(`Rolled back #${rev.tx_id} → ${rev.target_file.split("/").pop()}.`);
+      setNotice(`Rolled back Ticket #${rev.tx_id} → ${rev.target_file.split("/").pop()}.`);
       await fetchPending(selectedTx?.id);
     } catch (e) {
       if (!force && e instanceof ApiError && e.status === 409) {
@@ -266,9 +266,9 @@ export default function HitlPage() {
                     ? "bg-accent-amber/20 text-accent-amber border border-accent-amber/50 shadow-[0_0_10px_rgba(251,191,36,0.2)] font-bold"
                     : "text-text-muted hover:text-text-primary hover:bg-background-light/40"
                 }`}
-                title={`#${tx.id} [${tx.agent_name}] ${tx.target_file.split("/").pop()}`}
+                title={`Ticket #${tx.id} [${tx.agent_name}] ${tx.target_file.split("/").pop()}`}
               >
-                {tx.id}
+                #{tx.id}
               </button>
             ))}
           </div>
@@ -317,14 +317,23 @@ export default function HitlPage() {
                         selectedTx?.id === tx.id ? "bg-background-light/80 border-l-2 border-accent-amber" : "border-l-2 border-transparent"
                       }`}
                     >
+                      {/* Top row: Ticket # (replacing monolithic agent label) + Staging timestamp */}
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-text-muted uppercase tracking-wider">{tx.agent_name}</span>
+                        <span className="text-xs font-mono font-semibold text-accent-amber">
+                          Ticket #{tx.id}
+                        </span>
                         <span className="text-[10px] text-text-muted">{new Date(tx.created_at).toLocaleTimeString()}</span>
                       </div>
-                      <p className="font-medium text-sm text-text-primary truncate">{tx.action_type}</p>
-                      <p className="text-xs text-text-muted truncate mt-1" title={tx.target_file}>
+                      {/* Primary Header: Target File Title */}
+                      <h3 className="font-semibold text-sm text-text-primary truncate" title={tx.target_file}>
                         {tx.target_file.split("/").pop() || tx.target_file}
-                      </p>
+                      </h3>
+                      {/* Secondary Header: Proposing Agent & Action Type */}
+                      <div className="flex items-center gap-1.5 text-xs text-text-muted truncate mt-1">
+                        <span className="truncate">{tx.agent_name}</span>
+                        <span>·</span>
+                        <span className="capitalize">{tx.action_type}</span>
+                      </div>
                     </button>
                   </li>
                 ))}
@@ -362,7 +371,7 @@ export default function HitlPage() {
                     {revisions.map(rev => (
                       <li key={rev.id} className="px-4 py-1.5 flex items-center justify-between gap-2 text-xs">
                         <span className={`truncate ${rev.rolled_back ? "text-text-muted line-through" : "text-text-secondary"}`} title={rev.target_file}>
-                          #{rev.tx_id} {rev.target_file.split("/").pop()}
+                          Ticket #{rev.tx_id} · {rev.target_file.split("/").pop()}
                         </span>
                         {rev.rolled_back ? (
                           <span className="text-text-muted shrink-0">undone</span>
@@ -411,9 +420,20 @@ export default function HitlPage() {
             <div className="p-6 border-b border-background-light shrink-0">
               <div className="flex justify-between items-start mb-4">
                 <div>
+                  {/* Top metadata badge: Ticket # and proposing Agent / action type */}
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-accent-amber/20 text-accent-amber border border-accent-amber/40 shadow-xs">
+                      Ticket #{selectedTx.id}
+                    </span>
+                    <span className="text-xs text-text-muted">
+                      {selectedTx.agent_name} · <span className="capitalize">{selectedTx.action_type}</span>
+                    </span>
+                  </div>
+                  {/* Primary Header: Target Note Filename */}
                   <h1 className="text-xl font-bold text-text-primary mb-1">
-                    {selectedTx.action_type}: <span className="text-text-secondary">{selectedTx.target_file.split("/").pop()}</span>
+                    {selectedTx.target_file.split("/").pop() || selectedTx.target_file}
                   </h1>
+                  {/* Secondary Context: Canonical Full Vault Path */}
                   <p className="text-xs font-mono text-text-muted break-all">
                     {selectedTx.target_file}
                   </p>
