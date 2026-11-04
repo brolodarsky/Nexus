@@ -113,6 +113,37 @@ def test_auto_generate_title_with_mock_llm(client, temp_conv):
 
 
 @pytest.mark.anyio
+def test_auto_generate_title_gemini_block_format(client, temp_conv):
+    """Verify that Gemini 3+ structured content blocks [{'type': 'text', 'text': '...'}] are cleanly unpacked."""
+    log_message(
+        role="user",
+        content="Catch up and email sweep across my accounts",
+        conversation_id=temp_conv,
+    )
+
+    mock_model = AsyncMock()
+    # Simulate Gemini 3+ content block returned by ChatGoogleGenerativeAI
+    mock_model.ainvoke.return_value = AIMessage(
+        content=[
+            {
+                "type": "text",
+                "text": "Catch Up and Email Sweep",
+                "extras": {"signature": "thought_sig_xyz"},
+            }
+        ]
+    )
+
+    with patch("nexus.core.constants.get_chat_model", return_value=mock_model):
+        response = client.post(f"/api/agents/ask/conversations/{temp_conv}/auto-title")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "updated"
+        # Verify the raw string block was unpacked to clean text
+        assert data["title"] == "Catch Up and Email Sweep"
+        assert not data["title"].startswith("[{")
+
+
+@pytest.mark.anyio
 def test_auto_generate_title_graceful_fallback_on_error(client, temp_conv):
     """Verify that when the LLM call fails, auto-title falls back gracefully to a prompt excerpt without crashing."""
     prompt_text = "What is the recommended design pattern for distributed task queues?"

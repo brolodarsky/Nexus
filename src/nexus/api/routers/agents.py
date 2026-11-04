@@ -145,6 +145,7 @@ async def auto_generate_conversation_title(conversation_id: str):
 
     try:
         from nexus.core.constants import get_chat_model
+        from nexus.agent.graph import extract_message_text
         # Use low-tier model (Flash / Sonnet) for sub-second, ultra-low-cost title summarization
         chat_model = get_chat_model(tier="low", temperature=0.2)
         
@@ -159,8 +160,15 @@ async def auto_generate_conversation_title(conversation_id: str):
 
         # BaseChatModel.ainvoke: asynchronous coroutine executing the prompt without blocking the event loop
         resp = await chat_model.ainvoke(prompt)
-        raw_content = resp.content if isinstance(resp.content, str) else str(resp.content)
+        # extract_message_text: cleanly unpacks text across both string and Gemini 3+ block-list formats
+        raw_content = extract_message_text(resp)
         cleaned_title = raw_content.strip().strip('"\'`').replace("\n", " ").strip()
+        
+        # Strip common LLM preamble prefixes if present
+        for prefix in ("Title:", "title:", "Topic:", "topic:"):
+            if cleaned_title.startswith(prefix):
+                cleaned_title = cleaned_title[len(prefix):].strip()
+        cleaned_title = cleaned_title.strip('"\'`')
         
         # Enforce maximum sensible display length for sidebar neatness
         if len(cleaned_title) > 60:
