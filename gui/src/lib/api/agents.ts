@@ -178,11 +178,34 @@ export async function deleteConversation(conversationId: string): Promise<{ stat
 }
 
 // Updates the display title of an existing conversation thread
-export async function updateConversationTitle(conversationId: string, title: string): Promise<{ status: string }> {
-  return apiFetch<{ status: string }>(`/api/agents/ask/conversations/${conversationId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ title }),
-  });
+// - conversationId: UUID string linking to chats.db record
+// - title: new user-specified or edited thread title string
+// Promise settles with `{ status: "updated", conversation_id, title }` on success
+export async function updateConversationTitle(
+  conversationId: string,
+  title: string
+): Promise<{ status: string; conversation_id?: string; title?: string }> {
+  return apiFetch<{ status: string; conversation_id?: string; title?: string }>(
+    `/api/agents/ask/conversations/${conversationId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }
+  );
+}
+
+// Automatically generates a concise 3-6 word topic title using the low-tier model (Flash / Sonnet)
+// - conversationId: target conversation thread to summarize and update in SQLite chats.db
+// Promise settles with `{ status: "updated", conversation_id, title }`
+export async function autoGenerateConversationTitle(
+  conversationId: string
+): Promise<{ status: string; conversation_id?: string; title?: string; fallback?: boolean }> {
+  return apiFetch<{ status: string; conversation_id?: string; title?: string; fallback?: boolean }>(
+    `/api/agents/ask/conversations/${conversationId}/auto-title`,
+    {
+      method: "POST",
+    }
+  );
 }
 
 // Fetches recent structured run summaries from logs/runs/

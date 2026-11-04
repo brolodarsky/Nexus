@@ -15,6 +15,8 @@ import {
   getConversations,
   createConversation,
   deleteConversation,
+  updateConversationTitle,
+  autoGenerateConversationTitle,
   getBoardBulletins,
   clearBoardBulletins,
   deleteBoardBulletin,
@@ -295,6 +297,39 @@ export default function ChatPage() {
     [conversations, activeConvId]
   );
 
+  // Updates the display title for a conversation in SQLite chats.db and synchronizes local UI state
+  // - convId: UUID string identifying the target conversation row
+  // - newTitle: trimmed new title string to persist
+  const handleUpdateTitle = useCallback(async (convId: string, newTitle: string) => {
+    const trimmed = newTitle.trim();
+    if (!trimmed) return;
+    // Optimistically update conversation title in state for instant UI feedback
+    setConversations((prev) =>
+      prev.map((c) => (c.id === convId ? { ...c, title: trimmed } : c))
+    );
+    try {
+      await updateConversationTitle(convId, trimmed);
+    } catch (err) {
+      console.error("Failed to update conversation title:", err);
+      // Reconcile against ground-truth database state on error
+      getConversations().then(setConversations);
+    }
+  }, []);
+
+  // Invokes fast AI auto-titling for an existing conversation using the low-tier Flash/Sonnet model
+  const handleAutoGenerateTitle = useCallback(async (convId: string) => {
+    try {
+      const res = await autoGenerateConversationTitle(convId);
+      if (res.title) {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === convId ? { ...c, title: res.title! } : c))
+        );
+      }
+    } catch (err) {
+      console.error("Failed to auto-generate conversation title:", err);
+    }
+  }, []);
+
   const handleSubmit = useCallback(
     async (e?: React.FormEvent) => {
       e?.preventDefault();
@@ -302,8 +337,10 @@ export default function ChatPage() {
       if (!query || loading) return;
 
       let targetConvId = activeConvId;
+      let isNewConv = false;
       if (!targetConvId) {
         // Create new conversation on first message
+        isNewConv = true;
         const title = query.slice(0, 30) + (query.length > 30 ? "..." : "");
         const res = await createConversation(title);
         targetConvId = res.conversation_id;
@@ -385,7 +422,25 @@ export default function ChatPage() {
             setLoading(false);
             abortRef.current = null;
             inputRef.current?.focus();
-            getConversations().then(setConversations);
+            getConversations().then((updatedList) => {
+              setConversations(updatedList);
+              // For a newly initialized conversation thread, automatically generate a concise topic title with AI
+              if (isNewConv && targetConvId) {
+                autoGenerateConversationTitle(targetConvId)
+                  .then((titleRes) => {
+                    if (titleRes.title) {
+                      setConversations((prev) =>
+                        prev.map((c) =>
+                          c.id === targetConvId ? { ...c, title: titleRes.title! } : c
+                        )
+                      );
+                    }
+                  })
+                  .catch((err) =>
+                    console.error("Failed to auto-generate title on first turn:", err)
+                  );
+              }
+            });
             refreshBoard();
           },
           onError: (errorMessage) => {
@@ -533,15 +588,19 @@ export default function ChatPage() {
         onSelectConversation={setActiveConvId}
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
+        onUpdateTitle={handleUpdateTitle}
       />
 
       {/* ── Main Chat Area ──────────────────────────────────── */}
       <div className="flex flex-col flex-1 min-w-0">
         <ChatHeader
           title={activeConv?.title}
+          activeConvId={activeConvId}
           showBoard={showBoard}
           bulletinCount={bulletins.length}
           onToggleBoard={handleToggleBoard}
+          onUpdateTitle={handleUpdateTitle}
+          onAutoGenerateTitle={handleAutoGenerateTitle}
         />
 
         <ChatMessageThread

@@ -2,9 +2,11 @@
 
 /**
  * ChatSidebar.tsx — Collapsible conversation history menu for the Nexus Chat interface.
- * Renders either a compact 14-unit icon rail or a full 64-unit drawer with quick model preset buttons.
+ * Renders either a compact 14-unit icon rail or a full 64-unit drawer with quick model preset buttons
+ * and inline conversation title renaming.
  */
 
+import { useState, useRef } from "react";
 import type { Conversation, ModelOption } from "@/lib/api";
 
 // ChatSidebarProps: defines data and callbacks required by the conversation history sidebar
@@ -17,6 +19,7 @@ import type { Conversation, ModelOption } from "@/lib/api";
 // - onSelectConversation: callback invoked when the user clicks a conversation row
 // - onNewChat: callback to start a blank conversation, optionally pre-selecting a model tier
 // - onDeleteChat: callback to delete a conversation thread without triggering row selection
+// - onUpdateTitle: optional callback invoked when the user saves an edited conversation title
 export interface ChatSidebarProps {
   conversations: Conversation[];
   activeConvId: string | null;
@@ -27,6 +30,7 @@ export interface ChatSidebarProps {
   onSelectConversation: (id: string) => void;
   onNewChat: (initialTier?: string) => void;
   onDeleteChat: (id: string, e: React.MouseEvent) => void;
+  onUpdateTitle?: (id: string, newTitle: string) => void;
 }
 
 export default function ChatSidebar({
@@ -39,7 +43,40 @@ export default function ChatSidebar({
   onSelectConversation,
   onNewChat,
   onDeleteChat,
+  onUpdateTitle,
 }: ChatSidebarProps) {
+  // editingId: tracks which conversation UUID is currently in inline title editing mode (or null if none)
+  const [editingId, setEditingId] = useState<string | null>(null);
+  // editTitle: holds the draft title string being actively typed in the rename input
+  const [editTitle, setEditTitle] = useState<string>("");
+  // editInputRef: HTMLInputElement reference used to auto-focus and auto-select existing title text on mount
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  // Initiates inline rename mode for a specific conversation row
+  const handleStartEdit = (conv: Conversation, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setEditingId(conv.id);
+    setEditTitle(conv.title);
+    queueMicrotask(() => {
+      editInputRef.current?.focus();
+      editInputRef.current?.select();
+    });
+  };
+
+  // Cancels inline edit mode and clears transient draft title
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditTitle("");
+  };
+
+  // Commits the updated title to the parent orchestrator and exits edit mode
+  const handleSaveEdit = (id: string) => {
+    const trimmed = editTitle.trim();
+    if (trimmed && onUpdateTitle) {
+      onUpdateTitle(id, trimmed);
+    }
+    handleCancelEdit();
+  };
   if (isCollapsed) {
     // Collapsed Rail: Slim column with expand button, new chat icon, and conversation switcher
     return (
@@ -141,27 +178,97 @@ export default function ChatSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {conversations.map((conv) => (
-          <div
-            key={conv.id}
-            onClick={() => onSelectConversation(conv.id)}
-            className={`group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-sm transition-colors ${activeConvId === conv.id
-              ? "bg-bg-tertiary text-text-primary"
-              : "text-text-secondary hover:bg-bg-tertiary/50"
-              }`}
-          >
-            <div className="flex flex-col overflow-hidden">
-              <span className="truncate font-medium">{conv.title}</span>
-            </div>
-            <button
-              onClick={(e) => onDeleteChat(conv.id, e)}
-              className="opacity-0 group-hover:opacity-100 p-1 text-text-muted hover:text-red-400 transition-opacity"
-              title="Delete Chat"
+        {conversations.map((conv) => {
+          const isEditing = editingId === conv.id;
+          if (isEditing) {
+            // Inline Rename Input Form: Allows editing the conversation title with Enter to commit, Escape to cancel
+            return (
+              <div
+                key={conv.id}
+                className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-bg-tertiary border border-accent-cyan/40 shadow-sm"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  ref={editInputRef}
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleSaveEdit(conv.id);
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      handleCancelEdit();
+                    }
+                  }}
+                  className="flex-1 min-w-0 bg-bg-primary/90 border border-border-subtle rounded px-2 py-1 text-xs text-text-primary focus:outline-none focus:border-accent-cyan"
+                  placeholder="Chat title..."
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSaveEdit(conv.id)}
+                  className="p-1 rounded text-accent-cyan hover:bg-accent-cyan/20 transition-colors text-xs font-bold"
+                  title="Save title (Enter)"
+                  aria-label="Save title"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-secondary transition-colors text-xs"
+                  title="Cancel (Esc)"
+                  aria-label="Cancel editing title"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <div
+              key={conv.id}
+              onClick={() => onSelectConversation(conv.id)}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                handleStartEdit(conv);
+              }}
+              className={`group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-sm transition-colors ${activeConvId === conv.id
+                ? "bg-bg-tertiary text-text-primary"
+                : "text-text-secondary hover:bg-bg-tertiary/50"
+                }`}
+              title={`${conv.title} (double-click or hover pencil to rename)`}
             >
-              ✕
-            </button>
-          </div>
-        ))}
+              <div className="flex flex-col overflow-hidden min-w-0 mr-1.5">
+                <span className="truncate font-medium">{conv.title}</span>
+              </div>
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                <button
+                  type="button"
+                  onClick={(e) => handleStartEdit(conv, e)}
+                  className="p-1 text-text-muted hover:text-accent-cyan hover:bg-bg-secondary rounded transition-colors"
+                  title="Rename Chat"
+                  aria-label="Rename Chat"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => onDeleteChat(conv.id, e)}
+                  className="p-1 text-text-muted hover:text-red-400 hover:bg-bg-secondary rounded transition-colors"
+                  title="Delete Chat"
+                  aria-label="Delete Chat"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </aside>
   );

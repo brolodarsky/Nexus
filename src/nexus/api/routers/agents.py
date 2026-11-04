@@ -26,7 +26,7 @@ from nexus.core.run_logger import log_run, list_runs, get_run
 # chats_db: SQLite data access layer for conversations and chat history
 from nexus.core.chats_db import (
     log_message, get_chat_history,
-    create_conversation, get_conversations, 
+    create_conversation, get_conversations, get_conversation,
     delete_conversation, update_conversation_title
 )
 
@@ -96,9 +96,83 @@ class UpdateTitleRequest(BaseModel):
 # Updates the title of an existing conversation
 @router.patch("/ask/conversations/{conversation_id}")
 async def update_conversation(conversation_id: str, req: UpdateTitleRequest):
-    """Renames an existing conversation thread."""
-    update_conversation_title(conversation_id, req.title)
-    return {"status": "updated"}
+    """
+    Renames an existing conversation thread in SQLite `chats.db`.
+    - conversation_id: UUID primary key identifying the target thread
+    - req.title: New display title string (validated to prevent blank/whitespace-only names)
+    """
+    new_title = req.title.strip()
+    if not new_title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty.")
+    
+    # Verify the target conversation exists in the SQLite store before writing
+    conv = get_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' not found.")
+    
+    update_conversation_title(conversation_id, new_title)
+    return {"status": "updated", "conversation_id": conversation_id, "title": new_title}
+
+# Automatically generates a concise topic title for an existing conversation using the fast low-tier model
+@router.post("/ask/conversations/{conversation_id}/auto-title")
+async def auto_generate_conversation_title(conversation_id: str):
+    """
+    Summarizes the opening turn of a conversation into a concise 3-6 word title using the fast low-tier model.
+    - conversation_id: UUID primary key identifying the conversation
+    - Reads first user query and optional assistant excerpt from SQLite `messages` table
+    - Invokes fast `tier="low"` LLM (`gemini-3.8-flash` or `claude-sonnet-4-5`) with low temperature
+    - Falls back gracefully to a prompt excerpt if the model call times out or encounters an error
+    """
+    conv = get_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' not found.")
+
+    history = get_chat_history(conversation_id=conversation_id, limit=6)
+    if not history:
+        return {"status": "unchanged", "title": conv.get("title", "New Chat")}
+
+    # Locate the first user prompt and first assistant message in chronological history
+    first_user_msg = next((m["content"] for m in history if m.get("role") == "user"), None)
+    first_assistant_msg = next((m["content"] for m in history if m.get("role") == "assistant"), None)
+
+    if not first_user_msg:
+        return {"status": "unchanged", "title": conv.get("title", "New Chat")}
+
+    # Default fallback title in case LLM is unavailable or unconfigured
+    fallback_title = first_user_msg.strip()[:35].strip()
+    if len(first_user_msg.strip()) > 35:
+        fallback_title += "..."
+
+    try:
+        from nexus.core.constants import get_chat_model
+        # Use low-tier model (Flash / Sonnet) for sub-second, ultra-low-cost title summarization
+        chat_model = get_chat_model(tier="low", temperature=0.2)
+        
+        prompt = (
+            "Generate a concise, high-signal, natural conversation title (maximum 3 to 6 words) "
+            "summarizing the topic of this chat. Do NOT use quotation marks, ending punctuation, "
+            "prefixes like 'Title:', or markdown formatting. Return ONLY the raw title text.\n\n"
+            f"User prompt: {first_user_msg[:400]}"
+        )
+        if first_assistant_msg:
+            prompt += f"\nAssistant excerpt: {first_assistant_msg[:400]}"
+
+        # BaseChatModel.ainvoke: asynchronous coroutine executing the prompt without blocking the event loop
+        resp = await chat_model.ainvoke(prompt)
+        raw_content = resp.content if isinstance(resp.content, str) else str(resp.content)
+        cleaned_title = raw_content.strip().strip('"\'`').replace("\n", " ").strip()
+        
+        # Enforce maximum sensible display length for sidebar neatness
+        if len(cleaned_title) > 60:
+            cleaned_title = cleaned_title[:57] + "..."
+            
+        final_title = cleaned_title if cleaned_title else fallback_title
+        update_conversation_title(conversation_id, final_title)
+        return {"status": "updated", "conversation_id": conversation_id, "title": final_title}
+    except Exception as exc:
+        # Fall back gracefully to prompt snippet without failing HTTP response
+        update_conversation_title(conversation_id, fallback_title)
+        return {"status": "updated", "conversation_id": conversation_id, "title": fallback_title, "fallback": True}
 
 # Returns message history for a specific conversation
 @router.get("/ask/history")
