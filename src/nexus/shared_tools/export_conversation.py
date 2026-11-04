@@ -201,12 +201,22 @@ def parse_json_data(data: Any) -> List[ChatMessage]:
     return messages
 
 
+def get_brain_dirs() -> List[Path]:
+    """Returns existing Antigravity brain directory roots across both current and legacy naming conventions."""
+    home = Path.home()
+    candidates = [
+        home / ".gemini" / "antigravity" / "brain",
+        home / ".gemini" / "antigravity-ide" / "brain",
+    ]
+    return [d for d in candidates if d.exists()]
+
+
 def load_conversation_source(source_path_or_id: Optional[str] = None) -> Tuple[str, List[ChatMessage], str]:
     """
     Load conversation messages from a file path, JSON/JSONL stream, or conversation ID.
     Returns: (title_or_id, messages, source_description)
     """
-    brain_dir = Path.home() / ".gemini" / "antigravity-ide" / "brain"
+    brain_dirs = get_brain_dirs()
 
     # Stdin stream
     if source_path_or_id == "-":
@@ -248,20 +258,18 @@ def load_conversation_source(source_path_or_id: Optional[str] = None) -> Tuple[s
                 return p.name, messages, str(target.resolve())
 
     # Fallback to Antigravity Brain resolver if UUID, prefix, or latest
-    if brain_dir.exists():
-        target_dir: Optional[Path] = None
-        convo_id = "latest"
-
+    if brain_dirs:
         if not source_path_or_id or source_path_or_id.lower() == "latest":
             candidates = []
-            for entry in brain_dir.iterdir():
-                if not entry.is_dir():
-                    continue
-                log_full = entry / ".system_generated" / "logs" / "transcript_full.jsonl"
-                log_compact = entry / ".system_generated" / "logs" / "transcript.jsonl"
-                target_log = log_full if log_full.exists() else (log_compact if log_compact.exists() else None)
-                if target_log:
-                    candidates.append((target_log.stat().st_mtime, entry.name, target_log))
+            for bdir in brain_dirs:
+                for entry in bdir.iterdir():
+                    if not entry.is_dir():
+                        continue
+                    log_full = entry / ".system_generated" / "logs" / "transcript_full.jsonl"
+                    log_compact = entry / ".system_generated" / "logs" / "transcript.jsonl"
+                    target_log = log_full if log_full.exists() else (log_compact if log_compact.exists() else None)
+                    if target_log:
+                        candidates.append((target_log.stat().st_mtime, entry.name, target_log))
             if candidates:
                 candidates.sort(key=lambda x: x[0], reverse=True)
                 convo_id, target_file = candidates[0][1], candidates[0][2]
@@ -270,26 +278,28 @@ def load_conversation_source(source_path_or_id: Optional[str] = None) -> Tuple[s
                 return convo_id, messages, str(target_file.resolve())
 
         elif source_path_or_id:
-            # Exact UUID
-            exact = brain_dir / source_path_or_id
-            if exact.is_dir():
-                full = exact / ".system_generated" / "logs" / "transcript_full.jsonl"
-                compact = exact / ".system_generated" / "logs" / "transcript.jsonl"
-                target_log = full if full.exists() else (compact if compact.exists() else None)
-                if target_log:
-                    with open(target_log, "r", encoding="utf-8", errors="ignore") as f:
-                        messages = parse_jsonl_stream(f)
-                    return source_path_or_id, messages, str(target_log.resolve())
-
-            # Prefix match
-            matches = []
-            for entry in brain_dir.iterdir():
-                if entry.is_dir() and entry.name.startswith(source_path_or_id):
-                    log_full = entry / ".system_generated" / "logs" / "transcript_full.jsonl"
-                    log_compact = entry / ".system_generated" / "logs" / "transcript.jsonl"
-                    target_log = log_full if log_full.exists() else (log_compact if log_compact.exists() else None)
+            # Exact UUID search across brain dirs
+            for bdir in brain_dirs:
+                exact = bdir / source_path_or_id
+                if exact.is_dir():
+                    full = exact / ".system_generated" / "logs" / "transcript_full.jsonl"
+                    compact = exact / ".system_generated" / "logs" / "transcript.jsonl"
+                    target_log = full if full.exists() else (compact if compact.exists() else None)
                     if target_log:
-                        matches.append((entry.name, target_log))
+                        with open(target_log, "r", encoding="utf-8", errors="ignore") as f:
+                            messages = parse_jsonl_stream(f)
+                        return source_path_or_id, messages, str(target_log.resolve())
+
+            # Prefix match search across brain dirs
+            matches = []
+            for bdir in brain_dirs:
+                for entry in bdir.iterdir():
+                    if entry.is_dir() and entry.name.startswith(source_path_or_id):
+                        log_full = entry / ".system_generated" / "logs" / "transcript_full.jsonl"
+                        log_compact = entry / ".system_generated" / "logs" / "transcript.jsonl"
+                        target_log = log_full if log_full.exists() else (log_compact if log_compact.exists() else None)
+                        if target_log:
+                            matches.append((entry.name, target_log))
             if len(matches) == 1:
                 convo_id, target_file = matches[0][0], matches[0][1]
                 with open(target_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -377,51 +387,54 @@ def format_to_markdown(
 
 
 def list_conversations(limit: int = 15) -> List[Dict[str, Any]]:
-    """Helper to list known conversation logs from local brain storage."""
-    brain_dir = Path.home() / ".gemini" / "antigravity-ide" / "brain"
-    if not brain_dir.exists():
+    """Helper to list known conversation logs from local brain storage across all discovered roots."""
+    brain_dirs = get_brain_dirs()
+    if not brain_dirs:
         return []
 
     results = []
-    for entry in brain_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        log_file = entry / ".system_generated" / "logs" / "transcript.jsonl"
-        if not log_file.exists():
-            log_file = entry / ".system_generated" / "logs" / "transcript_full.jsonl"
-        if not log_file.exists():
-            continue
+    seen_ids = set()
+    for bdir in brain_dirs:
+        for entry in bdir.iterdir():
+            if not entry.is_dir() or entry.name in seen_ids:
+                continue
+            log_file = entry / ".system_generated" / "logs" / "transcript.jsonl"
+            if not log_file.exists():
+                log_file = entry / ".system_generated" / "logs" / "transcript_full.jsonl"
+            if not log_file.exists():
+                continue
 
-        mtime = log_file.stat().st_mtime
-        preview = ""
-        msg_count = 0
-        created_at = ""
+            seen_ids.add(entry.name)
+            mtime = log_file.stat().st_mtime
+            preview = ""
+            msg_count = 0
+            created_at = ""
 
-        try:
-            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    if not line.strip():
-                        continue
-                    try:
-                        data = json.loads(line)
-                        msg_count += 1
-                        if not preview and normalize_role(data.get("role", ""), data.get("source", ""), data.get("type", "")) == "user":
-                            preview = clean_text_content(data.get("content", ""))[:90].replace("\n", " ")
-                        if not created_at and data.get("created_at"):
-                            created_at = data.get("created_at")
-                    except Exception:
-                        continue
-        except Exception:
-            continue
+            try:
+                with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if not line.strip():
+                            continue
+                        try:
+                            data = json.loads(line)
+                            msg_count += 1
+                            if not preview and normalize_role(data.get("role", ""), data.get("source", ""), data.get("type", "")) == "user":
+                                preview = clean_text_content(data.get("content", ""))[:90].replace("\n", " ")
+                            if not created_at and data.get("created_at"):
+                                created_at = data.get("created_at")
+                        except Exception:
+                            continue
+            except Exception:
+                continue
 
-        results.append({
-            "id": entry.name,
-            "mtime": mtime,
-            "created_at": created_at or datetime.datetime.fromtimestamp(mtime).isoformat(),
-            "messages": msg_count,
-            "preview": preview or "(no user prompt found)",
-            "path": str(log_file),
-        })
+            results.append({
+                "id": entry.name,
+                "mtime": mtime,
+                "created_at": created_at or datetime.datetime.fromtimestamp(mtime).isoformat(),
+                "messages": msg_count,
+                "preview": preview or "(no user prompt found)",
+                "path": str(log_file),
+            })
 
     results.sort(key=lambda x: x["mtime"], reverse=True)
     return results[:limit]
