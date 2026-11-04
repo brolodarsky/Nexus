@@ -6,7 +6,8 @@
  * and inline conversation title renaming.
  */
 
-import { useState, useRef, useEffect } from "react";
+// memo: Isolates the conversation history sidebar from re-rendering during keystroke updates in the composer
+import { useState, useRef, useEffect, memo } from "react";
 import type { Conversation, ModelOption } from "@/lib/api";
 import {
   CHAT_SIDEBAR_WIDTH_KEY,
@@ -44,7 +45,7 @@ export interface ChatSidebarProps {
   onAutoGenerateTitle?: (id: string) => Promise<void> | void;
 }
 
-export default function ChatSidebar({
+const ChatSidebar = memo(function ChatSidebar({
   conversations,
   activeConvId,
   isCollapsed,
@@ -452,5 +453,7 @@ export default function ChatSidebar({
       </div>
     </aside>
   );
-}
+});
+
+export default ChatSidebar;
 

@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import Link from "next/link";
+import { useEffect, useState, useMemo, useDeferredValue } from "react";
 import MarkdownMessage from "@/components/MarkdownMessage";
-import { AgentGraphView, TRACE_ICONS, AGENT_THEME } from "@/components/AgentTraceVisualizer";
+import { AgentGraphView, AGENT_THEME } from "@/components/AgentTraceVisualizer";
 import { getAgentRuns, getAgentRun } from "@/lib/api";
-import type { RunSummary, RunSnapshot, SubagentRunRecord, TraceEvent } from "@/lib/api";
+import type { RunSummary, RunSnapshot } from "@/lib/api";
 
 // ── Tab Navigation Keys ──────────────────────────────────────────────────────
 type AuditTab = "graph" | "subagents" | "steps" | "io" | "json";
@@ -21,6 +20,8 @@ export default function AuditPage() {
   const [activeTab, setActiveTab] = useState<AuditTab>("graph");
   // searchQuery: text filter for finding runs by prompt or ID
   const [searchQuery, setSearchQuery] = useState<string>("");
+  // deferredSearchQuery: React 19 concurrent deferred value so typing in the search bar never blocks on list/detail re-renders
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   // loading state flags for list and detail fetches
   const [loadingList, setLoadingList] = useState<boolean>(true);
   const [loadingDetail, setLoadingDetail] = useState<boolean>(false);
@@ -79,8 +80,8 @@ export default function AuditPage() {
 
   // Filter runs based on search input (matching query, run_id, conversation thread_id, or agent name)
   const filteredRuns = useMemo(() => {
-    if (!searchQuery.trim()) return runs;
-    const q = searchQuery.toLowerCase();
+    if (!deferredSearchQuery.trim()) return runs;
+    const q = deferredSearchQuery.toLowerCase();
     return runs.filter(
       (r) =>
         r.run_id.toLowerCase().includes(q) ||
@@ -88,7 +89,7 @@ export default function AuditPage() {
         r.agent_name?.toLowerCase().includes(q) ||
         r.thread_id?.toLowerCase().includes(q)
     );
-  }, [runs, searchQuery]);
+  }, [runs, deferredSearchQuery]);
 
   // Token metrics parsed from run metadata
   const tokenMetrics = useMemo(() => {

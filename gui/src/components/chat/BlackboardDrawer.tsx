@@ -6,7 +6,8 @@
  * manual refresh, unpinned bulletin clearing, and per-bulletin dismissal.
  */
 
-import { useState } from "react";
+// memo: Prevents Blackboard drawer and bulletin Markdown ASTs from re-rendering when chat composer state changes
+import { useState, memo } from "react";
 import MarkdownMessage from "@/components/MarkdownMessage";
 import type { BoardBulletin } from "@/lib/api";
 
@@ -24,7 +25,7 @@ export interface BlackboardDrawerProps {
   onClose: () => void;
 }
 
-export default function BlackboardDrawer({
+const BlackboardDrawer = memo(function BlackboardDrawer({
   bulletins,
   onRefresh,
   onClear,
@@ -140,5 +141,7 @@ export default function BlackboardDrawer({
       </div>
     </aside>
   );
-}
+});
+
+export default BlackboardDrawer;
 

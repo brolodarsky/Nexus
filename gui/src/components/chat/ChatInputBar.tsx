@@ -4,25 +4,42 @@
  * ChatInputBar.tsx — Multiline auto-expanding chat input with per-turn model tier selector.
  * Handles dynamic textarea height resizing, Enter/Shift+Enter keyboard shortcuts,
  * and segmented capability tier buttons (`Strong` vs `Fast`).
+ * Isolates live keystroke buffer state locally so typing never triggers full-page re-renders.
  */
 
-import { useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import type { ModelOption } from "@/lib/api";
 
-// ChatInputBarProps: defines controlled input state, model options, and event handlers for the chat composer
-// - input: current unsubmitted text inside the textarea
+// Height bounds (in pixels) for the auto-expanding multiline chat textarea
+const MIN_TEXTAREA_HEIGHT = 10;
+const MAX_TEXTAREA_HEIGHT = 240; // Max expansion limit (~10 lines) before vertical scrolling takes over
+
+// Resizes the textarea DOM element to match its content height without unnecessary layout thrashing.
+// - el: HTMLTextAreaElement | null — Target textarea element to measure and resize.
+function syncTextareaHeight(el: HTMLTextAreaElement | null): void {
+  if (!el) return;
+  // Reset height temporarily so scrollHeight accurately reflects current content after deletions or wrapping
+  el.style.height = "auto";
+  const nextHeight = Math.min(Math.max(el.scrollHeight, MIN_TEXTAREA_HEIGHT), MAX_TEXTAREA_HEIGHT);
+  el.style.height = `${nextHeight}px`;
+}
+
+// ChatInputBarProps: defines controlled/synchronized input state, model options, and event handlers for the chat composer
+// - input: externally seeded text value (e.g., restored draft on thread switch, cleared "" on submit, or starter prompt)
+// - inputSyncId: optional monotonic counter incremented whenever the parent programmatically overrides `input`
 // - loading: boolean disabling submission while an agent stream is active
 // - isCollapsed: boolean indicating whether the input bar is minimized to a compact rail to maximize thread space
 // - modelOptions: array of selectable ModelOption descriptors from `/api/agents/models`
 // - selectedModelTier: active model tier identifier ("strong", "medium", "low")
 // - activeModelLabel: human-readable label of the currently selected model tier
 // - inputRef: React RefObject pointing to the underlying HTMLTextAreaElement for programmatic focus and auto-sizing
-// - onChangeInput: callback updating the controlled `input` string state
+// - onChangeInput: callback notifying parent of updated draft text (without forcing parent re-renders on every keystroke)
 // - onSelectModelTier: callback updating and persisting the user's selected model tier
 // - onToggleCollapse: callback updating and persisting whether the input bar is minimized or expanded
 // - onSubmit: form submission handler triggered by clicking Send or pressing Enter
 export interface ChatInputBarProps {
   input: string;
+  inputSyncId?: number;
   loading: boolean;
   isCollapsed: boolean;
   modelOptions: ModelOption[];
@@ -35,8 +52,9 @@ export interface ChatInputBarProps {
   onSubmit: (e?: React.FormEvent) => void;
 }
 
-export default function ChatInputBar({
+const ChatInputBar = memo(function ChatInputBar({
   input,
+  inputSyncId = 0,
   loading,
   isCollapsed,
   modelOptions,
@@ -48,18 +66,34 @@ export default function ChatInputBar({
   onToggleCollapse,
   onSubmit,
 }: ChatInputBarProps) {
-  // Auto-expand textarea height dynamically as the user types, bounded between a comfortable min and max height
+  // Local typing buffer: keeps per-keystroke React state updates confined strictly inside ChatInputBar
+  const [localInput, setLocalInput] = useState<string>(input);
+  // Tracks the last seen external `input` and `inputSyncId` props to detect programmatic parent overrides during render
+  const [prevSync, setPrevSync] = useState<{ input: string; inputSyncId: number }>({
+    input,
+    inputSyncId,
+  });
+
+  // Render-phase prop synchronization: when the parent switches conversations, clears on submit, or injects a prompt suggestion,
+  // immediately snap `localInput` to the new `input` value in the same render pass without a cascading effect re-render.
+  if (input !== prevSync.input || inputSyncId !== prevSync.inputSyncId) {
+    setPrevSync({ input, inputSyncId });
+    setLocalInput(input);
+  }
+
+  // Re-measure textarea height when expanding from collapsed rail or when external input is programmatically loaded/cleared
   useEffect(() => {
     if (isCollapsed) return;
-    const el = inputRef.current;
-    if (!el) return;
-    // Reset height temporarily so scrollHeight accurately reflects current content after deletions or wrapping
-    el.style.height = "auto";
-    const minHeight = 10;
-    const maxHeight = 240; // Max expansion limit (~10 lines) before vertical scrolling takes over
-    const nextHeight = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
-    el.style.height = `${nextHeight}px`;
-  }, [input, inputRef, isCollapsed]);
+    syncTextareaHeight(inputRef.current);
+  }, [input, inputSyncId, inputRef, isCollapsed]);
+
+  // Handles user typing inside the textarea: updates local buffer, resizes inline in the event handler, and notifies parent
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const nextValue = e.target.value;
+    setLocalInput(nextValue);
+    syncTextareaHeight(e.currentTarget);
+    onChangeInput(nextValue);
+  };
 
   // Keyboard shortcut handler for multiline chat textarea:
   // - Enter (without Shift) triggers immediate submission
@@ -67,7 +101,7 @@ export default function ChatInputBar({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      if (!loading && input.trim()) {
+      if (!loading && localInput.trim()) {
         onSubmit();
       }
     }
@@ -94,11 +128,11 @@ export default function ChatInputBar({
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="text-sm shrink-0">💬</span>
             <span className="truncate">
-              {input.trim() ? (
+              {localInput.trim() ? (
                 <span>
                   <span className="text-accent-cyan font-medium">Draft:</span>{" "}
                   <span className="text-text-primary">
-                    &ldquo;{input.slice(0, 60)}{input.length > 60 ? "…" : ""}&rdquo;
+                    &ldquo;{localInput.slice(0, 60)}{localInput.length > 60 ? "…" : ""}&rdquo;
                   </span>
                 </span>
               ) : (
@@ -148,8 +182,8 @@ export default function ChatInputBar({
         <div className="flex items-start gap-3 px-1 pt-1">
           <textarea
             ref={inputRef}
-            value={input}
-            onChange={(e) => onChangeInput(e.target.value)}
+            value={localInput}
+            onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
             placeholder={`Type message...`}
             disabled={loading}
@@ -216,7 +250,7 @@ export default function ChatInputBar({
           <div className="flex items-center gap-3">
             <button
               type="submit"
-              disabled={loading || !input.trim()}
+              disabled={loading || !localInput.trim()}
               title="Send message (Enter) • Newline (Shift+Enter)"
               className="flex items-center justify-center w-9 h-9 rounded-xl bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
             >
@@ -238,5 +272,7 @@ export default function ChatInputBar({
       </div>
     </form>
   );
-}
+});
+
+export default ChatInputBar;
 

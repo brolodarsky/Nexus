@@ -6,7 +6,8 @@
  * orchestrator subtitle, and Shared Blackboard toggle button.
  */
 
-import { useState, useRef } from "react";
+// memo: Prevents header re-renders when sibling chat components or drafts mutate
+import { useState, useRef, memo } from "react";
 
 // ChatHeaderProps: defines the display state and callbacks for the Chat workspace header
 // - title: active conversation title string (falls back to "Chat" when starting a fresh session)
@@ -26,7 +27,7 @@ export interface ChatHeaderProps {
   onAutoGenerateTitle?: (id: string) => Promise<void> | void;
 }
 
-export default function ChatHeader({
+const ChatHeader = memo(function ChatHeader({
   title,
   activeConvId,
   showBoard,
@@ -198,5 +199,7 @@ export default function ChatHeader({
       </div>
     </header>
   );
-}
+});
+
+export default ChatHeader;
 

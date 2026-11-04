@@ -8,7 +8,7 @@
  * pinned status indicators, and keyboard dismissal (Escape key).
  */
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useDeferredValue } from "react";
 import type { PinNoteModalProps } from "./types";
 
 /**
@@ -32,6 +32,8 @@ export default function PinNoteModal({
 }: PinNoteModalProps) {
   // Local search query input within the modal
   const [searchQuery, setSearchQuery] = useState("");
+  // deferredSearchQuery: React 19 concurrent deferred value keeping keystroke updates instant while filtering 300+ notes
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   // Active top-level folder category filter ("all" or folder prefix like "1. Core")
   const [selectedFolderFilter, setSelectedFolderFilter] = useState("all");
 
@@ -45,9 +47,9 @@ export default function PinNoteModal({
     return ["all", ...Array.from(set).sort()];
   }, [allNotes]);
 
-  // Compute filtered list based on active folder filter and search query
+  // Compute filtered list based on active folder filter and deferred search query
   const filteredModalNotes = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const query = deferredSearchQuery.trim().toLowerCase();
     return allNotes.filter((note) => {
       const matchesFolder =
         selectedFolderFilter === "all" ||
@@ -61,7 +63,7 @@ export default function PinNoteModal({
         note.path.toLowerCase().includes(query)
       );
     });
-  }, [allNotes, searchQuery, selectedFolderFilter]);
+  }, [allNotes, deferredSearchQuery, selectedFolderFilter]);
 
   // Attach Escape key listener to dismiss modal
   useEffect(() => {

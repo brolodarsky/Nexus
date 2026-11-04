@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useDeferredValue, memo } from "react";
 import {
   getResumeDocuments,
   getResumeDocument,
@@ -11,7 +11,6 @@ import {
   type DocumentDetail,
   type PageBudgetMetrics,
   type RenderResponse,
-  type RenderResultRecord,
 } from "@/lib/api";
 
 // ── Navigation & Tool Identifiers ────────────────────────────────────────────
@@ -115,6 +114,98 @@ function getVerdictBadge(verdict?: string) {
 }
 
 
+// ── Isolated Markdown Editor Subcomponent ───────────────────────────────────
+
+// ResumeMarkdownEditorProps: defines props for the isolated Markdown source editor
+// - docPath: active document path used to detect when a new document is loaded
+// - initialContent: saved Markdown text on disk for the active document
+// - savingDoc: boolean indicating whether a save request is currently in-flight
+// - onDirtyChange: callback notifying parent only when the boolean dirty status (`content !== initialContent`) flips
+// - onSave: callback invoked with the current local Markdown text when the user clicks Save
+interface ResumeMarkdownEditorProps {
+  docPath: string;
+  initialContent: string;
+  savingDoc: boolean;
+  onDirtyChange: (isDirty: boolean) => void;
+  onSave: (content: string) => void;
+}
+
+// ResumeMarkdownEditor: Memoized Markdown textarea component that confines keystroke state updates locally
+// so editing a resume or cover letter never triggers re-renders of the parent 1000-line ToolsPage.
+const ResumeMarkdownEditor = memo(function ResumeMarkdownEditor({
+  docPath,
+  initialContent,
+  savingDoc,
+  onDirtyChange,
+  onSave,
+}: ResumeMarkdownEditorProps) {
+  const [localContent, setLocalContent] = useState<string>(initialContent);
+  const [prevSync, setPrevSync] = useState<{ docPath: string; initialContent: string }>({
+    docPath,
+    initialContent,
+  });
+
+  // Render-phase synchronization: reset local editor buffer whenever the active document or saved disk content changes
+  if (docPath !== prevSync.docPath || initialContent !== prevSync.initialContent) {
+    setPrevSync({ docPath, initialContent });
+    setLocalContent(initialContent);
+  }
+
+  const isDirty = localContent !== initialContent;
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const nextValue = e.target.value;
+    const wasDirty = localContent !== initialContent;
+    const nowDirty = nextValue !== initialContent;
+    setLocalContent(nextValue);
+    // Only notify parent when the boolean dirty indicator flips (`false <-> true`)
+    if (wasDirty !== nowDirty) {
+      onDirtyChange(nowDirty);
+    }
+  };
+
+  const handleDiscard = () => {
+    setLocalContent(initialContent);
+    onDirtyChange(false);
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between text-xs text-text-secondary">
+        <p>
+          Edit markdown source directly. Changes write directly to the Vault on save.
+        </p>
+        <div className="flex items-center gap-2">
+          {isDirty && (
+            <button
+              onClick={handleDiscard}
+              className="px-2.5 py-1 rounded-md text-text-muted hover:text-text-primary text-xs"
+            >
+              Discard
+            </button>
+          )}
+          <button
+            onClick={() => onSave(localContent)}
+            disabled={savingDoc || !isDirty}
+            className="px-3.5 py-1.5 rounded-lg bg-accent-emerald/20 hover:bg-accent-emerald/30 border border-accent-emerald/40 text-accent-emerald font-semibold text-xs transition-colors flex items-center gap-1.5 disabled:opacity-40"
+          >
+            <span>{savingDoc ? "⏳" : "💾"}</span>
+            <span>{savingDoc ? "Saving..." : "Save Markdown"}</span>
+          </button>
+        </div>
+      </div>
+
+      <textarea
+        value={localContent}
+        onChange={handleChange}
+        className="w-full h-[520px] bg-bg-secondary/90 border border-border-subtle rounded-xl p-4 font-mono text-xs text-text-primary leading-relaxed focus:outline-none focus:border-accent-cyan/50 resize-y"
+        placeholder="Markdown content..."
+        spellCheck={false}
+      />
+    </div>
+  );
+});
+
 // ── Main Tools Page Component ────────────────────────────────────────────────
 
 export default function ToolsPage() {
@@ -129,10 +220,11 @@ export default function ToolsPage() {
 
   // Editorial and view state
   const [studioTab, setStudioTab] = useState<StudioViewTab>("metrics");
-  const [editorContent, setEditorContent] = useState<string>("");
   const [isEditorDirty, setIsEditorDirty] = useState<boolean>(false);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  // deferredSearchQuery: React 19 concurrent deferred value that keeps the filter input responsive while filtering the document list
+  const deferredSearchQuery = useDeferredValue(searchQuery);
 
   // Loading and execution indicators
   const [loadingDocs, setLoadingDocs] = useState<boolean>(true);
@@ -179,7 +271,6 @@ export default function ToolsPage() {
   useEffect(() => {
     if (!selectedDocPath) {
       setActiveDetail(null);
-      setEditorContent("");
       setIsEditorDirty(false);
       return;
     }
@@ -191,7 +282,6 @@ export default function ToolsPage() {
         const detail = await getResumeDocument(path);
         if (!isCancelled) {
           setActiveDetail(detail);
-          setEditorContent(detail.content);
           setIsEditorDirty(false);
         }
       } catch (err) {
@@ -218,9 +308,9 @@ export default function ToolsPage() {
       if (categoryFilter !== "all" && doc.category !== categoryFilter) {
         return false;
       }
-      // Search query filter
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
+      // Search query filter (uses deferredSearchQuery to keep typing non-blocking)
+      if (deferredSearchQuery.trim()) {
+        const query = deferredSearchQuery.toLowerCase();
         return (
           doc.name.toLowerCase().includes(query) ||
           doc.relative_path.toLowerCase().includes(query)
@@ -228,7 +318,7 @@ export default function ToolsPage() {
       }
       return true;
     });
-  }, [documents, categoryFilter, searchQuery]);
+  }, [documents, categoryFilter, deferredSearchQuery]);
 
   // ── Multi-select Handlers ──────────────────────────────────────────────────
   const toggleSelectDoc = (path: string, e: React.MouseEvent) => {
@@ -253,23 +343,26 @@ export default function ToolsPage() {
   };
 
   // ── Save Document Content ──────────────────────────────────────────────────
-  const handleSaveDocument = async () => {
-    if (!selectedDocPath) return;
-    try {
-      setSavingDoc(true);
-      const updated = await saveResumeDocument(selectedDocPath, editorContent);
-      setActiveDetail(updated);
-      setIsEditorDirty(false);
-      setSuccessToast("Document saved to disk.");
-      setTimeout(() => setSuccessToast(null), 3000);
-      // Refresh documents list to sync modified timestamp
-      fetchDocuments(selectedDocPath);
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Failed to save document.");
-    } finally {
-      setSavingDoc(false);
-    }
-  };
+  const handleSaveDocument = useCallback(
+    async (contentToSave: string) => {
+      if (!selectedDocPath) return;
+      try {
+        setSavingDoc(true);
+        const updated = await saveResumeDocument(selectedDocPath, contentToSave);
+        setActiveDetail(updated);
+        setIsEditorDirty(false);
+        setSuccessToast("Document saved to disk.");
+        setTimeout(() => setSuccessToast(null), 3000);
+        // Refresh documents list to sync modified timestamp
+        fetchDocuments(selectedDocPath);
+      } catch (err) {
+        setErrorMessage(err instanceof Error ? err.message : "Failed to save document.");
+      } finally {
+        setSavingDoc(false);
+      }
+    },
+    [selectedDocPath, fetchDocuments]
+  );
 
   // ── Render Handlers ────────────────────────────────────────────────────────
   const handleRender = async (pathsToRender: string[], formats: ("pdf" | "docx")[] = ["pdf", "docx"]) => {
@@ -937,45 +1030,13 @@ export default function ToolsPage() {
 
                 {/* ── TAB 2: In-Browser Markdown Editor ────────────── */}
                 {studioTab === "editor" && (
-                  <div className="flex flex-col gap-3">
-                    <div className="flex items-center justify-between text-xs text-text-secondary">
-                      <p>
-                        Edit markdown source directly. Changes write directly to the Vault on save.
-                      </p>
-                      <div className="flex items-center gap-2">
-                        {isEditorDirty && (
-                          <button
-                            onClick={() => {
-                              setEditorContent(activeDetail.content);
-                              setIsEditorDirty(false);
-                            }}
-                            className="px-2.5 py-1 rounded-md text-text-muted hover:text-text-primary text-xs"
-                          >
-                            Discard
-                          </button>
-                        )}
-                        <button
-                          onClick={handleSaveDocument}
-                          disabled={savingDoc || !isEditorDirty}
-                          className="px-3.5 py-1.5 rounded-lg bg-accent-emerald/20 hover:bg-accent-emerald/30 border border-accent-emerald/40 text-accent-emerald font-semibold text-xs transition-colors flex items-center gap-1.5 disabled:opacity-40"
-                        >
-                          <span>{savingDoc ? "⏳" : "💾"}</span>
-                          <span>{savingDoc ? "Saving..." : "Save Markdown"}</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <textarea
-                      value={editorContent}
-                      onChange={(e) => {
-                        setEditorContent(e.target.value);
-                        setIsEditorDirty(true);
-                      }}
-                      className="w-full h-[520px] bg-bg-secondary/90 border border-border-subtle rounded-xl p-4 font-mono text-xs text-text-primary leading-relaxed focus:outline-none focus:border-accent-cyan/50 resize-y"
-                      placeholder="Markdown content..."
-                      spellCheck={false}
-                    />
-                  </div>
+                  <ResumeMarkdownEditor
+                    docPath={activeDetail.path}
+                    initialContent={activeDetail.content}
+                    savingDoc={savingDoc}
+                    onDirtyChange={setIsEditorDirty}
+                    onSave={handleSaveDocument}
+                  />
                 )}
 
                 {/* ── TAB 3: Inline PDF Preview ────────────────────── */}

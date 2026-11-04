@@ -50,7 +50,10 @@ export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  // input: externally-driven composer seed value (updated on hydration, thread switch, prompt suggestion, or submit clear)
   const [input, setInput] = useState("");
+  // inputSyncId: monotonic counter incremented whenever `ChatPage` programmatically overrides `input` in `ChatInputBar`
+  const [inputSyncId, setInputSyncId] = useState<number>(0);
   // drafts: dictionary mapping conversation UUIDs (and DRAFT_NEW_KEY) to unsubmitted typed message drafts
   const [drafts, setDrafts] = useState<ChatDraftMap>({});
   const [loading, setLoading] = useState(false);
@@ -67,13 +70,33 @@ export default function ChatPage() {
   const [selectedModelTier, setSelectedModelTier] = useState<string>("strong");
 
   const liveTraceRef = useRef<TraceEvent[]>([]);
+  // currentInputRef: holds the live unsubmitted string in the composer so submit/switch callbacks read it without re-rendering ChatPage on every keystroke
+  const currentInputRef = useRef<string>("");
   // draftsRef: mutable ref holding current drafts dictionary to avoid stale closures in event handlers
   const draftsRef = useRef<ChatDraftMap>({});
+  // draftPersistTimerRef: debounce timer handle delaying synchronous localStorage writes while the user is actively typing
+  const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // inputRef: HTMLTextAreaElement reference allowing programmatic focus management and dynamic height auto-expansion
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<(() => void) | null>(null);
   // isHydratedRef: guards against overwriting saved localStorage drafts with initial empty state during hydration
   const isHydratedRef = useRef<boolean>(false);
+
+  // Programmatically sets the composer input value and increments `inputSyncId` so `ChatInputBar` snaps to `nextText`
+  const setProgrammaticInput = useCallback((nextText: string) => {
+    currentInputRef.current = nextText;
+    setInput(nextText);
+    setInputSyncId((prev) => prev + 1);
+  }, []);
+
+  // Flushes any pending debounced draft write immediately to localStorage
+  const flushDraftPersistence = useCallback(() => {
+    if (draftPersistTimerRef.current) {
+      clearTimeout(draftPersistTimerRef.current);
+      draftPersistTimerRef.current = null;
+      persistDrafts(draftsRef.current);
+    }
+  }, []);
 
   // Helper to fetch recent bulletins from `/api/board`
   const refreshBoard = useCallback(() => {
@@ -110,10 +133,10 @@ export default function ChatPage() {
       if (savedActiveConv === "__new__") {
         setActiveConvId(null);
         if (initialDrafts[DRAFT_NEW_KEY]) {
-          setInput(initialDrafts[DRAFT_NEW_KEY]);
+          setProgrammaticInput(initialDrafts[DRAFT_NEW_KEY]);
         }
       } else if (savedActiveConv && initialDrafts[savedActiveConv]) {
-        setInput(initialDrafts[savedActiveConv]);
+        setProgrammaticInput(initialDrafts[savedActiveConv]);
       }
 
       // Restore left conversation history sidebar collapse state from localStorage so panel choice survives tab navigation
@@ -174,26 +197,26 @@ export default function ChatPage() {
           const savedActiveConv = localStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
           if (savedActiveConv === "__new__") {
             setActiveConvId(null);
-            setInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
+            setProgrammaticInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
             return;
           }
           if (savedActiveConv && convos.some((c) => c.id === savedActiveConv)) {
             setActiveConvId(savedActiveConv);
-            setInput(draftsRef.current[savedActiveConv] ?? "");
+            setProgrammaticInput(draftsRef.current[savedActiveConv] ?? "");
             return;
           }
         } catch {
           // Gracefully fallback to the most recent conversation
         }
         setActiveConvId(convos[0].id);
-        setInput(draftsRef.current[convos[0].id] ?? "");
+        setProgrammaticInput(draftsRef.current[convos[0].id] ?? "");
       } else {
         setActiveConvId(null);
-        setInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
+        setProgrammaticInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
       }
     });
     refreshBoard();
-  }, [refreshBoard]);
+  }, [refreshBoard, setProgrammaticInput]);
 
   // Persist user's per-turn model selection preference and keep input focused for immediate typing
   const handleSelectModelTier = useCallback((tierId: string) => {
@@ -265,27 +288,46 @@ export default function ChatPage() {
     }
   }, [activeConvId]);
 
-  // Clean up abort on unmount
+  // Clean up SSE stream abort and flush any pending debounced draft writes on unmount or tab unload
   useEffect(() => {
+    window.addEventListener("beforeunload", flushDraftPersistence);
     return () => {
+      window.removeEventListener("beforeunload", flushDraftPersistence);
+      flushDraftPersistence();
       abortRef.current?.();
     };
-  }, []);
+  }, [flushDraftPersistence]);
 
-  // Updates current input text, reflects the draft immediately into the per-conversation draft map, and persists to localStorage
+  // Updates current input ref and per-conversation draft map without re-rendering ChatPage on intermediate keystrokes,
+  // and debounces synchronous localStorage persistence by 300ms so the typing event loop remains unblocked.
   const handleInputChange = useCallback(
     (value: string) => {
-      setInput(value);
+      currentInputRef.current = value;
       const key = activeConvId ?? DRAFT_NEW_KEY;
+      const hadDraft = Boolean(draftsRef.current[key]?.trim());
+      const hasDraft = Boolean(value.trim());
+
       const updated: ChatDraftMap = { ...draftsRef.current };
-      if (value.trim()) {
+      if (hasDraft) {
         updated[key] = value;
       } else {
         delete updated[key];
       }
       draftsRef.current = updated;
-      setDrafts(updated);
-      persistDrafts(updated);
+
+      // Only trigger a React state update for `drafts` when the boolean presence of a draft flips (empty <-> non-empty),
+      // so ChatSidebar's "Draft" badge appears/disappears on the first/last character without re-rendering on every character.
+      if (hadDraft !== hasDraft) {
+        setDrafts(updated);
+      }
+
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+      }
+      draftPersistTimerRef.current = setTimeout(() => {
+        draftPersistTimerRef.current = null;
+        persistDrafts(draftsRef.current);
+      }, 300);
     },
     [activeConvId]
   );
@@ -295,11 +337,17 @@ export default function ChatPage() {
     (newConvId: string) => {
       if (newConvId === activeConvId) return;
 
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
+
       // 1. Commit outgoing conversation's draft (or _new if switching away from an unpersisted thread)
       const currentKey = activeConvId ?? DRAFT_NEW_KEY;
+      const currentText = currentInputRef.current;
       const updated: ChatDraftMap = { ...draftsRef.current };
-      if (input.trim()) {
-        updated[currentKey] = input;
+      if (currentText.trim()) {
+        updated[currentKey] = currentText;
       } else {
         delete updated[currentKey];
       }
@@ -309,7 +357,7 @@ export default function ChatPage() {
 
       // 2. Load the target conversation's draft (or blank if none exists)
       const nextDraft = updated[newConvId] ?? "";
-      setInput(nextDraft);
+      setProgrammaticInput(nextDraft);
 
       // 3. Switch active thread and persist selection
       setActiveConvId(newConvId);
@@ -320,7 +368,7 @@ export default function ChatPage() {
       }
       inputRef.current?.focus();
     },
-    [activeConvId, input]
+    [activeConvId, setProgrammaticInput]
   );
 
   // Starts a fresh blank conversation thread, preserving the outgoing thread's draft and restoring the new chat draft (if any)
@@ -335,11 +383,17 @@ export default function ChatPage() {
         return;
       }
 
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
+
       // 1. Commit outgoing conversation's draft
       const currentKey = activeConvId;
+      const currentText = currentInputRef.current;
       const updated: ChatDraftMap = { ...draftsRef.current };
-      if (input.trim()) {
-        updated[currentKey] = input;
+      if (currentText.trim()) {
+        updated[currentKey] = currentText;
       } else {
         delete updated[currentKey];
       }
@@ -349,7 +403,7 @@ export default function ChatPage() {
 
       // 2. Restore new chat draft (or blank if none exists)
       const nextDraft = updated[DRAFT_NEW_KEY] ?? "";
-      setInput(nextDraft);
+      setProgrammaticInput(nextDraft);
 
       // 3. Reset active thread to null and persist new chat indicator
       setActiveConvId(null);
@@ -361,7 +415,7 @@ export default function ChatPage() {
       }
       inputRef.current?.focus();
     },
-    [activeConvId, input, handleSelectModelTier]
+    [activeConvId, handleSelectModelTier, setProgrammaticInput]
   );
 
   const handleDeleteChat = useCallback(
@@ -370,6 +424,11 @@ export default function ChatPage() {
       await deleteConversation(id);
       const updatedConvs = conversations.filter((c) => c.id !== id);
       setConversations(updatedConvs);
+
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
 
       // Prune the deleted conversation's draft from the map
       const updatedDrafts: ChatDraftMap = { ...draftsRef.current };
@@ -382,7 +441,7 @@ export default function ChatPage() {
         const nextId = updatedConvs.length > 0 ? updatedConvs[0].id : null;
         setActiveConvId(nextId);
         const nextDraft = (nextId ? updatedDrafts[nextId] : updatedDrafts[DRAFT_NEW_KEY]) ?? "";
-        setInput(nextDraft);
+        setProgrammaticInput(nextDraft);
         try {
           if (nextId) {
             localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, nextId);
@@ -394,7 +453,7 @@ export default function ChatPage() {
         }
       }
     },
-    [conversations, activeConvId]
+    [conversations, activeConvId, setProgrammaticInput]
   );
 
   // Updates the display title for a conversation in SQLite chats.db and synchronizes local UI state
@@ -433,8 +492,13 @@ export default function ChatPage() {
   const handleSubmit = useCallback(
     async (e?: React.FormEvent) => {
       e?.preventDefault();
-      const query = input.trim();
+      const query = currentInputRef.current.trim();
       if (!query || loading) return;
+
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
 
       let targetConvId = activeConvId;
       let isNewConv = false;
@@ -464,7 +528,7 @@ export default function ChatPage() {
         modelName: turnModelOption?.model_name ?? null,
       };
       setMessages((prev) => [...prev, userMsg]);
-      setInput("");
+      setProgrammaticInput("");
       // Clear the submitted draft for this thread (and DRAFT_NEW_KEY if this initiated a fresh thread)
       const updatedDrafts: ChatDraftMap = { ...draftsRef.current };
       if (isNewConv) {
@@ -571,7 +635,7 @@ export default function ChatPage() {
 
       abortRef.current = abort;
     },
-    [input, loading, activeConvId, selectedModelTier, modelOptions, refreshBoard]
+    [loading, activeConvId, selectedModelTier, modelOptions, refreshBoard, setProgrammaticInput]
   );
 
   const handleClearBoard = useCallback(async () => {
@@ -619,7 +683,11 @@ export default function ChatPage() {
   // handleSelectPromptSuggestion: populates chat input, updates per-thread draft map, auto-expands composer, and focuses textarea
   const handleSelectPromptSuggestion = useCallback(
     (suggestion: string) => {
-      setInput(suggestion);
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
+      setProgrammaticInput(suggestion);
       const key = activeConvId ?? DRAFT_NEW_KEY;
       const updated: ChatDraftMap = { ...draftsRef.current };
       if (suggestion.trim()) {
@@ -640,7 +708,7 @@ export default function ChatPage() {
         inputRef.current?.focus();
       });
     },
-    [activeConvId]
+    [activeConvId, setProgrammaticInput]
   );
 
   // Global keyboard shortcut: pressing '/' while viewing the thread expands the message bar and focuses the input
@@ -734,6 +802,7 @@ export default function ChatPage() {
 
         <ChatInputBar
           input={input}
+          inputSyncId={inputSyncId}
           loading={loading}
           isCollapsed={isInputCollapsed}
           modelOptions={modelOptions}

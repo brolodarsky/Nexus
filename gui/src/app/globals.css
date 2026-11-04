@@ -58,13 +58,19 @@ body {
 }
 
 /* ── Glassmorphism Card ──────────────────────────────────── */
+/* Uses a 12px blur kernel and explicit non-layout transition properties (background, border, shadow, transform)
+   instead of `transition: all` so dynamic textarea/card height adjustments never trigger 300ms layout-thrashing animations. */
 .glass-card {
   background: var(--color-bg-card);
-  backdrop-filter: blur(20px) saturate(1.3);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
   border: 1px solid var(--color-border-subtle);
   border-radius: 16px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .glass-card:hover {
   background: var(--color-bg-card-hover);

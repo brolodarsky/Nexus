@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, memo } from "react";
 import type { TraceEvent } from "@/lib/api";
 import MarkdownMessage from "@/components/MarkdownMessage";
 
@@ -475,7 +475,9 @@ function TraceStepCard({
 
 // ── Visual DAG Graph View & Node Inspector ───────────────────────────────────
 
-export function AgentGraphView({
+// AgentGraphView: Memoized DAG topology canvas so parent search inputs or tab state changes
+// do not trigger re-rendering of the execution graph unless `events` or `isLive` changes.
+export const AgentGraphView = memo(function AgentGraphView({
   events,
   isLive = false,
 }: {
@@ -771,15 +773,16 @@ export function AgentGraphView({
       )}
     </div>
   );
-}
+});
 
 // ── Collapsible & Expandable Thinking Panel (Used in Chat Thread) ────────────
 
 // ThinkingPanel: Collapsible agent execution trace drawer for both streaming and historical turns.
+// Wrapped in `React.memo` so historical trace drawers never re-render when chat input state changes.
 // - events: TraceEvent[] — Lossless chronological array of trace events (tool calls, LLM responses, agent boundaries).
 // - isLive: boolean — Distinguishes between active SSE streaming execution and completed historical runs.
 // - defaultExpanded: boolean — Initial disclosure state; defaults to false so live runs and message history start collapsed.
-export function ThinkingPanel({
+export const ThinkingPanel = memo(function ThinkingPanel({
   events,
   isLive,
   defaultExpanded = false,
@@ -946,4 +949,4 @@ export function ThinkingPanel({
       )}
     </div>
   );
-}
+});

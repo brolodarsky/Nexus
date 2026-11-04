@@ -6,7 +6,8 @@
  * and the live streaming `ThinkingPanel` indicator.
  */
 
-import { useRef, useEffect } from "react";
+// memo: Isolates the scrollable message feed from sibling/parent state updates (e.g., input typing or sidebar toggles)
+import { useRef, useEffect, memo } from "react";
 import { ThinkingPanel } from "@/components/AgentTraceVisualizer";
 import type { TraceEvent } from "@/lib/api";
 import type { Message } from "./types";
@@ -33,7 +34,7 @@ export interface ChatMessageThreadProps {
   onSelectPromptSuggestion: (suggestion: string) => void;
 }
 
-export default function ChatMessageThread({
+const ChatMessageThread = memo(function ChatMessageThread({
   messages,
   loading,
   liveTrace,
@@ -113,5 +114,7 @@ export default function ChatMessageThread({
       )}
     </div>
   );
-}
+});
+
+export default ChatMessageThread;
 

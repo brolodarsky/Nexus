@@ -6,6 +6,8 @@
  * and collapsible execution trace panels (`ThinkingPanel`).
  */
 
+// memo: Wraps individual message bubbles so historical turns never re-render unless their `message` reference changes
+import { memo, useMemo } from "react";
 // MarkdownMessage: Shared GFM + Obsidian [[Wiki-Link]] renderer (also used by the HITL Pre-Commit Preview)
 import MarkdownMessage from "@/components/MarkdownMessage";
 // ThinkingPanel: Lossless agent execution trace viewer with Graph View, full step payloads, and raw JSON
@@ -18,12 +20,16 @@ export interface ChatMessageItemProps {
   message: Message;
 }
 
-export default function ChatMessageItem({ message }: ChatMessageItemProps) {
+const ChatMessageItem = memo(function ChatMessageItem({ message }: ChatMessageItemProps) {
   const isUser = message.role === "user";
   const hasTrace = Boolean(message.trace && message.trace.length > 0);
-  const effectiveCost =
-    message.costUsd ??
-    extractTurnCost(message.trace, null, message.modelName, message.modelTier);
+  // Memoize turn cost calculation so trace event scanning only runs once per message
+  const effectiveCost = useMemo(
+    () =>
+      message.costUsd ??
+      extractTurnCost(message.trace, null, message.modelName, message.modelTier),
+    [message.costUsd, message.trace, message.modelName, message.modelTier]
+  );
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -107,5 +113,7 @@ export default function ChatMessageItem({ message }: ChatMessageItemProps) {
       </div>
     </div>
   );
-}
+});
+
+export default ChatMessageItem;
 
