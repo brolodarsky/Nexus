@@ -33,14 +33,17 @@ import {
   BlackboardDrawer,
   FALLBACK_MODELS,
   MODEL_STORAGE_KEY,
-  CHAT_DRAFT_STORAGE_KEY,
   ACTIVE_CONV_STORAGE_KEY,
   CHAT_SIDEBAR_COLLAPSED_KEY,
   CHAT_BOARD_OPEN_KEY,
   CHAT_INPUT_COLLAPSED_KEY,
+  DRAFT_NEW_KEY,
+  loadPersistedDrafts,
+  persistDrafts,
   extractTurnModelInfo,
   extractTurnCost,
   type Message,
+  type ChatDraftMap,
 } from "@/components/chat";
 
 export default function ChatPage() {
@@ -48,6 +51,8 @@ export default function ChatPage() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  // drafts: dictionary mapping conversation UUIDs (and DRAFT_NEW_KEY) to unsubmitted typed message drafts
+  const [drafts, setDrafts] = useState<ChatDraftMap>({});
   const [loading, setLoading] = useState(false);
   const [liveTrace, setLiveTrace] = useState<TraceEvent[]>([]);
   // Shared Agent Blackboard state: live bulletins posted by Flash subagents and Astra
@@ -62,6 +67,8 @@ export default function ChatPage() {
   const [selectedModelTier, setSelectedModelTier] = useState<string>("strong");
 
   const liveTraceRef = useRef<TraceEvent[]>([]);
+  // draftsRef: mutable ref holding current drafts dictionary to avoid stale closures in event handlers
+  const draftsRef = useRef<ChatDraftMap>({});
   // inputRef: HTMLTextAreaElement reference allowing programmatic focus management and dynamic height auto-expansion
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<(() => void) | null>(null);
@@ -87,14 +94,26 @@ export default function ChatPage() {
         // Ignore storage access errors in restricted browser contexts
       }
 
-      // Restore unsubmitted chat draft from localStorage so typed text survives Nexus tab navigation and reloads
+      // Restore unsubmitted chat drafts mapped per conversation ID from localStorage
+      const initialDrafts = loadPersistedDrafts();
+      draftsRef.current = initialDrafts;
+      setDrafts(initialDrafts);
+
+      let savedActiveConv: string | null = null;
       try {
-        const savedDraft = localStorage.getItem(CHAT_DRAFT_STORAGE_KEY);
-        if (savedDraft) {
-          setInput(savedDraft);
-        }
+        savedActiveConv = localStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
       } catch {
         // Gracefully ignore storage quota / access errors in private browsing contexts
+      }
+
+      // Optimistically restore active conversation's draft (or new chat draft) during hydration
+      if (savedActiveConv === "__new__") {
+        setActiveConvId(null);
+        if (initialDrafts[DRAFT_NEW_KEY]) {
+          setInput(initialDrafts[DRAFT_NEW_KEY]);
+        }
+      } else if (savedActiveConv && initialDrafts[savedActiveConv]) {
+        setInput(initialDrafts[savedActiveConv]);
       }
 
       // Restore left conversation history sidebar collapse state from localStorage so panel choice survives tab navigation
@@ -153,14 +172,24 @@ export default function ChatPage() {
         // Restore previously active conversation if it exists, maintaining context across tab navigation
         try {
           const savedActiveConv = localStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
+          if (savedActiveConv === "__new__") {
+            setActiveConvId(null);
+            setInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
+            return;
+          }
           if (savedActiveConv && convos.some((c) => c.id === savedActiveConv)) {
             setActiveConvId(savedActiveConv);
+            setInput(draftsRef.current[savedActiveConv] ?? "");
             return;
           }
         } catch {
           // Gracefully fallback to the most recent conversation
         }
         setActiveConvId(convos[0].id);
+        setInput(draftsRef.current[convos[0].id] ?? "");
+      } else {
+        setActiveConvId(null);
+        setInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
       }
     });
     refreshBoard();
@@ -223,27 +252,13 @@ export default function ChatPage() {
     inputRef.current?.focus();
   }, [activeConvId]);
 
-  // Sync unsubmitted input draft to localStorage on every change once hydration is complete
-  useEffect(() => {
-    if (!isHydratedRef.current) return;
-    try {
-      if (input) {
-        localStorage.setItem(CHAT_DRAFT_STORAGE_KEY, input);
-      } else {
-        localStorage.removeItem(CHAT_DRAFT_STORAGE_KEY);
-      }
-    } catch {
-      // Gracefully ignore storage quota / access errors in private browsing contexts
-    }
-  }, [input]);
-
   // Persist active conversation ID so switching Nexus tabs (e.g., Chat -> Brain Explorer -> Chat) restores the same active chat
   useEffect(() => {
     try {
       if (activeConvId) {
         localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, activeConvId);
       } else {
-        localStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+        localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, "__new__");
       }
     } catch {
       // Gracefully ignore storage quota / access errors in private browsing contexts
@@ -257,37 +272,122 @@ export default function ChatPage() {
     };
   }, []);
 
+  // Updates current input text, reflects the draft immediately into the per-conversation draft map, and persists to localStorage
+  const handleInputChange = useCallback(
+    (value: string) => {
+      setInput(value);
+      const key = activeConvId ?? DRAFT_NEW_KEY;
+      const updated: ChatDraftMap = { ...draftsRef.current };
+      if (value.trim()) {
+        updated[key] = value;
+      } else {
+        delete updated[key];
+      }
+      draftsRef.current = updated;
+      setDrafts(updated);
+      persistDrafts(updated);
+    },
+    [activeConvId]
+  );
+
+  // Switches the active conversation thread, preserving the outgoing thread's draft and restoring the incoming thread's draft
+  const handleSelectConversation = useCallback(
+    (newConvId: string) => {
+      if (newConvId === activeConvId) return;
+
+      // 1. Commit outgoing conversation's draft (or _new if switching away from an unpersisted thread)
+      const currentKey = activeConvId ?? DRAFT_NEW_KEY;
+      const updated: ChatDraftMap = { ...draftsRef.current };
+      if (input.trim()) {
+        updated[currentKey] = input;
+      } else {
+        delete updated[currentKey];
+      }
+      draftsRef.current = updated;
+      setDrafts(updated);
+      persistDrafts(updated);
+
+      // 2. Load the target conversation's draft (or blank if none exists)
+      const nextDraft = updated[newConvId] ?? "";
+      setInput(nextDraft);
+
+      // 3. Switch active thread and persist selection
+      setActiveConvId(newConvId);
+      try {
+        localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, newConvId);
+      } catch {
+        // Ignore storage errors in restricted browser contexts
+      }
+      inputRef.current?.focus();
+    },
+    [activeConvId, input]
+  );
+
+  // Starts a fresh blank conversation thread, preserving the outgoing thread's draft and restoring the new chat draft (if any)
   const handleNewChat = useCallback(
     (initialTier?: string) => {
       if (initialTier) {
         handleSelectModelTier(initialTier);
       }
+      if (activeConvId === null) {
+        // Already viewing the new chat composer
+        inputRef.current?.focus();
+        return;
+      }
+
+      // 1. Commit outgoing conversation's draft
+      const currentKey = activeConvId;
+      const updated: ChatDraftMap = { ...draftsRef.current };
+      if (input.trim()) {
+        updated[currentKey] = input;
+      } else {
+        delete updated[currentKey];
+      }
+      draftsRef.current = updated;
+      setDrafts(updated);
+      persistDrafts(updated);
+
+      // 2. Restore new chat draft (or blank if none exists)
+      const nextDraft = updated[DRAFT_NEW_KEY] ?? "";
+      setInput(nextDraft);
+
+      // 3. Reset active thread to null and persist new chat indicator
       setActiveConvId(null);
       setMessages([]);
       try {
-        localStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+        localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, "__new__");
       } catch {
-        // Ignore storage errors
+        // Ignore storage errors in restricted browser contexts
       }
       inputRef.current?.focus();
     },
-    [handleSelectModelTier]
+    [activeConvId, input, handleSelectModelTier]
   );
 
   const handleDeleteChat = useCallback(
     async (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
       await deleteConversation(id);
-      const updated = conversations.filter((c) => c.id !== id);
-      setConversations(updated);
+      const updatedConvs = conversations.filter((c) => c.id !== id);
+      setConversations(updatedConvs);
+
+      // Prune the deleted conversation's draft from the map
+      const updatedDrafts: ChatDraftMap = { ...draftsRef.current };
+      delete updatedDrafts[id];
+      draftsRef.current = updatedDrafts;
+      setDrafts(updatedDrafts);
+      persistDrafts(updatedDrafts);
+
       if (activeConvId === id) {
-        const nextId = updated.length > 0 ? updated[0].id : null;
+        const nextId = updatedConvs.length > 0 ? updatedConvs[0].id : null;
         setActiveConvId(nextId);
+        const nextDraft = (nextId ? updatedDrafts[nextId] : updatedDrafts[DRAFT_NEW_KEY]) ?? "";
+        setInput(nextDraft);
         try {
           if (nextId) {
             localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, nextId);
           } else {
-            localStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+            localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, "__new__");
           }
         } catch {
           // Ignore storage errors
@@ -365,11 +465,17 @@ export default function ChatPage() {
       };
       setMessages((prev) => [...prev, userMsg]);
       setInput("");
-      try {
-        localStorage.removeItem(CHAT_DRAFT_STORAGE_KEY);
-      } catch {
-        // Ignore storage errors
+      // Clear the submitted draft for this thread (and DRAFT_NEW_KEY if this initiated a fresh thread)
+      const updatedDrafts: ChatDraftMap = { ...draftsRef.current };
+      if (isNewConv) {
+        delete updatedDrafts[DRAFT_NEW_KEY];
       }
+      if (targetConvId) {
+        delete updatedDrafts[targetConvId];
+      }
+      draftsRef.current = updatedDrafts;
+      setDrafts(updatedDrafts);
+      persistDrafts(updatedDrafts);
       setLoading(true);
       setLiveTrace([]);
       liveTraceRef.current = [];
@@ -510,19 +616,32 @@ export default function ChatPage() {
     });
   }, []);
 
-  // handleSelectPromptSuggestion: populates chat input, auto-expands the message bar if collapsed, and focuses textarea
-  const handleSelectPromptSuggestion = useCallback((suggestion: string) => {
-    setInput(suggestion);
-    setIsInputCollapsed(false);
-    try {
-      localStorage.setItem(CHAT_INPUT_COLLAPSED_KEY, "false");
-    } catch {
-      // Ignore quota errors in restricted browser contexts
-    }
-    queueMicrotask(() => {
-      inputRef.current?.focus();
-    });
-  }, []);
+  // handleSelectPromptSuggestion: populates chat input, updates per-thread draft map, auto-expands composer, and focuses textarea
+  const handleSelectPromptSuggestion = useCallback(
+    (suggestion: string) => {
+      setInput(suggestion);
+      const key = activeConvId ?? DRAFT_NEW_KEY;
+      const updated: ChatDraftMap = { ...draftsRef.current };
+      if (suggestion.trim()) {
+        updated[key] = suggestion;
+      } else {
+        delete updated[key];
+      }
+      draftsRef.current = updated;
+      setDrafts(updated);
+      persistDrafts(updated);
+      setIsInputCollapsed(false);
+      try {
+        localStorage.setItem(CHAT_INPUT_COLLAPSED_KEY, "false");
+      } catch {
+        // Ignore quota errors in restricted browser contexts
+      }
+      queueMicrotask(() => {
+        inputRef.current?.focus();
+      });
+    },
+    [activeConvId]
+  );
 
   // Global keyboard shortcut: pressing '/' while viewing the thread expands the message bar and focuses the input
   useEffect(() => {
@@ -584,8 +703,9 @@ export default function ChatPage() {
         isCollapsed={isSidebarCollapsed}
         modelOptions={modelOptions}
         selectedModelTier={selectedModelTier}
+        drafts={drafts}
         onToggleCollapse={handleToggleSidebarCollapse}
-        onSelectConversation={setActiveConvId}
+        onSelectConversation={handleSelectConversation}
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
         onUpdateTitle={handleUpdateTitle}
@@ -620,7 +740,7 @@ export default function ChatPage() {
           selectedModelTier={selectedModelTier}
           activeModelLabel={activeModelLabel}
           inputRef={inputRef}
-          onChangeInput={setInput}
+          onChangeInput={handleInputChange}
           onSelectModelTier={handleSelectModelTier}
           onToggleCollapse={handleToggleInputCollapse}
           onSubmit={handleSubmit}

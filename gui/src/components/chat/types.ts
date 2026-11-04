@@ -32,8 +32,78 @@ export interface Message {
 // LocalStorage key for remembering the user's selected model tier across page reloads
 export const MODEL_STORAGE_KEY = "nexus_chat_model_tier";
 
-// LocalStorage key for preserving unsubmitted chat prompt drafts across Nexus tab navigation and reloads
+// LocalStorage key for preserving unsubmitted chat prompt drafts across Nexus tab navigation and reloads (legacy single-draft key)
 export const CHAT_DRAFT_STORAGE_KEY = "nexus_chat_input_draft";
+
+// LocalStorage key for preserving unsubmitted chat drafts mapped by conversation ID (and "_new" for fresh threads)
+export const CHAT_DRAFTS_STORAGE_KEY = "nexus_chat_drafts";
+
+// Special draft dictionary key representing an unpersisted new chat draft
+export const DRAFT_NEW_KEY = "_new";
+
+// ChatDraftMap: Type alias for an unsubmitted draft dictionary mapping conversation ID strings (or "_new") to text content
+export type ChatDraftMap = Record<string, string>;
+
+/**
+ * Loads the draft dictionary from localStorage, gracefully handling parsing errors,
+ * restricted browser environments, and migrating legacy single-draft storage.
+ * 
+ * - Returns: `ChatDraftMap` containing all saved conversation drafts.
+ */
+export function loadPersistedDrafts(): ChatDraftMap {
+  try {
+    const raw = localStorage.getItem(CHAT_DRAFTS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Ensure the parsed JSON is a non-null, non-array object
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as ChatDraftMap;
+      }
+    }
+    // Backward compatibility: migrate legacy single-key draft if present
+    const legacy = localStorage.getItem(CHAT_DRAFT_STORAGE_KEY);
+    if (legacy && legacy.trim()) {
+      const activeConv = localStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
+      const key = activeConv && activeConv !== "__new__" ? activeConv : DRAFT_NEW_KEY;
+      const initial: ChatDraftMap = { [key]: legacy };
+      try {
+        localStorage.setItem(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(initial));
+        localStorage.removeItem(CHAT_DRAFT_STORAGE_KEY);
+      } catch {
+        // Ignore quota/privacy errors in restricted contexts
+      }
+      return initial;
+    }
+  } catch {
+    // Gracefully ignore storage quota / access errors in private browsing contexts
+  }
+  return {};
+}
+
+/**
+ * Persists the entire draft dictionary to localStorage, removing keys with empty values,
+ * or removing the storage entry entirely if no drafts remain.
+ * 
+ * - drafts: `ChatDraftMap` containing current active drafts mapped by conversation ID or `_new`.
+ */
+export function persistDrafts(drafts: ChatDraftMap): void {
+  try {
+    // Clean up empty or whitespace-only drafts before serializing to minimize localStorage footprint
+    const cleaned: ChatDraftMap = {};
+    for (const [key, val] of Object.entries(drafts)) {
+      if (val && val.trim().length > 0) {
+        cleaned[key] = val;
+      }
+    }
+    if (Object.keys(cleaned).length > 0) {
+      localStorage.setItem(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(cleaned));
+    } else {
+      localStorage.removeItem(CHAT_DRAFTS_STORAGE_KEY);
+    }
+  } catch {
+    // Gracefully ignore storage quota / access errors in private browsing contexts
+  }
+}
 
 // LocalStorage key for remembering the active conversation ID across Nexus tab navigation
 export const ACTIVE_CONV_STORAGE_KEY = "nexus_chat_active_conv_id";

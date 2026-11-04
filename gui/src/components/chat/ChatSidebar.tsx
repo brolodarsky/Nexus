@@ -13,6 +13,7 @@ import {
   DEFAULT_CHAT_SIDEBAR_WIDTH,
   MIN_CHAT_SIDEBAR_WIDTH,
   MAX_CHAT_SIDEBAR_WIDTH,
+  DRAFT_NEW_KEY,
 } from "./types";
 
 // ChatSidebarProps: defines data and callbacks required by the conversation history sidebar
@@ -21,6 +22,7 @@ import {
 // - isCollapsed: boolean controlling whether the sidebar renders as a slim rail (w-14) or full drawer (w-64)
 // - modelOptions: available LLM tiers returned by GET /api/agents/models
 // - selectedModelTier: currently selected model tier ID ("strong", "medium", "low")
+// - drafts: optional dictionary mapping conversation IDs (and DRAFT_NEW_KEY) to unsubmitted prompt drafts
 // - onToggleCollapse: callback invoked to expand or collapse the conversation history panel
 // - onSelectConversation: callback invoked when the user clicks a conversation row
 // - onNewChat: callback to start a blank conversation, optionally pre-selecting a model tier
@@ -33,6 +35,7 @@ export interface ChatSidebarProps {
   isCollapsed: boolean;
   modelOptions: ModelOption[];
   selectedModelTier: string;
+  drafts?: Record<string, string>;
   onToggleCollapse: (collapsed: boolean) => void;
   onSelectConversation: (id: string) => void;
   onNewChat: (initialTier?: string) => void;
@@ -47,6 +50,7 @@ export default function ChatSidebar({
   isCollapsed,
   modelOptions,
   selectedModelTier,
+  drafts,
   onToggleCollapse,
   onSelectConversation,
   onNewChat,
@@ -170,6 +174,8 @@ export default function ChatSidebar({
     }
     handleCancelEdit();
   };
+  const hasNewChatDraft = Boolean(drafts?.[DRAFT_NEW_KEY]?.trim());
+
   if (isCollapsed) {
     // Collapsed Rail: Slim column with expand button, new chat icon, and conversation switcher
     return (
@@ -191,28 +197,37 @@ export default function ChatSidebar({
         {/* Compact New Chat Action */}
         <button
           onClick={() => onNewChat()}
-          className="mt-3 w-9 h-9 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors flex items-center justify-center text-lg font-bold"
-          title="Start New Chat"
+          className="relative mt-3 w-9 h-9 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors flex items-center justify-center text-lg font-bold"
+          title={`Start New Chat${hasNewChatDraft ? " (Draft saved)" : ""}`}
           aria-label="Start New Chat"
         >
           +
+          {hasNewChatDraft && (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-cyan border border-bg-secondary" />
+          )}
         </button>
 
         {/* Conversation history icons for fast switching */}
         <div className="mt-4 flex-1 overflow-y-auto space-y-1.5 w-full px-2 flex flex-col items-center">
-          {conversations.map((conv) => (
-            <button
-              key={conv.id}
-              onClick={() => onSelectConversation(conv.id)}
-              className={`w-9 h-9 rounded-lg flex items-center justify-center text-xs transition-all ${activeConvId === conv.id
-                ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40 shadow-[0_0_10px_rgba(56,189,248,0.15)] font-bold"
-                : "text-text-muted hover:text-text-primary hover:bg-bg-tertiary"
-                }`}
-              title={conv.title}
-            >
-              💬
-            </button>
-          ))}
+          {conversations.map((conv) => {
+            const hasDraft = Boolean(drafts?.[conv.id]?.trim());
+            return (
+              <button
+                key={conv.id}
+                onClick={() => onSelectConversation(conv.id)}
+                className={`relative w-9 h-9 rounded-lg flex items-center justify-center text-xs transition-all ${activeConvId === conv.id
+                  ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40 shadow-[0_0_10px_rgba(56,189,248,0.15)] font-bold"
+                  : "text-text-muted hover:text-text-primary hover:bg-bg-tertiary"
+                  }`}
+                title={`${conv.title}${hasDraft ? " (Draft saved)" : ""}`}
+              >
+                💬
+                {hasDraft && (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-cyan border border-bg-secondary" />
+                )}
+              </button>
+            );
+          })}
         </div>
       </aside>
     );
@@ -248,7 +263,16 @@ export default function ChatSidebar({
             onClick={() => onNewChat()}
             className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors text-sm font-medium"
           >
-            <span className="text-lg">+</span> New Chat
+            <span className="text-lg">+</span>
+            <span>New Chat</span>
+            {hasNewChatDraft && (
+              <span
+                className="text-[0.62rem] px-1.5 py-0.5 rounded bg-accent-cyan/15 text-accent-cyan font-mono border border-accent-cyan/30 uppercase tracking-wider font-semibold"
+                title="Unsubmitted new chat draft saved"
+              >
+                Draft
+              </span>
+            )}
           </button>
           <button
             onClick={() => onToggleCollapse(true)}
@@ -338,6 +362,8 @@ export default function ChatSidebar({
             );
           }
 
+          const hasDraft = Boolean(drafts?.[conv.id]?.trim());
+
           return (
             <div
               key={conv.id}
@@ -351,11 +377,21 @@ export default function ChatSidebar({
                   ? "bg-bg-tertiary text-text-primary"
                   : "text-text-secondary hover:bg-bg-tertiary/50"
               }`}
-              title={`${conv.title} (double-click or hover pencil to rename)`}
+              title={`${conv.title}${hasDraft ? " (Draft saved)" : ""} (double-click or hover pencil to rename)`}
             >
               {/* Conversation title: takes full available row width without reserved sibling space; truncates with ellipsis */}
               <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center">
-                <span className="truncate font-medium block">{conv.title}</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="truncate font-medium">{conv.title}</span>
+                  {hasDraft && (
+                    <span
+                      className="shrink-0 text-[0.62rem] px-1.5 py-0.5 rounded bg-accent-cyan/15 text-accent-cyan font-mono border border-accent-cyan/30 uppercase tracking-wider font-semibold"
+                      title="Unsubmitted draft saved"
+                    >
+                      Draft
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Hover Actions: Floats over the right end on hover with a crisp background pill so it never cramps title text */}
