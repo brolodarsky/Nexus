@@ -3,6 +3,95 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.2.0] - 2026-11-04
+
+### Added
+- **LLM Cost Estimation & Pricing Engine (`src/nexus/core/cost.py`):** Created a dedicated inference cost calculation engine with model-specific pricing tables for Google Gemini (`gemini-3.8-flash`, `gemini-4-argon`, Pro/Flash families) and OpenAI (`gpt-5.4-mini`, `gpt-5.6-terra`, `gpt-5.6-sol`, o-series). Supports prompt context caching discount accounting (e.g. 75% Gemini discount, 50% OpenAI discount).
+- **Run Snapshot Cost Telemetry (`src/nexus/core/run_logger.py` & `src/nexus/agent/graph.py`):** Added real-time cost calculation to `_log_token_usage()`, emitted in live trace events and terminal logs. Updated `log_run()` to compute and persist root and per-subagent `cost_usd` and `cache_savings_usd` in `logs/runs/*.json` snapshots and `list_runs()` summaries.
+- **Run Cost Audit & Backfill Utility (`scripts/audit_run_costs.py`):** Built a standalone CLI tool that scans all persisted execution snapshots in `logs/runs/`, reports total spend ($14.02 across 150 historical runs, 49M tokens, $16.50 saved via prompt caching with an 82.4% cache hit rate), shows breakdowns by model, and includes `--backfill` to retroactively stamp `cost_usd` into legacy snapshots.
+- **Control Panel Cost Badges (`gui/`):** Displayed estimated dollar inference costs on assistant chat message bubbles (`ChatMessageItem.tsx`), quick-stats pills and run ledger summaries in the Agent Audit Log (`/audit`), and individual agent node execution cards in `AgentTraceVisualizer.tsx`.
+- **Unit Test Coverage (`tests/test_cost_tracking.py`):** Added 5 automated tests validating rate lookups, prompt caching discounts, zero-token edge cases, and run snapshot cost persistence (86 passing engine tests).
+- **Tools Suite Page (`gui/src/app/tools/page.tsx`):** Added a dedicated `/tools` page to the Nexus Control Panel featuring an extensible tool tab switcher and hosting the premier Resume & Document Compiler Engine.
+- **Sidebar Destination (`gui/src/components/Sidebar.tsx`):** Added a primary navigation link for `🛠️ Tools` to the global sidebar menu.
+- **Resume Engine Interactive Studio:** Replaced the terminal CLI workflow with a rich browser workspace including:
+  - Portfolio document explorer with category tabs (`Resumes`, `Cover Letters`, `All`), multi-select checkboxes, and search filtering.
+  - Page Budget & Metrics scorecard displaying total page count, last page fill %, geometry verdicts (`GOOD FIT`, `TIGHT FIT`, `ROOM`, `UNDERFILL`, `OVERFLOW`), and bullet points headroom / trim estimators.
+  - Live in-browser markdown editor with direct saving to Vault.
+  - Live inline PDF viewer iframe streamed directly from the engine backend.
+  - Execution console log drawer and one-click PDF/DOCX downloads.
+- **FastAPI Tools Router (`src/nexus/api/routers/tools.py`):** Added `/api/tools/resume/*` endpoints for portfolio scanning, document metadata inspection, markdown updating, headless Chromium & Word DOCX rendering, and binary asset streaming.
+- **Resume Engine Backend Service (`src/nexus/shared_tools/resume_engine/service.py`):** Authoritative backend controller managing file discovery, directory traversal security checks, disk caching (`metrics_cache.json`), and compilation execution.
+- **TypeScript API Client (`gui/src/lib/api/tools.ts`):** Client-side bindings and TypeScript data interfaces for all resume engine actions.
+- **Automated Test Suite (`tests/test_resume_engine_api.py`):** 8 unit and integration tests covering document discovery, path traversal sandbox enforcement (HTTP 403 / ValueError), document reading, and binary PDF streaming.
+- **Agentic Web Search Engine (`src/nexus/shared_tools/web_search.py` & `search_web` in `shared.py`):** Added `web_search.py` (`execute_web_search`, `format_search_results_as_markdown`, and `[CLI]` entrypoint `python -m nexus.shared_tools.web_search`) backed by `langchain-tavily` (`TavilySearch`) with search depth (`basic` / `advanced`), topic filtering (`general` / `news` / `finance`), domain whitelisting/blacklisting (`--domain`, `--exclude-domain`), and snippet length capping. Wrapped as `@tool def search_web` in `src/nexus/shared_tools/shared.py` (with a Context Hygiene Directive for subagent delegation) and bound into `CORE_TOOLS` in `src/nexus/agent/graph.py` so both `NexusAgent` and spawned subagents have native live web search.
+- **Web Search Unit Test Suite (`tests/test_web_search.py`):** Added 5 unit tests covering empty-query and missing-key guards, parameter clamping, result normalization, Markdown formatting/truncation, and `CORE_TOOLS` graph binding.
+- **Zero-Vestige Refactoring Standard (`.agents/rules/no_vestigial_code.md`):** Added a standing architectural rule requiring all coding and builder agents to identify and prune superseded code, dead CLI interfaces, obsolete debug scripts, and orphaned package dependencies whenever implementing replacements or modernizing existing tools.
+- **Standing Directive in `AGENTS.md` & `Master Instructions.md`:** Integrated the Zero-Vestige Refactoring mandate into the core developer agent guidelines and living vault constitution to prevent code rot and zombie CLI scaffolds.
+- **Anthropic Claude Model Options (`claude-opus-4-5` & `claude-sonnet-4-5`):** Added `langchain-anthropic` (`ChatAnthropic`) integration, `ANTHROPIC_API_KEY` / model tier settings in `src/nexus/core/config.py`, and side-by-side Chat UI model selector options (`Opus 4.5` for `strong` and `Sonnet 4.5` for `low`) in `src/nexus/core/constants.py`, `gui/src/components/chat/types.ts`, `gui/src/components/chat/ChatSidebar.tsx`, and `gui/src/components/chat/ChatInputBar.tsx`.
+- **Provider-Matched Subagent Spawning (`spawn_subagent`):** Updated `call_model` and `spawn_subagent` in `src/nexus/agent/graph.py` so subagents spawned during an Anthropic Claude turn automatically route `low` tier execution to `claude-sonnet-4-5`.
+- **Anthropic Cost & Prompt-Cache Pricing (`src/nexus/core/cost.py`):** Added Claude Opus 4.5 (`$5.00` input / `$0.50` cached / `$25.00` output per 1M tokens) and Claude Sonnet 4.5 (`$3.00` input / `$0.30` cached / `$15.00` output per 1M tokens) to the real-time pricing catalog and frontend fallback cost calculator.
+- Added unit tests in `tests/test_cost_tracking.py` verifying context step-up thresholds and rates for models with large context windows.
+- **Chat Title Renaming & Inline Editing in Next.js GUI (`gui/`):** Added inline conversation title editing in both `ChatSidebar.tsx` (via hover pencil button or double-click on thread items) and `ChatHeader.tsx` (via click-to-edit or hover pencil button) with keyboard shortcuts (Enter to save, Escape to cancel) and optimistic UI synchronization.
+- **AI Auto-Titling Endpoint & UI Action:** Added `POST /api/agents/ask/conversations/{conversation_id}/auto-title` in `src/nexus/api/routers/agents.py` using fast low-tier models (`gemini-3.8-flash` / `claude-sonnet-4-5`) to summarize the opening turn into a concise 3–6 word topic title. Connected to a dedicated "✨" sparkle action button in `ChatHeader.tsx` and automated background auto-titling after the initial turn of newly started chats.
+- **Validation & Safe Error Handling:** Enhanced `PATCH /api/agents/ask/conversations/{conversation_id}` in `src/nexus/api/routers/agents.py` to reject blank/whitespace-only titles with HTTP 400 Bad Request and verify thread existence in SQLite `chats.db` before writing.
+- **Unit Test Coverage (`tests/test_chat_titles.py`):** Added 6 unit tests covering manual title updates, validation guards, 404 handling, mock LLM auto-titling, and fallback title generation on LLM timeout/quota exceptions.
+- **Collapsible Nexus Message Bar (`gui/src/components/chat/ChatInputBar.tsx`):** Added collapsible state to the chat message composer bar. When minimized, collapses into a sleek, compact bottom rail displaying unsubmitted draft previews, the active model capability badge, and a click/keyboard expand toggle.
+- **Global '/' Keyboard Shortcut (`gui/src/app/chat/page.tsx`):** Added a global keyboard shortcut listening for `/` when viewing the conversation thread to automatically expand the message bar and focus the multiline textarea.
+- **Persistent Storage (`gui/src/components/chat/types.ts`):** Added `CHAT_INPUT_COLLAPSED_KEY` (`nexus_chat_input_collapsed`) to persist the message bar's collapsed/expanded preference across page refreshes and tab navigations.
+- **Auto-Expansion on Starter Prompts (`gui/src/app/chat/page.tsx`):** Selecting any empty-state starter suggestion prompt automatically expands the message bar and pre-fills the textarea.
+- Added automated security test suite in `tests/test_path_safety.py` verifying rejection of traversal payloads (`../.env`, `..\\.env`, `C:\\Windows\\win.ini`, `/etc/passwd`, `3. Operations/../../.env`), escaping symlinks, and successful resolution of valid notes and unique basenames.
+- **HITL Provenance Tracking (`conversation_id`, `thread_id`, `agent_id`, `agent_role`):**
+  - Extended `src/nexus/core/hitl_queue.py` (`transactions` schema, idempotent `ALTER TABLE` migration, `add_transaction`, and `get_recent_revisions`) with `conversation_id`, `thread_id`, `agent_id`, and `agent_role` columns plus `ContextVar`-backed execution context propagation (`set_hitl_execution_context`, `reset_hitl_execution_context`, `get_hitl_execution_context`).
+  - Wired parent `Commander (<tier>)` (`agent_id="nexus"`) and spawned `Subagent #<n> (<tier>)` (`agent_id="subagent-<n>"`, `thread_id="<conv_id>:subagent-<n>"`) execution contexts in `src/nexus/agent/api.py` and `src/nexus/agent/graph.py`.
+  - Exposed all 4 provenance fields in FastAPI `TransactionResponse` / `MockTransactionRequest` (`src/nexus/api/routers/hitl.py`) and TypeScript client types (`gui/src/lib/api/hitl.ts`), and backfilled 244 historical `hitl.db` transactions from run logs.
+- Added `_invoke_tool_node_resilient()` in `src/nexus/agent/graph.py` to automatically fall back to sequential in-thread tool execution when `ToolNode`'s `ContextThreadPoolExecutor` raises `RuntimeError('cannot schedule new futures after shutdown')` during a `uvicorn --reload` worker restart.
+- Added human-readable error translation in `run_nexus_agent_with_trace()` (`src/nexus/agent/api.py`) for `cannot schedule new futures after` and `BrokenThreadPool` exceptions.
+- Added 2 unit tests in `tests/test_model_config_and_resilience.py` covering synchronous tool fallback and reload error translation.
+- Persisted client storage keys `CHAT_SIDEBAR_COLLAPSED_KEY` and `CHAT_BOARD_OPEN_KEY` in `gui/src/components/chat/types.ts`.
+- **Mandatory Engineering Section Instructions Directive (`AGENTS.md`):** Mandated that all Builder agents read and adhere to `Vault/6. Engineering/Section Instructions.md` ALWAYS when operating on the Nexus Engine, tools, or architecture.
+- **Prompt-First Session Transcript Archival Directive (`Vault/6. Engineering/Section Instructions.md`):** Codified Section 2.D requiring AI agents to proactively offer to export and archive high-signal co-engineering session transcripts into `<Project>/Transcripts/` via `export_conversation.py` linked to `[[Build Log - <Project>]]` at the conclusion of non-trivial milestones. Explicitly prohibits silent or automated transcript exports without user confirmation.
+- **Master Instructions Flush Integration (`Vault/Master Instructions.md`):** Integrated prompt-first transcript archival as step 3 of the Cognitive Boundary Flush protocol.
+- **Resizable Conversation History Sidebar (`gui/src/components/chat/ChatSidebar.tsx`):** Added a draggable right-border resize handle with native pointer coordinate tracking (`PointerEvent`), min/max boundary clamping (`200px` to `640px`), double-click reset to default width (`256px`), and smooth transition prevention during active drag.
+- **Persistent Sidebar Width Storage (`gui/src/components/chat/types.ts`):** Added `CHAT_SIDEBAR_WIDTH_KEY` (`nexus_chat_sidebar_width`) to save custom sidebar width in `localStorage`, maintaining user sizing across tab navigation and reloads.
+
+### Changed
+- **Headless Compiler Streamlining (`src/nexus/shared_tools/resume_engine/render.js`):** Refactored `render.js` into a dedicated headless Chromium PDF and page metrics compiler accepting CLI paths or batch flags (`--all`).
+- **Native Python Execution (`src/nexus/shared_tools/resume_engine/service.py`):** Replaced the indirect Node-to-Python subprocess hop for Word DOCX generation with direct Python invocation via `render_docx.render_docx()`.
+- **Updated `README.md`:** Added documentation for `src/nexus/api/routers/tools.py` and the Control Panel `/tools` page.
+- **Vault Instruction Sets & Project Documentation (`Master Instructions.md`, `Section Instructions.md`, `README.md`, `Project - *.md`):** Updated `Master Instructions.md`, `2. Health/Section Instructions.md`, `3.1. Career Strategy & Revenue/Section Instructions.md`, and `6. Engineering/Section Instructions.md` to prompt `search_web` for live market/company verification, peer-reviewed clinical literature lookups, and frontier library/benchmark verification; reconciled doc-vs-disk drift across `Project - Nexus Agentic Engine.md`, `Project - Nexus GUI.md`, `Project - Nexus Demo.md`, and `README.md`.
+- **Audit Run Ledger Conversation ID Badges (`gui/src/app/audit/page.tsx`):** Replaced the redundant static `"nexus"` agent badge on each run card in the left ledger with a compact conversation badge (`conv: <short_id>`) that displays the full UUID on hover. Falls back to agent name if unassociated with a thread.
+- **Audit Search Filter (`gui/src/app/audit/page.tsx`):** Added `r.thread_id` to the search filter and updated placeholder to `Search runs by query, run ID, or conversation...` so users can filter all execution runs by conversation thread.
+- **Default Disclosure of Live Agent Execution (`gui/`):** Configured real-time agent trace visualization (`ThinkingPanel`) in `ChatMessageThread.tsx` to mount collapsed by default (`defaultExpanded={false}`), preventing UI jumpiness while streaming responses.
+- **Trace Panel Disclosure Polishing (`gui/`):** Updated default prop value in `AgentTraceVisualizer.tsx` to `defaultExpanded = false` and removed extraneous bottom border when the control bar is in collapsed state.
+- **Blackboard Empty State Description (`gui/`):** Generalized placeholder copy in `BlackboardDrawer.tsx` from Astra-specific terminology to reference primary agents dispatching subagents.
+- **HITL Review Queue UI Hierarchy (`gui/src/app/hitl/page.tsx`):**
+  - Replaced the legacy `NEXUS_AGENT` label at the top of review queue cards with prominent `Ticket #{id}` badges matching conversational agent citations.
+  - Promoted the target note title to the card's primary header (`font-semibold text-sm`) with tooltip truncation.
+  - Displayed `agent_role`, `agent_id`, `conversation_id`, and `thread_id` pills in the card's secondary header and the main review inspector header.
+  - Updated action notices and recently applied ledger entries to consistently cite `Ticket #{id}`.
+- Updated `start.ps1` to scope Uvicorn file watching with `--reload-dir src/nexus`, exclude standalone CLI tools and SQLite files (`--reload-exclude export_conversation.py`, `--reload-exclude *.db*`, `--reload-exclude *.sqlite*`), and set `--timeout-graceful-shutdown 30`.
+- Refactored `gui/src/app/chat/page.tsx` to restore and sync left conversation history menu (`ChatSidebar`) and right situational feed drawer (`BlackboardDrawer`) open/collapsed states via `localStorage`, ensuring user sidebar choices persist across Nexus page navigations.
+- **Full-Width Conversation Titles with Floating Hover Actions (`gui/src/components/chat/ChatSidebar.tsx`):** Restructured conversation history items so titles take up 100% of available row width instead of reserving 70px of space for hidden action buttons. Action buttons (rename, AI auto-title, delete) now float seamlessly over the right edge on hover inside a backdrop-blurred pill container, avoiding text truncation.
+
+### Fixed
+- Calibrated real-time LLM cost estimation in `src/nexus/core/cost.py` for Gemini Pro and Argon models exceeding 128k context tokens, applying Google's 2x tier step-up pricing ($2.50/1M prompt, $0.625/1M cached, $10.00/1M output).
+- Upgraded `scripts/audit_run_costs.py` to infer model names and capability tiers from agent reasoning strings on legacy snapshots and parse token usage from historical trace telemetry.
+- Backfilled 83 historical run snapshots in `logs/runs/` with accurate token counts and tiered pricing.
+- **SSE Stream Disconnect Recovery:** Hardened `gui/src/lib/api/stream.ts` to detect abrupt HTTP socket closures before a terminal `done` or `error` packet is emitted (e.g. backend reloads or network drops). Previously, an abrupt closure exited the read loop silently, leaving the chat UI permanently hung in a loading state. Now, it flushes trailing buffer data and invokes `callbacks.onError()` to cleanly stop the spinner and notify the user.
+
+### Removed
+- **Vestigial Terminal CLI Code (`src/nexus/shared_tools/resume_engine/render.js`):** Removed legacy interactive terminal prompt (`readline`, `promptFileSelection()`, `createInterface()`) now superseded by the `/tools` web studio.
+- **Obsolete Debug Scripts & Unused Packages:** Deleted unused `inspect_docx.js` and removed unneeded `html-to-docx` and `adm-zip` dependencies from `src/nexus/shared_tools/resume_engine/package.json`.
+- **Legacy Multi-Agent Run Logs (`logs/runs/`):** Pruned obsolete historical run snapshots from deprecated multi-agent routing (`librarian`, `career`).
+- Removed orphaned 0-byte `src/nexus/agent/hitl.db` file.
+
+### Security
+- Fixed arbitrary-file-read and path traversal vulnerability in `src/nexus/shared_tools/vault_reader.py` (`resolve_vault_note_path`): rejected absolute paths and Windows drive letters upfront, resolved all candidate paths (direct and basename fallback) against `VAULT_PATH.resolve()` (or resolved domain root), and enforced `is_relative_to()` containment before reading or returning paths.
+- Hardened path containment across all path-accepting functions in `src/nexus/shared_tools/vault_reader.py` (`get_directory_tree`, `search_within`, `get_recent_modifications`) via `_resolve_vault_dir` and pruned symlinks escaping the Vault.
+- Hardened FastAPI Vault routes in `src/nexus/api/routers/vault.py` (`/structure`, `/note`, `/search`, `/list`, `/podcast/generate`, `/podcast/download`) by rejecting absolute/drive-letter inputs and resolving both sides against `VAULT_PATH.resolve()`.
+- Hardened `get_run()` in `src/nexus/core/run_logger.py` and `GET /api/agents/runs/{run_id}` in `src/nexus/api/routers/agents.py`: rejected `run_id` inputs containing path separators or `..`.
+- Hardened `read_file` and `create_file` LangChain tool wrappers in `src/nexus/shared_tools/shared.py` with strict Vault boundary enforcement.
+
 ## [3.1.0] - 2026-10-28
 
 ### Added
@@ -134,32 +223,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Mid-Session Message Pruning (`summarizer_node`):** Removed `summarizer_node` (and `SystemMessage` summary mutation) from `src/nexus/agent/graph.py` so `route_after_agent` routes directly to `END` when tool calls finish. Preserves 100% lossless conversation history within event-bounded threads and prevents `RemoveMessage` from invalidating the left-to-right provider KV prompt cache across multi-turn sessions.
 - **Custom Tool-Iteration Circuit Breaker (`MAX_TOOL_ITERATIONS_PER_TURN`):** Removed the custom step-counting circuit breaker from `src/nexus/agent/graph.py` and `Vault/Master Instructions.md`, allowing multi-file Vault workflows to converge naturally while relying on LangGraph's built-in `recursion_limit` for infinite-loop protection.
 - **Retired Legacy Multi-Agent Packages:** Removed `src/nexus/agents/router/`, `src/nexus/agents/career/`, and `src/nexus/agents/librarian/`.
-
-## [2.15.0] - 2026-10-16
-
-### Added
-- `src/nexus/shared_tools/gmail_engine.py`: Gmail REST API v1 data layer + CLI (native Gmail search, read/thread as markdown, labels, archive, trash, drafts). Scope `gmail.modify`; token isolated in `.secrets/token_gmail.json`. No send function by design.
-- `src/nexus/core/tool_catalog.py`: static `ast`-based catalog of `src/nexus/shared_tools/` for prompt hydration.
-- `{shared_tools}` placeholder and `## Shared Tools` section in `Vault/Playbook.md`, hydrated by `engine_constitution.py`.
-- `python -m nexus.core.engine_constitution` entrypoint that prints the fully hydrated Playbook.
-- Module docstrings for `summarizer.py`, `generate_podcast.py`, `medical_xml_parser.py`.
-- **Deterministic Vault Structure Hydration Tool (`get_vault_structure`):** Standardized and exported `get_vault_structure(path=None)` in `src/nexus/shared_tools/shared.py` as a shared cross-agent tool for recursive folder orientation (`path=None`) and targeted subtree drill-downs (`path="<section>"`).
-- **Dynamic Vault Structure Prompt Hydration:** Added `{vault_structure}` placeholder to `Vault/Playbook.md` and wired `src/nexus/core/engine_constitution.py` to deterministically inject the live Vault folder tree into the engine constitution prefix at runtime.
-
-### Changed
-- Consolidated and upgraded health, clinical research, and psychological architecture guidelines into `Vault/2. Health/Playbook.md` as the Vault-native single source of truth.
-- Router `fetch_emails` now calls `gmail_engine` directly (Gmail search syntax, optional `count`, bodies capped at 4,000 chars) instead of delegating to an Email Agent subgraph.
-- `AGENTS.md`: Resident agents inject the hydrated Playbook via the engine instead of reading the raw template.
-- Migrated `src/nexus/core/ENGINE_CONSTITUTION.md` to `Vault/Playbook.md` (`aliases: [Vault Playbook, Root Playbook, Engine Constitution]`) and updated `src/nexus/core/engine_constitution.py` and `AGENTS.md` to load the root Vault Playbook directly from `Vault/Playbook.md`.
-- Consolidated `.agents/rules/zero_sycophancy.md` into `Vault/Playbook.md` §11 and removed build-level implementation details from the Resident constitution.
-- Simplified `.agents/skills/cognitive_boundary_flush/SKILL.md` and fixed stale `Plan.md` path in `.agents/skills/career_counselor/SKILL.md`.
-- Fixed stale module paths in `README.md` (`vault_reader.py`, `shared.py`, `graph.py`).
-- Streamlined `AGENTS.md` into a lean standing operational contract covering agent role routing, safety boundaries, execution environment rules, and git/changeset policy.
-- Migrated granular coding standards and engineering invariants (tool factories, ephemeral prompt checkpointer hygiene, absolute imports, educational commenting) into `Project - Nexus Agentic Engine.md`.
-
-### Removed
-- Deleted legacy `.agents/skills/analyze_health/` (and `references/medical_research_protocol.md`) and `.agents/skills/analyze_psych/` skill directories after folding their rules into `Vault/2. Health/Playbook.md`.
-- Email Agent subgraph (`src/nexus/agents/email/`, including its evals).
-- IMAP/XOAUTH2 email client and `src/nexus/shared_tools/read_email.py`.
-- `email_address` / `imap_*` settings from `core/config.py`.
-- Removed `src/nexus/core/ENGINE_CONSTITUTION.md` (moved to `Vault/Playbook.md`) and `.agents/rules/zero_sycophancy.md` (folded into `Vault/Playbook.md` §11).
