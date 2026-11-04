@@ -6,8 +6,14 @@
  * and inline conversation title renaming.
  */
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { Conversation, ModelOption } from "@/lib/api";
+import {
+  CHAT_SIDEBAR_WIDTH_KEY,
+  DEFAULT_CHAT_SIDEBAR_WIDTH,
+  MIN_CHAT_SIDEBAR_WIDTH,
+  MAX_CHAT_SIDEBAR_WIDTH,
+} from "./types";
 
 // ChatSidebarProps: defines data and callbacks required by the conversation history sidebar
 // - conversations: array of persisted Conversation records fetched from SQLite chats.db
@@ -56,6 +62,88 @@ export default function ChatSidebar({
   const [editTitle, setEditTitle] = useState<string>("");
   // editInputRef: HTMLInputElement reference used to auto-focus and auto-select existing title text on mount
   const editInputRef = useRef<HTMLInputElement>(null);
+
+  // sidebarWidth: custom width in pixels for the expanded conversation sidebar drawer
+  const [sidebarWidth, setSidebarWidth] = useState<number>(DEFAULT_CHAT_SIDEBAR_WIDTH);
+  // isResizing: boolean flag tracking whether the user is actively dragging the right border handle
+  const [isResizing, setIsResizing] = useState<boolean>(false);
+  // sidebarRef: DOM reference to the aside element to compute accurate relative mouse drag coordinates
+  const sidebarRef = useRef<HTMLElement>(null);
+
+  // Restore persisted sidebar width from localStorage on mount (survives tab switches and reloads)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(CHAT_SIDEBAR_WIDTH_KEY);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= MIN_CHAT_SIDEBAR_WIDTH && parsed <= MAX_CHAT_SIDEBAR_WIDTH) {
+          setSidebarWidth(parsed);
+        }
+      }
+    } catch {
+      // Gracefully ignore storage quota / access errors in private browsing contexts
+    }
+  }, []);
+
+  // Handle pointer down on the resize handle: initiates dragging and binds global window pointer listeners
+  const handleResizeStart = (e: React.PointerEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (!sidebarRef.current) return;
+      // getBoundingClientRect().left gives the exact screen coordinate where the sidebar starts,
+      // correctly accounting for the main global Nexus navigation rail to the left of the page
+      const rect = sidebarRef.current.getBoundingClientRect();
+      const newWidth = moveEvent.clientX - rect.left;
+      const maxAllowed = Math.min(MAX_CHAT_SIDEBAR_WIDTH, window.innerWidth - 320);
+      const clamped = Math.max(MIN_CHAT_SIDEBAR_WIDTH, Math.min(maxAllowed, newWidth));
+      setSidebarWidth(clamped);
+    };
+
+    const handlePointerUp = (upEvent: PointerEvent) => {
+      setIsResizing(false);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+
+      if (sidebarRef.current) {
+        const rect = sidebarRef.current.getBoundingClientRect();
+        const newWidth = upEvent.clientX - rect.left;
+        const maxAllowed = Math.min(MAX_CHAT_SIDEBAR_WIDTH, window.innerWidth - 320);
+        const clamped = Math.max(MIN_CHAT_SIDEBAR_WIDTH, Math.min(maxAllowed, newWidth));
+        try {
+          localStorage.setItem(CHAT_SIDEBAR_WIDTH_KEY, String(clamped));
+        } catch {
+          // Gracefully ignore storage quota / access errors in private browsing contexts
+        }
+      }
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  };
+
+  // Reset sidebar width to default on double-clicking the resize handle
+  const handleResetWidth = () => {
+    setSidebarWidth(DEFAULT_CHAT_SIDEBAR_WIDTH);
+    try {
+      localStorage.setItem(CHAT_SIDEBAR_WIDTH_KEY, String(DEFAULT_CHAT_SIDEBAR_WIDTH));
+    } catch {
+      // Gracefully ignore storage quota / access errors
+    }
+  };
+
+  // Prevent text selection and maintain col-resize cursor on document body during active dragging
+  useEffect(() => {
+    if (isResizing) {
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "col-resize";
+      return () => {
+        document.body.style.userSelect = "";
+        document.body.style.cursor = "";
+      };
+    }
+  }, [isResizing]);
 
   // Initiates inline rename mode for a specific conversation row
   const handleStartEdit = (conv: Conversation, e?: React.MouseEvent) => {
@@ -130,12 +218,30 @@ export default function ChatSidebar({
     );
   }
 
-  // Expanded Conversation Menu: Full titles, model preset buttons, and delete actions
+  // Expanded Conversation Menu: Full titles, model preset buttons, resizable border handle, and delete actions
   return (
     <aside
-      className="w-64 border-r border-border-subtle bg-bg-secondary flex flex-col shrink-0 transition-all duration-300 ease-in-out"
+      ref={sidebarRef}
+      style={{ width: `${sidebarWidth}px` }}
+      className={`relative border-r border-border-subtle bg-bg-secondary flex flex-col shrink-0 ${
+        isResizing ? "select-none transition-none" : "transition-[width] duration-300 ease-in-out"
+      }`}
       aria-label="Conversations Menu"
     >
+      {/* Draggable Resize Handle: Sits along the right border to allow smooth mouse dragging */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize conversations menu"
+        tabIndex={0}
+        onPointerDown={handleResizeStart}
+        onDoubleClick={handleResetWidth}
+        className={`absolute top-0 -right-1 w-2 h-full cursor-col-resize z-20 transition-colors ${
+          isResizing ? "bg-accent-cyan" : "hover:bg-accent-cyan/60 active:bg-accent-cyan"
+        }`}
+        title="Drag to resize sidebar (double-click to reset width)"
+      />
+
       <div className="p-4 border-b border-border-subtle space-y-2">
         <div className="flex items-center gap-2">
           <button
@@ -240,20 +346,31 @@ export default function ChatSidebar({
                 e.stopPropagation();
                 handleStartEdit(conv);
               }}
-              className={`group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer text-sm transition-colors ${activeConvId === conv.id
-                ? "bg-bg-tertiary text-text-primary"
-                : "text-text-secondary hover:bg-bg-tertiary/50"
-                }`}
+              className={`group relative flex items-center px-3 py-2.5 rounded-lg cursor-pointer text-sm transition-colors overflow-hidden ${
+                activeConvId === conv.id
+                  ? "bg-bg-tertiary text-text-primary"
+                  : "text-text-secondary hover:bg-bg-tertiary/50"
+              }`}
               title={`${conv.title} (double-click or hover pencil to rename)`}
             >
-              <div className="flex flex-col overflow-hidden min-w-0 mr-1.5">
-                <span className="truncate font-medium">{conv.title}</span>
+              {/* Conversation title: takes full available row width without reserved sibling space; truncates with ellipsis */}
+              <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center">
+                <span className="truncate font-medium block">{conv.title}</span>
               </div>
-              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+
+              {/* Hover Actions: Floats over the right end on hover with a crisp background pill so it never cramps title text */}
+              <div
+                className={`absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity rounded-md px-1 py-0.5 z-10 ${
+                  activeConvId === conv.id
+                    ? "bg-bg-secondary/95 border border-border-subtle shadow-md"
+                    : "bg-bg-secondary/95 backdrop-blur-sm border border-border-subtle shadow-md"
+                }`}
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
                   type="button"
                   onClick={(e) => handleStartEdit(conv, e)}
-                  className="p-1 text-text-muted hover:text-accent-cyan hover:bg-bg-secondary rounded transition-colors"
+                  className="p-1 text-text-muted hover:text-accent-cyan hover:bg-bg-tertiary rounded transition-colors"
                   title="Rename Chat"
                   aria-label="Rename Chat"
                 >
@@ -274,7 +391,7 @@ export default function ChatSidebar({
                         setGeneratingId(null);
                       }
                     }}
-                    className={`p-1 text-text-muted hover:text-accent-violet hover:bg-bg-secondary rounded transition-colors text-xs ${
+                    className={`p-1 text-text-muted hover:text-accent-violet hover:bg-bg-tertiary rounded transition-colors text-xs ${
                       generatingId === conv.id ? "animate-pulse text-accent-violet" : ""
                     }`}
                     title="Auto-generate title with AI"
@@ -286,7 +403,7 @@ export default function ChatSidebar({
                 <button
                   type="button"
                   onClick={(e) => onDeleteChat(conv.id, e)}
-                  className="p-1 text-text-muted hover:text-red-400 hover:bg-bg-secondary rounded transition-colors"
+                  className="p-1 text-text-muted hover:text-red-400 hover:bg-bg-tertiary rounded transition-colors"
                   title="Delete Chat"
                   aria-label="Delete Chat"
                 >
