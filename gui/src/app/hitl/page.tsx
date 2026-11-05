@@ -49,6 +49,40 @@ function formatShortId(rawId?: string | null): string | null {
   return rawId.length > 12 ? rawId.slice(0, 8) : rawId;
 }
 
+// Formats an action or tool identifier into human-friendly capitalized text (e.g. "modify" -> "Modify", "write_file" -> "Write File")
+function formatAction(action?: string | null): string {
+  if (!action) return "Modify";
+  const clean = action.replace(/_/g, " ").trim();
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+// Maps an action/tool name to semantic theme colors (amber for edits, emerald for creates, violet for moves, rose for deletes)
+function getActionTheme(action?: string | null) {
+  const norm = (action || "").toLowerCase().replace(/_file$/, "").trim();
+  if (norm === "delete") {
+    return {
+      text: "text-accent-rose",
+      badge: "bg-accent-rose/20 text-accent-rose border-accent-rose/40",
+    };
+  }
+  if (norm === "create" || norm === "write") {
+    return {
+      text: "text-accent-emerald",
+      badge: "bg-accent-emerald/20 text-accent-emerald border-accent-emerald/40",
+    };
+  }
+  if (norm === "move") {
+    return {
+      text: "text-accent-violet",
+      badge: "bg-accent-violet/20 text-accent-violet border-accent-violet/40",
+    };
+  }
+  return {
+    text: "text-accent-amber",
+    badge: "bg-accent-amber/20 text-accent-amber border-accent-amber/40",
+  };
+}
+
 export default function HitlPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
@@ -277,7 +311,7 @@ export default function HitlPage() {
                     ? "bg-accent-amber/20 text-accent-amber border border-accent-amber/50 shadow-[0_0_10px_rgba(251,191,36,0.2)] font-bold"
                     : "text-text-muted hover:text-text-primary hover:bg-background-light/40"
                 }`}
-                title={`Ticket #${tx.id} [${tx.agent_role || tx.agent_name}] ${tx.target_file.split("/").pop()}`}
+                title={`[${formatAction(tx.action_type)}] ${tx.target_file.split("/").pop()} · Ticket #${tx.id} (${tx.agent_role || tx.agent_name})`}
               >
                 #{tx.id}
               </button>
@@ -328,10 +362,10 @@ export default function HitlPage() {
                         selectedTx?.id === tx.id ? "bg-background-light/80 border-l-2 border-accent-amber" : "border-l-2 border-transparent"
                       }`}
                     >
-                      {/* Top row: Ticket # (replacing monolithic agent label) + Staging timestamp */}
+                      {/* Top row: Tool Name / Action Header + Staging timestamp */}
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-mono font-semibold text-accent-amber">
-                          Ticket #{tx.id}
+                        <span className={`text-xs font-mono font-semibold capitalize ${getActionTheme(tx.action_type).text}`}>
+                          {formatAction(tx.action_type)}
                         </span>
                         <span className="text-[10px] text-text-muted">{new Date(tx.created_at).toLocaleTimeString()}</span>
                       </div>
@@ -341,7 +375,7 @@ export default function HitlPage() {
                           ? `${tx.target_file.split("/").pop()} → ${tx.destination_file.split("/").pop()}`
                           : (tx.target_file.split("/").pop() || tx.target_file)}
                       </h3>
-                      {/* Secondary Header: Agent Role, Agent ID & Action Type */}
+                      {/* Secondary Header: Agent Role, Agent ID & Ticket Number */}
                       <div className="flex items-center gap-1.5 text-xs text-text-muted truncate mt-1">
                         <span className="truncate font-medium text-text-secondary">
                           {tx.agent_role || tx.agent_name}
@@ -352,7 +386,9 @@ export default function HitlPage() {
                           </span>
                         )}
                         <span>·</span>
-                        <span className="capitalize shrink-0">{tx.action_type}</span>
+                        <span className="font-mono text-[11px] font-semibold text-accent-amber shrink-0">
+                          Ticket #{tx.id}
+                        </span>
                       </div>
                       {/* Provenance Row: Conversation ID & Thread ID pills */}
                       {(tx.conversation_id || tx.thread_id) && (
@@ -461,10 +497,10 @@ export default function HitlPage() {
             <div className="p-6 border-b border-background-light shrink-0">
               <div className="flex justify-between items-start mb-4">
                 <div>
-                  {/* Top metadata badge bar: Ticket #, Agent Role, Agent ID, Conversation ID, Thread ID, and Action Type */}
+                  {/* Top metadata badge bar: Tool Name / Action Badge, Agent Role, Agent ID, Conversation ID, Thread ID, and Ticket # */}
                   <div className="flex items-center flex-wrap gap-2 mb-1.5">
-                    <span className="px-2 py-0.5 text-xs font-mono font-bold rounded bg-accent-amber/20 text-accent-amber border border-accent-amber/40 shadow-xs">
-                      Ticket #{selectedTx.id}
+                    <span className={`px-2 py-0.5 text-xs font-mono font-bold rounded capitalize border shadow-xs ${getActionTheme(selectedTx.action_type).badge}`}>
+                      {formatAction(selectedTx.action_type)}
                     </span>
                     <span className="text-xs font-medium text-text-secondary">
                       {selectedTx.agent_role || selectedTx.agent_name}
@@ -493,8 +529,8 @@ export default function HitlPage() {
                         thread: {formatShortId(selectedTx.thread_id)}
                       </span>
                     )}
-                    <span className="text-xs text-text-muted">
-                      · <span className="capitalize">{selectedTx.action_type}</span>
+                    <span className="text-xs font-mono font-semibold text-accent-amber shrink-0">
+                      · <span>Ticket #{selectedTx.id}</span>
                     </span>
                   </div>
                   {/* Primary Header: Target Note Filename */}
