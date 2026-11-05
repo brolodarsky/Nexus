@@ -163,7 +163,7 @@ export function buildAgentExecutionGraph(events: TraceEvent[]): {
     // Resolve unique node ID for this event
     let nodeId = evt.agent_id;
     let parentId = evt.parent_id ?? null;
-    let displayLabel = rawAgent;
+    let displayLabel = rawAgent === "NexusAgent" || rawAgent === "nexus" ? "Head Agent" : rawAgent;
     let color = evt.color ?? "cyan";
 
     if (!nodeId) {
@@ -172,7 +172,7 @@ export function buildAgentExecutionGraph(events: TraceEvent[]): {
       if (!isSub) {
         nodeId = "nexus";
         parentId = null;
-        displayLabel = rawAgent || "NexusAgent";
+        displayLabel = "Head Agent";
       } else {
         parentId = "nexus";
         if (evt.type === "agent_start") {
@@ -371,6 +371,13 @@ function TraceStepCard({
     evt.agent_id ||
     (evt.agent?.toLowerCase().startsWith("subagent") ? "subagent" : (evt.agent || "nexus"));
 
+  // displayAgent: Human-readable agent badge label.
+  // The primary commander ("nexus" / "NexusAgent") is rendered as "Head Agent"; subagents retain their serial IDs ("subagent-1", "subagent-2")
+  const displayAgent =
+    agentId === "nexus" || evt.agent === "NexusAgent" || evt.agent === "Head Agent"
+      ? "Head Agent"
+      : agentId;
+
   const hasStructuredPayload = Boolean(
     (toolArgs && Object.keys(toolArgs).length > 0) ||
     toolResult ||
@@ -408,9 +415,9 @@ function TraceStepCard({
           <span className="shrink-0 w-4 text-center">{icon}</span>
           <span
             className={`shrink-0 px-1.5 py-0.2 rounded border text-[0.65rem] font-mono font-semibold ${theme.badge}`}
-            title={`Agent ID: ${agentId}${evt.agent ? ` • Name: ${evt.agent}` : ""}`}
+            title={`Agent: ${displayAgent} • ID: ${agentId}`}
           >
-            {agentId}
+            {displayAgent}
           </span>
           <span className="px-1.5 py-0.2 rounded bg-bg-tertiary text-text-secondary text-[0.62rem] uppercase tracking-wider shrink-0">
             {evt.type}
@@ -654,10 +661,10 @@ export const AgentGraphView = memo(function AgentGraphView({
                 <div className="flex items-center gap-2">
                   <span className="text-base">🧠</span>
                   <span className="font-bold text-xs text-cyan-300">
-                    {rootNode.label}
+                    {rootNode.label === "NexusAgent" || rootNode.label === "nexus" ? "Head Agent" : rootNode.label}
                   </span>
                   <span className="text-[0.62rem] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-200" title={`Unique Agent ID: ${rootNode.id}`}>
-                    Commander ({rootNode.id})
+                    Head Agent (Root)
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-[0.65rem] font-mono">
@@ -795,7 +802,7 @@ export const AgentGraphView = memo(function AgentGraphView({
                 {selectedNode.parentId === null ? "🧠" : "⚡"}
               </span>
               <h4 className="text-xs font-bold text-text-primary">
-                {selectedNode.label} — Full Uncut Inspector
+                {selectedNode.id === "nexus" || selectedNode.label === "NexusAgent" || selectedNode.label === "nexus" ? "Head Agent" : selectedNode.label} — Full Uncut Inspector
               </h4>
               <span className="text-[0.62rem] font-mono px-1.5 py-0.5 rounded bg-bg-tertiary text-accent-cyan border border-accent-cyan/30" title={`Unique Agent ID: ${selectedNode.id}`}>
                 id: {selectedNode.id}

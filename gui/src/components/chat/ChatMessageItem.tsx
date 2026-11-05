@@ -46,7 +46,7 @@ const ChatMessageItem = memo(function ChatMessageItem({ message }: ChatMessageIt
           <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.65rem] font-mono font-medium bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan">
               <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan" />
-              {message.agent || "nexus"}
+              {message.agent === "nexus" || message.agent === "NexusAgent" ? "Head Agent" : (message.agent || "Head Agent")}
               {message.domain && (
                 <span className="text-text-muted font-sans">• {message.domain}</span>
               )}

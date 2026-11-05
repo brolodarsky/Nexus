@@ -89,8 +89,8 @@ from nexus.shared_tools.shared import (
 
 # ── Agent Tracers & Subagent Serial Counter ──────────────────────────────────
 
-# Cyan console logger and SSE event emitter for the primary NexusAgent (root node `agent_id="nexus"`)
-nexus_tracer = AgentTracer("NexusAgent", color="cyan", agent_id="nexus", parent_id=None)
+# Cyan console logger and SSE event emitter for the primary Head Agent (root node `agent_id="nexus"`)
+nexus_tracer = AgentTracer("Head Agent", color="cyan", agent_id="nexus", parent_id=None)
 # Default magenta tracer kept for backward-compatible module imports; individual subagents instantiate their own serial-numbered AgentTracer
 subagent_tracer = AgentTracer("Subagent", color="magenta", agent_id="subagent", parent_id="nexus")
 

@@ -69,7 +69,7 @@ def run_nexus_agent_with_trace(
         conversation_id=active_thread,
         thread_id=active_thread,
         agent_id="nexus",
-        agent_role=f"Commander ({effective_tier})",
+        agent_role=f"Head Agent ({effective_tier})",
     )
     t0 = time.time()
 
@@ -121,7 +121,7 @@ def run_nexus_agent_with_trace(
             "agent": "nexus",
             "domain": (filters or {}).get("domain"),
             "confidence": 1.0,
-            "reasoning": f"Single Universal Agent (NexusAgent · {active_model_name} [{effective_tier}]) hydrated with Master Instructions.",
+            "reasoning": f"Single Universal Agent (Head Agent · {active_model_name} [{effective_tier}]) hydrated with Master Instructions.",
             "model_tier": effective_tier,
             "model_name": active_model_name,
             "tool_calls": tool_calls,

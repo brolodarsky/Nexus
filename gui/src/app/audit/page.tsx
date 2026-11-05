@@ -202,13 +202,13 @@ export default function AuditPage() {
                     {/* Display truncated Conversation ID (thread_id) with full UUID tooltip; falls back to agent name for threadless runs */}
                     <span
                       className="px-1.5 py-0.5 rounded bg-bg-primary/60 text-cyan-300"
-                      title={r.thread_id && r.thread_id !== "unspecified" ? `Conversation ID: ${r.thread_id}` : `Agent: ${r.agent_name || "nexus"}`}
+                      title={r.thread_id && r.thread_id !== "unspecified" ? `Conversation ID: ${r.thread_id}` : `Agent: ${r.agent_name === "nexus" || r.agent_name === "NexusAgent" ? "Head Agent" : (r.agent_name || "Head Agent")}`}
                     >
                       {r.thread_id && r.thread_id !== "unspecified"
-                        ? (r.agent_name && r.agent_name !== "nexus"
+                        ? (r.agent_name && r.agent_name !== "nexus" && r.agent_name !== "NexusAgent"
                             ? `${r.agent_name} • conv: ${r.thread_id.slice(0, 8)}`
-                            : `conv: ${r.thread_id.slice(0, 8)}`)
-                        : (r.agent_name || "nexus")}
+                            : `Head Agent • conv: ${r.thread_id.slice(0, 8)}`)
+                        : (r.agent_name === "nexus" || r.agent_name === "NexusAgent" ? "Head Agent" : (r.agent_name || "Head Agent"))}
                     </span>
                     {typeof r.cost_usd === "number" && r.cost_usd > 0 && (
                       <span className="text-amber-300 font-bold">
@@ -258,7 +258,7 @@ export default function AuditPage() {
                         Run Snapshot <span className="font-mono text-accent-cyan">#{activeSnapshot.run_id}</span>
                       </h2>
                       <span className="text-[0.65rem] font-mono px-2 py-0.5 rounded-full bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/30">
-                        {activeSnapshot.agent_name}
+                        {activeSnapshot.agent_name === "nexus" || activeSnapshot.agent_name === "NexusAgent" ? "Head Agent" : (activeSnapshot.agent_name || "Head Agent")}
                       </span>
                       {activeSnapshot.domain && (
                         <span className="text-[0.65rem] font-mono px-2 py-0.5 rounded-full bg-bg-tertiary text-text-secondary">
