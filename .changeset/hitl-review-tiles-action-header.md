@@ -7,3 +7,4 @@ type: patch
   - Maintained the primary filename header intact (`{target_file} → {destination_file}` or `{target_file}`).
   - Relocated the ticket number (`Ticket #{id}`) down into the secondary metadata row where the action type was previously placed, preserving clean alignment alongside agent role, agent ID, conversation ID, and thread provenance pills.
   - Updated collapsed queue rail tooltips to reflect the action-first hierarchy (`[{action}] {file} · Ticket #{id}`).
+

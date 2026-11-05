@@ -286,6 +286,7 @@ _The Content Log & Reference_
 	- **Smartphone:** Pixel 8 Pro
 	- **[[Laptop App List]]**
 	- **[[Protocol - Laptop App List Update]]**
+	- **[[Protocol - Digitize DVD Collection]]:** Workflow for ripping disc data via MakeMKV and encoding via HandBrake (H.264/H.265).
 - **Software Subscriptions:** (See [[Recurring Payments]])
 - **Hardware Inventory:** Serial numbers and warranty info.
 
