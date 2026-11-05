@@ -399,3 +399,223 @@ def test_hitl_execution_context_provenance_propagation_and_api(root: Path, clien
     assert revs[0]["agent_id"] == "subagent-1"
     assert revs[0]["agent_role"] == "Subagent #1 (low)"
 
+
+# ── Atomic File Move & Delete Support in HITL ───────────────────────────────
+
+
+def test_commit_and_rollback_file_deletion(root: Path):
+    """Verifies that staging action_type='delete' unlinks the file on commit and restores it on rollback."""
+    initial_text = "# Obsolete Note\n\nOld content that should be pruned.\n"
+    path = _write(root, "TrashNote.md", initial_text)
+
+    # 1. Stage deletion transaction
+    tx_id = hq.add_transaction(
+        agent_name="nexus_agent",
+        action_type="delete",
+        target_file="Vault/TrashNote.md",
+        proposed_content="",
+        original_content=initial_text,
+        reasoning="Pruning obsolete note",
+    )
+
+    # 2. Approve and commit deletion
+    result = hq.commit_transaction(tx_id, root)
+    assert not path.exists()
+    assert hq.get_transaction(tx_id)["status"] == "approved"
+    assert result["forced"] is False
+
+    # 3. Rollback deletion and verify exact restoration
+    rollback_res = hq.rollback_transaction(tx_id, root)
+    assert path.exists()
+    assert _read(path) == initial_text
+    assert hq.get_transaction(tx_id)["status"] == "rolled_back"
+    assert rollback_res["forced"] is False
+
+
+def test_commit_delete_refuses_when_human_edited(root: Path):
+    """Verifies that approving a staged deletion refuses if the note was edited on disk in Obsidian."""
+    path = _write(root, "ActiveNote.md", "Original text\n")
+    tx_id = hq.add_transaction(
+        agent_name="nexus_agent",
+        action_type="delete",
+        target_file="Vault/ActiveNote.md",
+        proposed_content="",
+        original_content="Original text\n",
+        reasoning="Delete note",
+    )
+    # Human edits note on disk
+    _write(root, "ActiveNote.md", "Original text\nHuman added important thought\n")
+
+    with pytest.raises(hq.StaleBaseError) as exc:
+        hq.commit_transaction(tx_id, root)
+    assert "edited on disk" in str(exc.value)
+    assert path.exists()
+    assert "Human added important thought" in _read(path)
+
+    # Force commit overrides human edits but preserves snapshot
+    hq.commit_transaction(tx_id, root, force=True)
+    assert not path.exists()
+    hq.rollback_transaction(tx_id, root)
+    assert path.exists()
+    assert "Human added important thought" in _read(path)
+
+
+def test_rollback_delete_refuses_if_file_recreated(root: Path):
+    """Verifies that rolling back a deletion refuses if a new note was created at the target path."""
+    path = _write(root, "Recreated.md", "Old\n")
+    tx_id = hq.add_transaction(
+        agent_name="nexus_agent",
+        action_type="delete",
+        target_file="Vault/Recreated.md",
+        proposed_content="",
+        original_content="Old\n",
+        reasoning="Delete",
+    )
+    hq.commit_transaction(tx_id, root)
+    assert not path.exists()
+
+    # Recreate note on disk
+    _write(root, "Recreated.md", "Freshly created\n")
+
+    with pytest.raises(hq.StaleBaseError, match="created at this path"):
+        hq.rollback_transaction(tx_id, root)
+    assert _read(path) == "Freshly created\n"
+
+    # Forced rollback overwrites recreated note but preserves it
+    hq.rollback_transaction(tx_id, root, force=True)
+    assert _read(path) == "Old\n"
+
+
+def test_commit_and_rollback_file_move(root: Path):
+    """Verifies that atomic file moves relocate the note on commit and cleanly revert on rollback."""
+    initial_text = "# Mission Note\n\nConcluded mission awaiting archival.\n"
+    src_path = _write(root, "Missions/Acme.md", initial_text)
+    dst_path = root / "Vault" / "Archive" / "2026" / "Acme.md"
+
+    # 1. Stage move transaction with destination_file
+    tx_id = hq.add_transaction(
+        agent_name="nexus_agent",
+        action_type="move",
+        target_file="Vault/Missions/Acme.md",
+        destination_file="Vault/Archive/2026/Acme.md",
+        proposed_content=initial_text,
+        original_content=initial_text,
+        reasoning="Mission concluded, archiving to 2026",
+    )
+
+    # 2. Approve and commit move
+    commit_res = hq.commit_transaction(tx_id, root)
+    assert not src_path.exists()
+    assert dst_path.exists()
+    assert _read(dst_path) == initial_text
+    assert hq.get_transaction(tx_id)["status"] == "approved"
+    assert commit_res["destination_file"] == "Vault/Archive/2026/Acme.md"
+
+    # 3. Rollback move: destination unlinked and source restored
+    rollback_res = hq.rollback_transaction(tx_id, root)
+    assert not dst_path.exists()
+    assert src_path.exists()
+    assert _read(src_path) == initial_text
+    assert hq.get_transaction(tx_id)["status"] == "rolled_back"
+    assert rollback_res["forced"] is False
+
+
+def test_commit_move_refuses_when_source_edited_or_dest_exists(root: Path):
+    """Verifies that committing a move detects source drift or destination collisions."""
+    src_path = _write(root, "Source.md", "Initial\n")
+    dst_path = _write(root, "Collision.md", "Existing dest\n")
+
+    # Destination collision check
+    tx_id = hq.add_transaction(
+        agent_name="nexus_agent",
+        action_type="move",
+        target_file="Vault/Source.md",
+        destination_file="Vault/Collision.md",
+        proposed_content="Initial\n",
+        original_content="Initial\n",
+        reasoning="Move collision",
+    )
+    with pytest.raises(hq.StaleBaseError, match="destination"):
+        hq.commit_transaction(tx_id, root)
+
+    # Source drift check
+    dst_path.unlink()  # Clear collision
+    _write(root, "Source.md", "Initial\nHuman edits\n")
+    with pytest.raises(hq.StaleBaseError, match="source note was edited"):
+        hq.commit_transaction(tx_id, root)
+
+
+def test_move_file_and_delete_file_tools(root: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verifies move_file and delete_file @tool functions in shared.py and graph.py integration."""
+    import nexus.agent.graph as graph_module
+    import nexus.shared_tools.shared as shared_module
+    import nexus.shared_tools.vault_reader as vr_module
+
+    vault = root / "Vault"
+    monkeypatch.setattr(shared_module, "VAULT_PATH", vault)
+    monkeypatch.setattr(vr_module, "VAULT_PATH", vault)
+
+    # 1. Verify CORE_TOOLS includes move_file and delete_file
+    core_tool_names = [t.name for t in graph_module.CORE_TOOLS]
+    assert "move_file" in core_tool_names
+    assert "delete_file" in core_tool_names
+
+    # 2. Verify containment guards
+    out_of_bounds = shared_module.move_file.invoke({
+        "source_path": "Note.md",
+        "destination_path": "../escape.md",
+        "reasoning": "Escape test",
+    })
+    assert "Error: Refusing to move file outside the Vault" in out_of_bounds
+
+    # 3. Verify identity move guard
+    same_path = shared_module.move_file.invoke({
+        "source_path": "Identical.md",
+        "destination_path": "Identical.md",
+        "reasoning": "Identity test",
+    })
+    assert "Error: Source and destination paths are identical" in same_path
+
+    # 4. Stage legitimate move_file
+    note_content = "# Active Pursuit\n\nTarget data.\n"
+    _write(root, "Active.md", note_content)
+    move_res = shared_module.move_file.invoke({
+        "source_path": "Active.md",
+        "destination_path": "Archive/2026/Active.md",
+        "reasoning": "Archiving finished note",
+    })
+    assert "✅ File move staged to HITL queue" in move_res
+    assert "Vault/Active.md" in move_res
+    assert "Vault/Archive/2026/Active.md" in move_res
+
+    # 5. Read staged move note via read_file
+    staged_read = shared_module.read_file.invoke({"file_path": "Active.md"})
+    assert "[STAGED TO MOVE IN HITL QUEUE" in staged_read
+    assert "Target data." in staged_read
+
+    # 6. Delete file tool
+    del_note_text = "# Redundant File\n\nNo longer needed.\n"
+    _write(root, "Redundant.md", del_note_text)
+    del_res = shared_module.delete_file.invoke({
+        "file_path": "Redundant.md",
+        "reasoning": "Pruning redundant file",
+    })
+    assert "✅ File deletion staged to HITL queue" in del_res
+
+    # Read staged delete note via read_file
+    del_read = shared_module.read_file.invoke({"file_path": "Redundant.md"})
+    assert "[STAGED FOR DELETION IN HITL QUEUE" in del_read
+    assert "Redundant File" in del_read
+
+    # 7. Discard pending create via delete_file
+    shared_module.create_file.invoke({
+        "file_path": "PendingOnly.md",
+        "content": "Not on disk yet\n",
+        "reasoning": "Staged create",
+    })
+    discard_res = shared_module.delete_file.invoke({
+        "file_path": "PendingOnly.md",
+        "reasoning": "Changed mind, discard staged note",
+    })
+    assert "Discarded pending staged note creation" in discard_res
+

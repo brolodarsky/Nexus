@@ -60,7 +60,7 @@ Nexus/
 │   ├── interfaces/              # Entry-point implementations (cli, voice, telegram)
 │   └── shared_tools/            # Shared engine utilities & deterministic CLI tools
 │       ├── vault_reader.py      # Pure-Python Vault navigation & search functions
-│       ├── shared.py            # Shared LangChain @tool wrappers (read_file, modify_file, create_file, get_directory_structure, search_vault)
+│       ├── shared.py            # Shared LangChain @tool wrappers (read_file, modify_file, create_file, move_file, delete_file, get_directory_structure, search_vault)
 │       └── summarizer.py        # Conversation window compression & archiving node
 ├── start.ps1                   # Launches backend + frontend Control Panel
 ├── pyproject.toml              # UV dependency configuration
@@ -140,7 +140,7 @@ This repository distinguishes between capabilities and constraints that define h
 | `src/nexus/evals/runner.py` | Benchmarks `NexusAgent` against the Golden Dataset. | `python -m nexus.evals.runner` |
 | `src/nexus/agent/graph.py` | Single Universal Agent (`NexusAgent`). Boots with prompt-cache-isolated `inject_root_instructions()`, routes across native `ChatGoogleGenerativeAI` (Argon / Flash) and OpenAI tiers (`get_chat_model` / `resolve_model_config`) with per-turn `model_tier` selection via LangGraph `RunnableConfig`, configurable timeout (`ai_request_timeout`), and resilient tier fallback on 504 Deadline Exceeded, preserves 100% lossless KV-cached history, binds core Vault/HITL/Blackboard tools, and spawns parallel isolated subagents (`spawn_subagent(task_prompt, model_tier="low")`). | `python -m nexus.agent.api` |
 | `src/nexus/shared_tools/vault_reader.py` | Pure-Python filesystem utilities for Vault navigation and recent modification queries (`get_recent_modifications`, `get_directory_tree`, `resolve_vault_note_path`, `read_note_content`, `search_within`). | `python -m nexus.shared_tools.vault_reader --today` |
-| `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` wrappers (`get_directory_structure`, `read_file`, `modify_file`, `create_file`, `search_vault`, `get_recent_modifications`, `search_web`, `fetch_emails`, calendar tools, `post_to_board`, `read_board`, `spawn_subagent`, `run_shared_tool_cli`). | N/A (library module) |
+| `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` wrappers (`get_directory_structure`, `read_file`, `modify_file`, `create_file`, `move_file`, `delete_file`, `search_vault`, `get_recent_modifications`, `search_web`, `fetch_emails`, calendar tools, `post_to_board`, `read_board`, `spawn_subagent`, `run_shared_tool_cli`). | N/A (library module) |
 | `src/nexus/core/blackboard.py` | Shared Agent Blackboard (`blackboard.db`) for cross-subagent and cross-turn situational bulletins. | N/A (library module) |
 | `src/nexus/core/engine_constitution.py` | Hydrates `Vault/Master Instructions.md` via `inject_root_instructions()` (`{current_time}`, `{user_name}`, `{vault_structure}`, `{shared_tools}`). IDE Resident agents and `NexusAgent` inject its output at boot. | `python -m nexus.core.engine_constitution` |
 | `src/nexus/core/tool_catalog.py` | Static (`ast`, no imports) catalog of `src/nexus/shared_tools/` modules for the `{shared_tools}` placeholder. | `python -m nexus.core.tool_catalog` |

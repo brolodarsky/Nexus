@@ -54,6 +54,7 @@ class TransactionResponse(BaseModel):
     thread_id: Optional[str] = None
     agent_id: Optional[str] = None
     agent_role: Optional[str] = None
+    destination_file: Optional[str] = None
 
 @router.get("/pending", response_model=List[TransactionResponse])
 async def get_pending():
@@ -143,6 +144,7 @@ class MockTransactionRequest(BaseModel):
     thread_id: Optional[str] = None
     agent_id: Optional[str] = None
     agent_role: Optional[str] = None
+    destination_file: Optional[str] = None
 
 @router.post("/mock")
 async def create_mock_tx(request: MockTransactionRequest):
@@ -158,5 +160,6 @@ async def create_mock_tx(request: MockTransactionRequest):
         thread_id=request.thread_id,
         agent_id=request.agent_id,
         agent_role=request.agent_role,
+        destination_file=request.destination_file,
     )
     return {"status": "success", "tx_id": tx_id}

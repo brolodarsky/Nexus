@@ -1,8 +1,9 @@
 """
 shared.py — Shared @tool wrappers for the Universal NexusAgent and spawned subagents.
 Provides high-leverage, zero-drift tools for Vault navigation, reading, surgical file editing
-(exact Target/Replacement patching routed through HITL), new note creation, recent modification
-queries, email/calendar access, and on-demand CLI tool execution.
+(exact Target/Replacement patching routed through HITL), new note creation, atomic note relocation
+and deletion (move_file, delete_file), recent modification queries, email/calendar access,
+and on-demand CLI tool execution.
 """
 import json
 import subprocess
@@ -98,6 +99,31 @@ def read_file(
         staged_text: str = pending_tx["proposed_content"]
         tx_id = pending_tx.get("id")
         target_name = pending_tx.get("target_file", lookup_target)
+        action_type = pending_tx.get("action_type", "")
+
+        # Branch on staged action type to display high-signal context
+        if action_type in ("delete", "delete_file"):
+            orig_text = pending_tx.get("original_content") or ""
+            banner = (
+                f"[STAGED FOR DELETION IN HITL QUEUE (Tx #{tx_id} on `{target_name}`) — "
+                f"Awaiting human approval]\n\n"
+            )
+            return f"{banner}--- {target_name} (Content prior to proposed deletion) ---\n{orig_text}"
+
+        if action_type in ("move", "move_file"):
+            dest_name = pending_tx.get("destination_file", "unknown")
+            banner = (
+                f"[STAGED TO MOVE IN HITL QUEUE (Tx #{tx_id}: `{target_name}` → `{dest_name}`) — "
+                f"Showing proposed content awaiting human approval]\n\n"
+            )
+            if start_line is not None or end_line is not None:
+                lines = staged_text.splitlines()
+                s_idx = max(0, (start_line or 1) - 1)
+                e_idx = min(len(lines), end_line or len(lines))
+                sliced = "\n".join(f"{i + 1}: {lines[i]}" for i in range(s_idx, e_idx))
+                return f"{banner}--- {target_name} → {dest_name} (Lines {s_idx + 1}-{e_idx} of {len(lines)}) ---\n{sliced}"
+            return f"{banner}--- {target_name} → {dest_name} ---\n{staged_text}"
+
         banner = (
             f"[STAGED IN HITL QUEUE (Tx #{tx_id} on `{target_name}`) — "
             f"Showing cumulative pending content awaiting human approval]\n\n"
@@ -357,6 +383,217 @@ def create_file(
         return (
             f"✅ File {'overwrite' if original_content is not None else 'creation'} staged to HITL queue "
             f"(Transaction #{tx_id} on `{hitl_target_file}`). Awaiting human approval."
+        )
+
+
+# Signature breakdown for move_file:
+# - source_path: Relative Vault path (or unique filename) of the existing note to move
+# - destination_path: Target relative path where the note will live after approval
+# - reasoning: Plain-English justification explaining the move for human review in the HITL panel
+# - overwrite: Boolean guard preventing accidental overwrites if a file already exists at destination_path
+@tool
+def move_file(
+    source_path: str,
+    destination_path: str,
+    reasoning: str,
+    overwrite: bool = False,
+) -> str:
+    """Propose moving or renaming an existing note within the Vault (staged to the HITL review queue).
+
+    Enables atomic note relocation and archival (e.g. moving a concluded Mission from
+    `Campaign - */Mission - *.md` to `<Section>/Archive/YYYY/Mission - *.md` or relocating a note
+    to a new section) without leaving orphaned files behind.
+
+    Stages the move to `hitl.db` for review in the Control Panel. Upon human approval,
+    the note is atomically written to `destination_path` and unlinked from `source_path`,
+    with a pre-commit snapshot saved in `revisions` enabling full one-click rollback.
+
+    Args:
+        source_path: Existing note path (relative to Vault root) or unique note filename.
+        destination_path: Target Vault-relative path where the note should be moved.
+        reasoning: Concise explanation of WHY this note is being moved or archived.
+        overwrite: Set True only if intentionally overwriting an existing note at destination (default: False).
+    """
+    from nexus.core.hitl_queue import add_transaction, get_file_mutation_lock, get_pending_for_file
+    from nexus.shared_tools.vault_reader import resolve_vault_note_path
+
+    # Phase 1: Validate input parameters and prevent empty path operations
+    if not source_path or not source_path.strip():
+        return "Error: `source_path` cannot be empty in `move_file`."
+    if not destination_path or not destination_path.strip():
+        return "Error: `destination_path` cannot be empty in `move_file`."
+    if not reasoning or not reasoning.strip():
+        return "Error: `reasoning` cannot be empty in `move_file`. Provide context for HITL review."
+
+    # Phase 2: Normalize and validate destination path containment within Vault
+    clean_dst = destination_path.strip().replace("\\", "/").lstrip("/")
+    if clean_dst.startswith("Vault/"):
+        clean_dst = clean_dst[len("Vault/"):]
+    if not clean_dst.endswith(".md") and "." not in clean_dst.split("/")[-1]:
+        clean_dst += ".md"
+
+    clean_src_raw = source_path.strip().replace("\\", "/").lstrip("/")
+    if clean_src_raw.startswith("Vault/"):
+        clean_src_raw = clean_src_raw[len("Vault/"):]
+    if not clean_src_raw.endswith(".md") and "." not in clean_src_raw.split("/")[-1]:
+        clean_src_raw += ".md"
+
+    if clean_src_raw.lower() == clean_dst.lower():
+        return f"Error: Source and destination paths are identical ('Vault/{clean_src_raw}')."
+
+    resolved_vault = VAULT_PATH.resolve()
+    candidate_dst = (resolved_vault / clean_dst).resolve()
+    if not candidate_dst.is_relative_to(resolved_vault):
+        return f"Error: Refusing to move file outside the Vault: '{destination_path}'"
+
+    # Phase 3: Resolve source note on disk (or verify pending staged status)
+    resolved_src, err = resolve_vault_note_path(source_path)
+    if err and ("outside the Vault" in err or "cannot be empty" in err):
+        return err
+
+    if resolved_src is not None:
+        rel_src = str(resolved_src.relative_to(resolved_vault)).replace("\\", "/")
+        hitl_source_file = f"Vault/{rel_src}"
+    else:
+        pending_src = get_pending_for_file(source_path)
+        if pending_src is None:
+            return err or f"Error: Source file '{source_path}' does not exist in the Vault."
+        hitl_source_file = pending_src["target_file"]
+
+    hitl_dest_file = f"Vault/{clean_dst}"
+
+    # Phase 4: Guard against identity moves (source == destination)
+    if hitl_source_file.lower() == hitl_dest_file.lower():
+        return f"Error: Source and destination paths are identical ('{hitl_source_file}')."
+
+    # Phase 5: Check destination collision guard (unless overwrite=True)
+    full_dst_path = resolved_vault / clean_dst
+    if full_dst_path.exists() and not overwrite:
+        return (
+            f"Error: Destination file '{hitl_dest_file}' already exists on disk. "
+            f"Pass `overwrite=True` if you intentionally intend to replace it."
+        )
+
+    # Phase 6: Thread-safe locking across both source and destination target paths
+    with get_file_mutation_lock(hitl_source_file):
+        with get_file_mutation_lock(hitl_dest_file):
+            # Check if source has pending staged edits so proposed content carries edits forward
+            pending_tx = get_pending_for_file(hitl_source_file)
+            if resolved_src is not None:
+                try:
+                    disk_content: Optional[str] = resolved_src.read_text(encoding="utf-8")
+                except Exception as e:
+                    return f"Error reading source file '{source_path}': {e}"
+            else:
+                disk_content = pending_tx.get("original_content") if pending_tx else None
+
+            # Carry pending content if source was already modified in queue; otherwise use disk baseline
+            content_to_move = (
+                pending_tx["proposed_content"]
+                if (pending_tx and pending_tx.get("proposed_content") is not None)
+                else (disk_content or "")
+            )
+            baseline_original = (
+                pending_tx.get("original_content")
+                if (pending_tx and pending_tx.get("original_content") is not None)
+                else disk_content
+            )
+
+            tx_id = add_transaction(
+                agent_name="nexus_agent",
+                action_type="move",
+                target_file=hitl_source_file,
+                destination_file=hitl_dest_file,
+                proposed_content=content_to_move,
+                original_content=baseline_original,
+                reasoning=reasoning,
+            )
+            return (
+                f"✅ File move staged to HITL queue (Transaction #{tx_id}: `{hitl_source_file}` → `{hitl_dest_file}`). "
+                f"Awaiting human approval."
+            )
+
+
+# Signature breakdown for delete_file:
+# - file_path: Relative Vault path (or unique filename) of the existing note to delete
+# - reasoning: Plain-English explanation justifying the deletion for human HITL review
+@tool
+def delete_file(
+    file_path: str,
+    reasoning: str,
+) -> str:
+    """Propose deleting an existing note from the Vault (staged to the HITL review queue).
+
+    NEVER delete files directly. Staging to HITL allows the user to review the proposed
+    deletion in the Control Panel before the note is unlinked from disk.
+    Upon approval, a pre-commit snapshot is saved in `revisions` so the deletion can
+    be completely reversed via one-click rollback.
+
+    If the note represents concluded pursuit or historical state, prefer moving it to
+    `<Section>/Archive/YYYY/` via `move_file` rather than permanently deleting it.
+
+    Args:
+        file_path: Vault-relative path or unique note filename (e.g. "3. Operations/3.1. Career Strategy & Revenue/Saved Job Listings/Expired Job.md").
+        reasoning: Concise explanation of WHY this note should be deleted.
+    """
+    from nexus.core.hitl_queue import add_transaction, get_file_mutation_lock, get_pending_for_file, update_transaction_status
+    from nexus.shared_tools.vault_reader import resolve_vault_note_path
+
+    # Phase 1: Validate input parameters
+    if not file_path or not file_path.strip():
+        return "Error: `file_path` cannot be empty in `delete_file`."
+    if not reasoning or not reasoning.strip():
+        return "Error: `reasoning` cannot be empty in `delete_file`. Explain why deletion is warranted."
+
+    # Phase 2: Resolve note on disk or check pending staged queue
+    resolved_path, err = resolve_vault_note_path(file_path)
+    if err and ("outside the Vault" in err or "cannot be empty" in err):
+        return err
+
+    resolved_vault = VAULT_PATH.resolve()
+    if resolved_path is not None:
+        rel_vault_path = str(resolved_path.relative_to(resolved_vault)).replace("\\", "/")
+        hitl_target_file = f"Vault/{rel_vault_path}"
+    else:
+        pending_tx = get_pending_for_file(file_path)
+        if pending_tx is None:
+            return err or f"Error: File '{file_path}' does not exist in the Vault."
+        hitl_target_file = pending_tx["target_file"]
+
+    # Phase 3: Lock target file and stage deletion
+    with get_file_mutation_lock(hitl_target_file):
+        pending_tx = get_pending_for_file(hitl_target_file)
+
+        # If note was staged as a pending create but never committed to disk, discard it cleanly
+        if pending_tx and pending_tx.get("action_type") == "create" and resolved_path is None:
+            update_transaction_status(pending_tx["id"], "rejected")
+            return f"✅ Discarded pending staged note creation for `{hitl_target_file}` (Tx #{pending_tx['id']} cancelled)."
+
+        if resolved_path is not None:
+            try:
+                disk_content: Optional[str] = resolved_path.read_text(encoding="utf-8")
+            except Exception as e:
+                return f"Error reading existing file '{file_path}': {e}"
+        else:
+            disk_content = pending_tx.get("original_content") if pending_tx else None
+
+        baseline_original = (
+            pending_tx.get("original_content")
+            if (pending_tx and pending_tx.get("original_content") is not None)
+            else disk_content
+        )
+
+        tx_id = add_transaction(
+            agent_name="nexus_agent",
+            action_type="delete",
+            target_file=hitl_target_file,
+            proposed_content="",
+            original_content=baseline_original,
+            reasoning=reasoning,
+        )
+        return (
+            f"✅ File deletion staged to HITL queue (Transaction #{tx_id} on `{hitl_target_file}`). "
+            f"Awaiting human approval."
         )
 
 

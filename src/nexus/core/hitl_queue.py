@@ -145,13 +145,14 @@ def init_db():
             conversation_id TEXT,
             thread_id TEXT,
             agent_id TEXT,
-            agent_role TEXT
+            agent_role TEXT,
+            destination_file TEXT
         )
     ''')
-    # Idempotent schema migration: add provenance columns to existing hitl.db files created before this schema version
+    # Idempotent schema migration: add provenance and destination_file columns to existing hitl.db files
     cursor.execute("PRAGMA table_info(transactions)")
     existing_cols = {row["name"] for row in cursor.fetchall()}
-    for col_name in ("conversation_id", "thread_id", "agent_id", "agent_role"):
+    for col_name in ("conversation_id", "thread_id", "agent_id", "agent_role", "destination_file"):
         if col_name not in existing_cols:
             cursor.execute(f"ALTER TABLE transactions ADD COLUMN {col_name} TEXT")
 
@@ -159,6 +160,7 @@ def init_db():
     #   prior_content NULL      -> file did not exist before approval (rollback deletes it)
     #   applied_content         -> exact text written on approval (rollback refuses if disk drifted, unless forced)
     #   overwritten_content     -> text clobbered by a *forced* rollback, kept so even that action is recoverable
+    #   destination_file        -> target destination path for atomic file move transactions
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS revisions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -169,9 +171,15 @@ def init_db():
             rolled_back INTEGER DEFAULT 0,
             overwritten_content TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            rolled_back_at TIMESTAMP
+            rolled_back_at TIMESTAMP,
+            destination_file TEXT
         )
     ''')
+    cursor.execute("PRAGMA table_info(revisions)")
+    existing_rev_cols = {row["name"] for row in cursor.fetchall()}
+    for col_name in ("destination_file",):
+        if col_name not in existing_rev_cols:
+            cursor.execute(f"ALTER TABLE revisions ADD COLUMN {col_name} TEXT")
     conn.commit()
     conn.close()
 
@@ -181,7 +189,8 @@ def get_pending_for_file(target_file: str) -> Optional[Dict[str, Any]]:
 
     Also matches when `target_file` is supplied as a short filename (e.g. `"Plan.md"`) by checking
     exact normalized path first and falling back to unique basename suffix match (`%/<filename>`).
-    Used by `read_file`, `modify_file`, and `create_file` so agents read and stack edits
+    Also matches across `destination_file` for pending file move operations.
+    Used by `read_file`, `modify_file`, `move_file`, and `create_file` so agents read and stack edits
     on top of already-staged `proposed_content` instead of reading stale disk state and
     creating conflicting duplicate transactions for the same note.
     """
@@ -191,11 +200,14 @@ def get_pending_for_file(target_file: str) -> Optional[Dict[str, Any]]:
     cursor.execute(
         '''
         SELECT * FROM transactions
-        WHERE status = 'pending' AND REPLACE(target_file, '\\', '/') = ?
+        WHERE status = 'pending' AND (
+            REPLACE(target_file, '\\', '/') = ?
+            OR (destination_file IS NOT NULL AND REPLACE(destination_file, '\\', '/') = ?)
+        )
         ORDER BY id DESC
         LIMIT 1
         ''',
-        (norm_target,),
+        (norm_target, norm_target),
     )
     row = cursor.fetchone()
     if row is None and "/" not in (target_file or "").strip().replace("\\", "/").lstrip("/"):
@@ -206,11 +218,14 @@ def get_pending_for_file(target_file: str) -> Optional[Dict[str, Any]]:
         cursor.execute(
             '''
             SELECT * FROM transactions
-            WHERE status = 'pending' AND REPLACE(target_file, '\\', '/') LIKE ?
+            WHERE status = 'pending' AND (
+                REPLACE(target_file, '\\', '/') LIKE ?
+                OR (destination_file IS NOT NULL AND REPLACE(destination_file, '\\', '/') LIKE ?)
+            )
             ORDER BY id DESC
             LIMIT 1
             ''',
-            (f"%/{basename}",),
+            (f"%/{basename}", f"%/{basename}"),
         )
         row = cursor.fetchone()
     conn.close()
@@ -243,11 +258,14 @@ def add_transaction(
     thread_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     agent_role: Optional[str] = None,
+    destination_file: Optional[str] = None,
 ) -> int:
     """Inserts a pending HITL transaction or coalesces in-place if `target_file` already has a pending edit.
 
     Automatically enriches the row with `conversation_id`, `thread_id`, `agent_id`, and `agent_role` from
     `get_hitl_execution_context()` when not explicitly supplied by the caller.
+    Supports atomic file moves (`action_type="move"` / `"move_file"`) by storing `destination_file`,
+    and file deletions (`action_type="delete"` / `"delete_file"`).
 
     Cumulative Overlay Stacking:
       - If `target_file` already has one or more `status = 'pending'` rows, we preserve the earliest
@@ -264,6 +282,7 @@ def add_transaction(
     eff_agent_name = ctx.get("agent_role") or agent_role or agent_name
 
     norm_target = _normalize_target_file(target_file)
+    norm_dest = _normalize_target_file(destination_file) if destination_file else None
     with get_file_mutation_lock(norm_target):
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -283,8 +302,13 @@ def add_transaction(
             newest = existing_rows[-1]
             tx_id = int(newest["id"])
 
-            # Preserve earliest pending action_type ('create' stays 'create' if refined before disk write)
-            baseline_action = oldest["action_type"] if oldest["action_type"] == "create" else action_type
+            # Explicit move or delete takes precedence; otherwise preserve earliest pending 'create'
+            if action_type in ("delete", "delete_file", "move", "move_file"):
+                baseline_action = action_type
+            elif oldest["action_type"] == "create":
+                baseline_action = "create"
+            else:
+                baseline_action = action_type
             baseline_original = oldest["original_content"] if oldest["original_content"] is not None else original_content
 
             combined_reasoning = oldest.get("reasoning") or ""
@@ -296,6 +320,7 @@ def add_transaction(
             merged_thread_id = eff_thread_id or newest.get("thread_id") or oldest.get("thread_id")
             merged_agent_id = eff_agent_id or newest.get("agent_id") or oldest.get("agent_id")
             merged_agent_role = eff_agent_role or newest.get("agent_role") or oldest.get("agent_role")
+            merged_dest = norm_dest or newest.get("destination_file")
 
             cursor.execute(
                 '''
@@ -310,6 +335,7 @@ def add_transaction(
                     thread_id = ?,
                     agent_id = ?,
                     agent_role = ?,
+                    destination_file = ?,
                     created_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 ''',
@@ -324,6 +350,7 @@ def add_transaction(
                     merged_thread_id,
                     merged_agent_id,
                     merged_agent_role,
+                    merged_dest,
                     tx_id,
                 ),
             )
@@ -344,8 +371,8 @@ def add_transaction(
             '''
             INSERT INTO transactions
             (agent_name, action_type, target_file, original_content, proposed_content, reasoning, status,
-             conversation_id, thread_id, agent_id, agent_role)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+             conversation_id, thread_id, agent_id, agent_role, destination_file)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
             ''',
             (
                 eff_agent_name,
@@ -358,6 +385,7 @@ def add_transaction(
                 eff_thread_id,
                 eff_agent_id,
                 eff_agent_role,
+                norm_dest,
             ),
         )
         tx_id = cursor.lastrowid
@@ -457,56 +485,149 @@ def _require_pending(tx_id: int) -> Dict[str, Any]:
 def commit_transaction(tx_id: int, root: Path, force: bool = False) -> Dict[str, Any]:
     """Applies a pending transaction to disk with stale-base detection and a pre-commit snapshot.
 
+    Supports surgical modifications (`modify`), new file creations (`create`), atomic file
+    relocations (`move` / `move_file`), and note deletions (`delete` / `delete_file`).
+
     Args:
         tx_id: Pending transaction to approve.
         root: Project root that `Vault/...` target paths are resolved against (normally `PROJECT_ROOT`).
         force: Skip the stale-base check and overwrite whatever is on disk (snapshot is still taken).
 
     Returns:
-        Dict with `revision_id`, `target_file`, and `forced` (True only if a real conflict was overridden).
+        Dict with `revision_id`, `target_file`, optional `destination_file`, and `forced`.
 
     Raises:
         StaleBaseError: Disk no longer matches `original_content` (human edited, deleted, or created the note).
     """
     tx = _require_pending(tx_id)
-    path = _resolve_commit_path(tx["target_file"], root)
-    current = _read_disk(path)
-    is_stale = not _content_matches(current, tx["original_content"])
+    action_type = tx.get("action_type", "")
 
-    if is_stale and not force:
-        # Phase 1: Explain *how* the disk drifted so the reviewer knows what approving would clobber
-        if current is None:
-            reason = "the note was deleted or moved after this edit was staged"
-        elif tx["original_content"] is None:
-            reason = "a note was created at this path after this edit was staged"
-        else:
-            reason = "the note was edited on disk after this edit was staged"
-        raise StaleBaseError(f"Stale base for Transaction #{tx_id}: {reason}.", current)
+    if action_type in ("delete", "delete_file"):
+        path = _resolve_commit_path(tx["target_file"], root)
+        current = _read_disk(path)
+        is_stale = not _content_matches(current, tx["original_content"])
 
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        # Phase 2: Stage the snapshot row (uncommitted) BEFORE touching disk, so a write failure rolls both back
-        cursor.execute(
-            '''
-            INSERT INTO revisions (tx_id, target_file, prior_content, applied_content)
-            VALUES (?, ?, ?, ?)
-            ''',
-            (tx_id, tx["target_file"], current, tx["proposed_content"]),
-        )
-        revision_id = cursor.lastrowid
-        # Phase 3: Mutate disk atomically, then flip status and commit the ledger in one SQLite transaction
-        _atomic_write(path, tx["proposed_content"])
-        cursor.execute("UPDATE transactions SET status = 'approved' WHERE id = ?", (tx_id,))
-        conn.commit()
-    except Exception:
-        # conn.rollback(): Discards the uncommitted snapshot row if the disk write (or status update) failed
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+        if is_stale and not force:
+            if current is None:
+                reason = "the note was already deleted or moved after this deletion was staged"
+            else:
+                reason = "the note was edited on disk after deletion was staged"
+            raise StaleBaseError(f"Stale base for Transaction #{tx_id}: {reason}.", current)
 
-    return {"revision_id": revision_id, "target_file": tx["target_file"], "forced": bool(force and is_stale)}
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO revisions (tx_id, target_file, prior_content, applied_content)
+                VALUES (?, ?, ?, ?)
+                ''',
+                (tx_id, tx["target_file"], current, ""),
+            )
+            revision_id = cursor.lastrowid
+            if path.exists():
+                path.unlink()
+            cursor.execute("UPDATE transactions SET status = 'approved' WHERE id = ?", (tx_id,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        return {"revision_id": revision_id, "target_file": tx["target_file"], "forced": bool(force and is_stale)}
+
+    elif action_type in ("move", "move_file"):
+        src_path = _resolve_commit_path(tx["target_file"], root)
+        dest_target = tx.get("destination_file")
+        if not dest_target:
+            raise HitlCommitError(f"Move transaction #{tx_id} is missing destination_file")
+        dst_path = _resolve_commit_path(dest_target, root)
+
+        src_current = _read_disk(src_path)
+        is_src_stale = not _content_matches(src_current, tx["original_content"])
+        if is_src_stale and not force:
+            if src_current is None:
+                reason = "the source note was deleted or moved after this move was staged"
+            else:
+                reason = "the source note was edited on disk after this move was staged"
+            raise StaleBaseError(f"Stale base for Transaction #{tx_id}: {reason}.", src_current)
+
+        dst_current = _read_disk(dst_path)
+        if dst_current is not None and not force:
+            raise StaleBaseError(
+                f"Stale base for Transaction #{tx_id}: a note now exists at destination '{dest_target}'.",
+                dst_current,
+            )
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO revisions (tx_id, target_file, destination_file, prior_content, applied_content)
+                VALUES (?, ?, ?, ?, ?)
+                ''',
+                (tx_id, tx["target_file"], dest_target, src_current, tx["proposed_content"]),
+            )
+            revision_id = cursor.lastrowid
+            _atomic_write(dst_path, tx["proposed_content"])
+            if src_path.exists() and src_path.resolve() != dst_path.resolve():
+                src_path.unlink()
+            cursor.execute("UPDATE transactions SET status = 'approved' WHERE id = ?", (tx_id,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        return {
+            "revision_id": revision_id,
+            "target_file": tx["target_file"],
+            "destination_file": dest_target,
+            "forced": bool(force and (is_src_stale or dst_current is not None)),
+        }
+
+    else:
+        path = _resolve_commit_path(tx["target_file"], root)
+        current = _read_disk(path)
+        is_stale = not _content_matches(current, tx["original_content"])
+
+        if is_stale and not force:
+            # Phase 1: Explain *how* the disk drifted so the reviewer knows what approving would clobber
+            if current is None:
+                reason = "the note was deleted or moved after this edit was staged"
+            elif tx["original_content"] is None:
+                reason = "a note was created at this path after this edit was staged"
+            else:
+                reason = "the note was edited on disk after this edit was staged"
+            raise StaleBaseError(f"Stale base for Transaction #{tx_id}: {reason}.", current)
+
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            # Phase 2: Stage the snapshot row (uncommitted) BEFORE touching disk, so a write failure rolls both back
+            cursor.execute(
+                '''
+                INSERT INTO revisions (tx_id, target_file, prior_content, applied_content)
+                VALUES (?, ?, ?, ?)
+                ''',
+                (tx_id, tx["target_file"], current, tx["proposed_content"]),
+            )
+            revision_id = cursor.lastrowid
+            # Phase 3: Mutate disk atomically, then flip status and commit the ledger in one SQLite transaction
+            _atomic_write(path, tx["proposed_content"])
+            cursor.execute("UPDATE transactions SET status = 'approved' WHERE id = ?", (tx_id,))
+            conn.commit()
+        except Exception:
+            # conn.rollback(): Discards the uncommitted snapshot row if the disk write (or status update) failed
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        return {"revision_id": revision_id, "target_file": tx["target_file"], "forced": bool(force and is_stale)}
 
 
 def rollback_transaction(tx_id: int, root: Path, force: bool = False) -> Dict[str, Any]:
@@ -514,6 +635,7 @@ def rollback_transaction(tx_id: int, root: Path, force: bool = False) -> Dict[st
 
     Refuses (StaleBaseError) if the note changed since approval, because restoring would erase those
     newer edits. With `force=True` the newer text is overwritten but preserved in `overwritten_content`.
+    Correctly reverses file moves and deletions atomically.
     """
     conn = get_db_connection()
     try:
@@ -534,37 +656,109 @@ def rollback_transaction(tx_id: int, root: Path, force: bool = False) -> Dict[st
             raise HitlCommitError(f"Transaction #{tx_id} has no applied revision to roll back")
         rev = dict(row)
 
-        path = _resolve_commit_path(rev["target_file"], root)
-        current = _read_disk(path)
-        drifted = not _content_matches(current, rev["applied_content"])
-        if drifted and not force:
-            raise StaleBaseError(
-                f"Cannot roll back Transaction #{tx_id}: the note changed after approval "
-                f"(rolling back would erase those newer edits).",
-                current,
+        tx = get_transaction(tx_id)
+        action_type = tx.get("action_type") if tx else None
+
+        # Case 1: Rollback atomic file move
+        if action_type in ("move", "move_file") or rev.get("destination_file") is not None:
+            dst_dest = rev.get("destination_file")
+            dst_path = _resolve_commit_path(dst_dest, root)
+            src_path = _resolve_commit_path(rev["target_file"], root)
+
+            current_dst = _read_disk(dst_path)
+            drifted_dst = not _content_matches(current_dst, rev["applied_content"])
+            if drifted_dst and not force:
+                raise StaleBaseError(
+                    f"Cannot roll back Transaction #{tx_id}: destination note changed after approval.",
+                    current_dst,
+                )
+
+            current_src = _read_disk(src_path)
+            if current_src is not None and not force:
+                raise StaleBaseError(
+                    f"Cannot roll back Transaction #{tx_id}: a note now exists at original source path '{rev['target_file']}'.",
+                    current_src,
+                )
+
+            if dst_path.exists():
+                dst_path.unlink()
+            _atomic_write(src_path, rev["prior_content"] or "")
+
+            cursor.execute(
+                '''
+                UPDATE revisions
+                SET rolled_back = 1, rolled_back_at = CURRENT_TIMESTAMP, overwritten_content = ?
+                WHERE id = ?
+                ''',
+                (current_dst if drifted_dst else None, rev["id"]),
             )
+            cursor.execute("UPDATE transactions SET status = 'rolled_back' WHERE id = ?", (tx_id,))
+            conn.commit()
+            return {
+                "revision_id": rev["id"],
+                "target_file": rev["target_file"],
+                "destination_file": dst_dest,
+                "forced": bool(force and (drifted_dst or current_src is not None)),
+            }
 
-        # Restore: NULL prior_content means the approval created the file, so undo = delete it
-        if rev["prior_content"] is None:
-            if path.exists():
-                path.unlink()
+        # Case 2: Rollback file deletion (restores deleted note from prior_content)
+        elif action_type in ("delete", "delete_file") or (rev["applied_content"] == "" and rev["prior_content"] is not None):
+            path = _resolve_commit_path(rev["target_file"], root)
+            current = _read_disk(path)
+            # For deletion, current is expected to be None (absent from disk)
+            drifted = current is not None
+            if drifted and not force:
+                raise StaleBaseError(
+                    f"Cannot roll back Transaction #{tx_id}: a note was created at this path after deletion.",
+                    current,
+                )
+
+            _atomic_write(path, rev["prior_content"] or "")
+
+            cursor.execute(
+                '''
+                UPDATE revisions
+                SET rolled_back = 1, rolled_back_at = CURRENT_TIMESTAMP, overwritten_content = ?
+                WHERE id = ?
+                ''',
+                (current if drifted else None, rev["id"]),
+            )
+            cursor.execute("UPDATE transactions SET status = 'rolled_back' WHERE id = ?", (tx_id,))
+            conn.commit()
+            return {"revision_id": rev["id"], "target_file": rev["target_file"], "forced": bool(force and drifted)}
+
+        # Case 3: Standard modify / create rollback
         else:
-            _atomic_write(path, rev["prior_content"])
+            path = _resolve_commit_path(rev["target_file"], root)
+            current = _read_disk(path)
+            drifted = not _content_matches(current, rev["applied_content"])
+            if drifted and not force:
+                raise StaleBaseError(
+                    f"Cannot roll back Transaction #{tx_id}: the note changed after approval "
+                    f"(rolling back would erase those newer edits).",
+                    current,
+                )
 
-        cursor.execute(
-            '''
-            UPDATE revisions
-            SET rolled_back = 1, rolled_back_at = CURRENT_TIMESTAMP, overwritten_content = ?
-            WHERE id = ?
-            ''',
-            (current if drifted else None, rev["id"]),
-        )
-        cursor.execute("UPDATE transactions SET status = 'rolled_back' WHERE id = ?", (tx_id,))
-        conn.commit()
+            # Restore: NULL prior_content means the approval created the file, so undo = delete it
+            if rev["prior_content"] is None:
+                if path.exists():
+                    path.unlink()
+            else:
+                _atomic_write(path, rev["prior_content"])
+
+            cursor.execute(
+                '''
+                UPDATE revisions
+                SET rolled_back = 1, rolled_back_at = CURRENT_TIMESTAMP, overwritten_content = ?
+                WHERE id = ?
+                ''',
+                (current if drifted else None, rev["id"]),
+            )
+            cursor.execute("UPDATE transactions SET status = 'rolled_back' WHERE id = ?", (tx_id,))
+            conn.commit()
+            return {"revision_id": rev["id"], "target_file": rev["target_file"], "forced": bool(force and drifted)}
     finally:
         conn.close()
-
-    return {"revision_id": rev["id"], "target_file": rev["target_file"], "forced": bool(force and drifted)}
 
 
 def three_way_merge(base: str, ours: str, theirs: str) -> Optional[str]:
@@ -622,11 +816,40 @@ def rebase_transaction(tx_id: int, root: Path) -> Dict[str, Any]:
 
     On success the card's `original_content` becomes current disk text and `proposed_content` becomes
     the merged result, so the diff shown in the GUI is again exactly what approval will write.
+    For deletions, updates the baseline to current disk content so reviewer sees latest human edits.
 
     Raises:
         MergeConflictError: Note deleted/created underneath the edit, or human and agent edits touch.
     """
     tx = _require_pending(tx_id)
+    action_type = tx.get("action_type", "")
+
+    if action_type in ("delete", "delete_file"):
+        path = _resolve_commit_path(tx["target_file"], root)
+        current = _read_disk(path)
+        if _content_matches(current, tx["original_content"]):
+            return {"rebased": False, "message": "Already based on current disk content"}
+        if current is None:
+            raise MergeConflictError("The note no longer exists on disk; reject this edit or force-approve.")
+        conn = get_db_connection()
+        try:
+            conn.execute(
+                '''
+                UPDATE transactions
+                SET original_content = ?, reasoning = ?
+                WHERE id = ?
+                ''',
+                (
+                    _normalize_eol(current),
+                    _merge_reasoning(tx.get("reasoning"), "Rebased deletion baseline onto human edits made after staging."),
+                    tx_id,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {"rebased": True, "message": "Rebased deletion baseline onto current disk content"}
+
     path = _resolve_commit_path(tx["target_file"], root)
     current = _read_disk(path)
 
@@ -675,7 +898,7 @@ def get_recent_revisions(limit: int = 20) -> List[Dict[str, Any]]:
     cursor = conn.cursor()
     cursor.execute(
         '''
-        SELECT r.id, r.tx_id, r.target_file, r.rolled_back, r.created_at, r.rolled_back_at,
+        SELECT r.id, r.tx_id, r.target_file, r.destination_file, r.rolled_back, r.created_at, r.rolled_back_at,
                t.agent_name, t.action_type, t.reasoning,
                t.conversation_id, t.thread_id, t.agent_id, t.agent_role
         FROM revisions r

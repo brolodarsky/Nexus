@@ -336,8 +336,10 @@ export default function HitlPage() {
                         <span className="text-[10px] text-text-muted">{new Date(tx.created_at).toLocaleTimeString()}</span>
                       </div>
                       {/* Primary Header: Target File Title */}
-                      <h3 className="font-semibold text-sm text-text-primary truncate" title={tx.target_file}>
-                        {tx.target_file.split("/").pop() || tx.target_file}
+                      <h3 className="font-semibold text-sm text-text-primary truncate" title={tx.destination_file ? `${tx.target_file} → ${tx.destination_file}` : tx.target_file}>
+                        {tx.destination_file
+                          ? `${tx.target_file.split("/").pop()} → ${tx.destination_file.split("/").pop()}`
+                          : (tx.target_file.split("/").pop() || tx.target_file)}
                       </h3>
                       {/* Secondary Header: Agent Role, Agent ID & Action Type */}
                       <div className="flex items-center gap-1.5 text-xs text-text-muted truncate mt-1">
@@ -497,11 +499,15 @@ export default function HitlPage() {
                   </div>
                   {/* Primary Header: Target Note Filename */}
                   <h1 className="text-xl font-bold text-text-primary mb-1">
-                    {selectedTx.target_file.split("/").pop() || selectedTx.target_file}
+                    {selectedTx.destination_file
+                      ? `${selectedTx.target_file.split("/").pop()} → ${selectedTx.destination_file.split("/").pop()}`
+                      : (selectedTx.target_file.split("/").pop() || selectedTx.target_file)}
                   </h1>
                   {/* Secondary Context: Canonical Full Vault Path */}
                   <p className="text-xs font-mono text-text-muted break-all">
-                    {selectedTx.target_file}
+                    {selectedTx.destination_file
+                      ? `${selectedTx.target_file} → ${selectedTx.destination_file}`
+                      : selectedTx.target_file}
                   </p>
                 </div>
                 <div className="flex gap-3">
@@ -617,7 +623,23 @@ export default function HitlPage() {
             {view === "preview" && (
               <div className="flex-1 min-h-0 overflow-y-auto p-8">
                 <div className="max-w-3xl mx-auto">
-                  <MarkdownMessage content={selectedTx.proposed_content} />
+                  {selectedTx.action_type === "delete" ? (
+                    <div className="p-6 rounded-lg border border-accent-rose/30 bg-accent-rose/10 text-accent-rose text-center">
+                      <p className="text-base font-semibold">⚠️ Scheduled for Deletion</p>
+                      <p className="text-sm mt-1 opacity-80">
+                        Approving this transaction will delete <code className="font-mono">{selectedTx.target_file}</code> from disk. A pre-commit snapshot will be preserved in revisions for rollback.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {selectedTx.destination_file && (
+                        <div className="mb-4 p-3 rounded-lg border border-accent-cyan/30 bg-accent-cyan/10 text-accent-cyan text-xs font-mono">
+                          Relocating to: {selectedTx.destination_file}
+                        </div>
+                      )}
+                      <MarkdownMessage content={selectedTx.proposed_content} />
+                    </>
+                  )}
                 </div>
               </div>
             )}

@@ -7,8 +7,9 @@ or restricting directory access, Nexus runs ONE universal agent design (`NexusAg
      (pre-hydrated with `{vault_structure}`, `{shared_tools}`, `{current_time}`, and `{user_name}`).
   2. Navigates any Vault section directly (`get_directory_structure`, `read_file`, `search_vault`,
      `get_recent_modifications`) and reads `<Section>/Section Instructions.md` on demand.
-  3. Surgically modifies existing Vault notes via `modify_file(file_path, target, replacement, reasoning)`
-     or creates new notes via `create_file`, staging all changes to the SQLite HITL queue (`hitl.db`).
+  3. Surgically modifies existing Vault notes via `modify_file(file_path, target, replacement, reasoning)`,
+     creates new notes via `create_file`, moves notes via `move_file`, and deletes notes via `delete_file`,
+     staging all changes to the SQLite HITL queue (`hitl.db`).
   4. Spawns isolated subagents via `spawn_subagent(task_prompt: str)` for parallel or deep subtasks,
      where each subagent inherits `inject_root_instructions()` and the core tool suite.
   5. Preserves 100% lossless event-bounded conversation history without message-pruning summarization,
@@ -72,12 +73,14 @@ from nexus.core.trace import RESULT_TRUNCATE_LEN, AgentTracer, _truncate
 from nexus.shared_tools.shared import (
     create_calendar_event,
     create_file,
+    delete_file,
     fetch_emails,
     get_calendar_schedule,
     get_directory_structure,
     get_recent_modifications,
     get_vault_structure,
     modify_file,
+    move_file,
     post_to_board,
     read_board,
     read_file,
@@ -146,6 +149,8 @@ CORE_TOOLS = [
     read_file,
     modify_file,
     create_file,
+    move_file,
+    delete_file,
     get_directory_structure,
     get_vault_structure,
     search_vault,

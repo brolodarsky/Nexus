@@ -9,10 +9,11 @@ import { apiFetch, ApiError } from "./client";
 export interface Transaction {
   id: number;                 // Auto-incrementing primary key in hitl.db
   agent_name: string;         // Display role/label of the proposing agent (e.g. "Commander (strong)")
-  action_type: string;        // Type of modification ("modify" | "create")
-  target_file: string;        // Vault-relative path to target file
+  action_type: string;        // Type of modification ("modify" | "create" | "move" | "delete")
+  target_file: string;        // Vault-relative path to target file (or source file for moves)
+  destination_file?: string | null; // Destination Vault-relative path (for "move" action_type)
   original_content: string | null; // Previous file content (for pre-commit diff preview)
-  proposed_content: string;   // New content drafted by the agent
+  proposed_content: string;   // New content drafted by the agent (empty for "delete")
   reasoning: string | null;   // Plain-English explanation of why change is needed
   status: string;             // "pending" | "approved" | "rejected" | "rolled_back" | "superseded"
   created_at: string;         // ISO-8601 creation timestamp
@@ -39,6 +40,7 @@ export interface HitlRevision {
   id: number;                 // Revision primary key
   tx_id: number;              // Transaction that produced this write
   target_file: string;        // Vault-relative path that was written
+  destination_file?: string | null; // Optional destination path for moved notes
   rolled_back: number;        // 0 = live, 1 = already undone (SQLite has no boolean type)
   created_at: string;         // When the approval was applied
   rolled_back_at: string | null;
@@ -57,6 +59,7 @@ export interface HitlCommitResult {
   message: string;
   revision_id: number;
   target_file: string;
+  destination_file?: string | null;
   forced: boolean;            // True only if a real conflict was overridden with force
 }
 
