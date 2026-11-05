@@ -173,3 +173,29 @@ def test_auto_generate_title_empty_conversation(client, temp_conv):
     data = response.json()
     assert data["status"] == "unchanged"
     assert data["title"] == "Temporary Title"
+
+
+def test_ask_brain_stream_mocked(client, temp_conv):
+    """Verify that POST /api/agents/ask/stream yields SSE packets and completes with a terminal 'done' packet."""
+    mock_result = {
+        "response": "Here is the simulated test response.",
+        "domain": "general",
+        "confidence": 0.95,
+        "reasoning": "Mock test routing",
+        "model_tier": "low",
+        "model_name": "gemini-3.8-flash",
+    }
+    with patch("nexus.agent.api.run_nexus_agent_with_trace", return_value=mock_result):
+        with client.stream(
+            "POST",
+            "/api/agents/ask/stream",
+            json={
+                "query": "Hello test stream",
+                "conversation_id": temp_conv,
+                "model_tier": "low",
+            },
+        ) as response:
+            assert response.status_code == 200
+            lines = [line for line in response.iter_lines() if line]
+            assert any("done" in line for line in lines)
+

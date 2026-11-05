@@ -109,13 +109,19 @@ export function askBrainStream(
 
         for (const block of lines) {
           for (const line of block.split("\n")) {
-            // SSE payload lines always start with "data: " prefix
+            // Ignore SSE keepalive comments (': ping') and non-data lines per RFC 8895
             if (!line.startsWith("data: ")) continue;
 
             const jsonStr = line.slice(6); // Strip "data: " prefix to extract JSON string
+            let event: TraceEvent;
             try {
-              const event: TraceEvent = JSON.parse(jsonStr);
+              event = JSON.parse(jsonStr);
+            } catch {
+              // Ignore malformed JSON chunks to prevent stream parser from crashing
+              continue;
+            }
 
+            try {
               // Route event to corresponding UI callback and flag terminal state
               if (event.type === "done") {
                 receivedTerminal = true;
@@ -126,8 +132,8 @@ export function askBrainStream(
               } else {
                 callbacks.onTrace(event); // Animate item into Thinking Panel
               }
-            } catch {
-              // Ignore malformed JSON chunks to prevent stream parser from crashing
+            } catch (cbErr) {
+              console.error("Error executing SSE stream event callback:", cbErr);
             }
           }
         }
@@ -137,10 +143,16 @@ export function askBrainStream(
       buffer += decoder.decode();
       if (buffer.trim()) {
         for (const line of buffer.split("\n")) {
+          // Ignore SSE comments
           if (!line.startsWith("data: ")) continue;
           const jsonStr = line.slice(6);
+          let event: TraceEvent;
           try {
-            const event: TraceEvent = JSON.parse(jsonStr);
+            event = JSON.parse(jsonStr);
+          } catch {
+            continue;
+          }
+          try {
             if (event.type === "done") {
               receivedTerminal = true;
               callbacks.onDone(event);
@@ -150,8 +162,8 @@ export function askBrainStream(
             } else {
               callbacks.onTrace(event);
             }
-          } catch {
-            // Ignore malformed trailing chunks
+          } catch (cbErr) {
+            console.error("Error executing trailing SSE stream event callback:", cbErr);
           }
         }
       }

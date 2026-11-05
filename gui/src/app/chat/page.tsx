@@ -81,6 +81,10 @@ export default function ChatPage() {
   const abortRef = useRef<(() => void) | null>(null);
   // isHydratedRef: guards against overwriting saved localStorage drafts with initial empty state during hydration
   const isHydratedRef = useRef<boolean>(false);
+  // isInitialLoadDoneRef: guards against premature writes to ACTIVE_CONV_STORAGE_KEY before initial conversations load
+  const isInitialLoadDoneRef = useRef<boolean>(false);
+  // activeStreamConvIdRef: tracks which conversation thread currently owns an active SSE stream to guard against race conditions
+  const activeStreamConvIdRef = useRef<string | null>(null);
 
   // Programmatically sets the composer input value and increments `inputSyncId` so `ChatInputBar` snaps to `nextText`
   const setProgrammaticInput = useCallback((nextText: string) => {
@@ -134,13 +138,10 @@ export default function ChatPage() {
       }
 
       // Optimistically restore active conversation's draft (or new chat draft) during hydration
-      if (savedActiveConv === "__new__") {
-        setActiveConvId(null);
-        if (initialDrafts[DRAFT_NEW_KEY]) {
-          setProgrammaticInput(initialDrafts[DRAFT_NEW_KEY]);
-        }
-      } else if (savedActiveConv && initialDrafts[savedActiveConv]) {
+      if (savedActiveConv && savedActiveConv !== "__new__" && initialDrafts[savedActiveConv]) {
         setProgrammaticInput(initialDrafts[savedActiveConv]);
+      } else if (initialDrafts[DRAFT_NEW_KEY]) {
+        setProgrammaticInput(initialDrafts[DRAFT_NEW_KEY]);
       }
 
       // Restore left conversation history sidebar collapse state from localStorage so panel choice survives tab navigation
@@ -196,28 +197,29 @@ export default function ChatPage() {
     getConversations().then((convos) => {
       setConversations(convos);
       if (convos.length > 0) {
-        // Restore previously active conversation if it exists, maintaining context across tab navigation
+        // By default, select the most recent conversation (convos[0] sorted by last_updated DESC in SQLite)
+        let targetId = convos[0].id;
         try {
           const savedActiveConv = localStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
-          if (savedActiveConv === "__new__") {
-            setActiveConvId(null);
-            setProgrammaticInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
-            return;
-          }
-          if (savedActiveConv && convos.some((c) => c.id === savedActiveConv)) {
-            setActiveConvId(savedActiveConv);
-            setProgrammaticInput(draftsRef.current[savedActiveConv] ?? "");
-            return;
+          // If a specific conversation ID was saved and exists in the database, restore it
+          if (savedActiveConv && savedActiveConv !== "__new__" && convos.some((c) => c.id === savedActiveConv)) {
+            targetId = savedActiveConv;
           }
         } catch {
           // Gracefully fallback to the most recent conversation
         }
-        setActiveConvId(convos[0].id);
-        setProgrammaticInput(draftsRef.current[convos[0].id] ?? "");
+        setActiveConvId(targetId);
+        setProgrammaticInput(draftsRef.current[targetId] ?? "");
+        try {
+          localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, targetId);
+        } catch {
+          // Ignore storage quota errors
+        }
       } else {
         setActiveConvId(null);
         setProgrammaticInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
       }
+      isInitialLoadDoneRef.current = true;
     });
   }, [setProgrammaticInput]);
 
@@ -245,6 +247,12 @@ export default function ChatPage() {
     getBoardBulletins(25, activeConvId)
       .then((res) => setBulletins(res.bulletins || []))
       .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
+
+    // If an SSE agent response stream is actively in-flight for this thread,
+    // do not let initial history fetch wipe out live streaming messages or reset loading state
+    if (activeStreamConvIdRef.current === activeConvId) {
+      return;
+    }
 
     let cancelled = false;
     queueMicrotask(() => {
@@ -274,7 +282,9 @@ export default function ChatPage() {
       })
       .catch((err) => console.error("Failed to load chat history:", err))
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && activeStreamConvIdRef.current !== activeConvId) {
+          setLoading(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -288,6 +298,8 @@ export default function ChatPage() {
 
   // Persist active conversation ID so switching Nexus tabs (e.g., Chat -> Brain Explorer -> Chat) restores the same active chat
   useEffect(() => {
+    // Guard against running before initial hydration and conversation resolution completes
+    if (!isInitialLoadDoneRef.current) return;
     try {
       if (activeConvId) {
         localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, activeConvId);
@@ -298,6 +310,43 @@ export default function ChatPage() {
       // Gracefully ignore storage quota / access errors in private browsing contexts
     }
   }, [activeConvId]);
+
+  // Auto-refresh conversation history when returning to the tab from another window/tab
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState === "visible" &&
+        activeConvId &&
+        !loading &&
+        activeStreamConvIdRef.current === null
+      ) {
+        getChatHistory(activeConvId)
+          .then((history) => {
+            setMessages(
+              history.map((entry) => {
+                const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
+                const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
+                return {
+                  role: entry.role,
+                  content: entry.content,
+                  agent: entry.agent,
+                  domain: entry.domain,
+                  confidence: entry.confidence,
+                  modelTier,
+                  modelName,
+                  costUsd,
+                  trace: entry.trace,
+                  timestamp: new Date(entry.timestamp),
+                };
+              })
+            );
+          })
+          .catch((err) => console.error("Failed to sync chat history on tab focus:", err));
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [activeConvId, loading]);
 
   // Clean up SSE stream abort and flush any pending debounced draft writes on unmount or tab unload
   useEffect(() => {
@@ -519,6 +568,8 @@ export default function ChatPage() {
         const title = query.slice(0, 30) + (query.length > 30 ? "..." : "");
         const res = await createConversation(title);
         targetConvId = res.conversation_id;
+        // Mark active stream thread BEFORE updating activeConvId so useEffect([activeConvId]) doesn't clobber live state
+        activeStreamConvIdRef.current = targetConvId;
         setActiveConvId(targetConvId);
         try {
           localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, targetConvId);
@@ -527,6 +578,8 @@ export default function ChatPage() {
         }
         // Refresh conversations list to show the new one
         getConversations().then(setConversations);
+      } else {
+        activeStreamConvIdRef.current = targetConvId;
       }
 
       const turnModelOption =
@@ -601,6 +654,7 @@ export default function ChatPage() {
             setLiveTrace([]);
             liveTraceRef.current = [];
             setLoading(false);
+            activeStreamConvIdRef.current = null;
             abortRef.current = null;
             inputRef.current?.focus();
             getConversations().then((updatedList) => {
@@ -624,21 +678,104 @@ export default function ChatPage() {
             });
             refreshBoard();
           },
-          onError: (errorMessage) => {
-            const errorMsg: Message = {
-              role: "assistant",
-              content: `❌ ${errorMessage}`,
-              timestamp: new Date(),
-              modelTier: turnModelOption?.tier ?? selectedModelTier,
-              modelName: turnModelOption?.model_name ?? null,
-              trace: liveTraceRef.current.length > 0 ? liveTraceRef.current : undefined,
-            };
-            setMessages((msgs) => [...msgs, errorMsg]);
-            setLiveTrace([]);
-            liveTraceRef.current = [];
-            setLoading(false);
-            abortRef.current = null;
-            inputRef.current?.focus();
+          onError: async (errorMessage) => {
+            // First check if the backend actually finished and logged the assistant response to chats.db
+            try {
+              const history = await getChatHistory(targetConvId);
+              const lastEntry = history[history.length - 1];
+              if (lastEntry && lastEntry.role === "assistant") {
+                // Ground truth: backend succeeded and logged to chats.db; reconcile state seamlessly
+                setMessages(
+                  history.map((entry) => {
+                    const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
+                    const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
+                    return {
+                      role: entry.role,
+                      content: entry.content,
+                      agent: entry.agent,
+                      domain: entry.domain,
+                      confidence: entry.confidence,
+                      modelTier,
+                      modelName,
+                      costUsd,
+                      trace: entry.trace,
+                      timestamp: new Date(entry.timestamp),
+                    };
+                  })
+                );
+                setLiveTrace([]);
+                liveTraceRef.current = [];
+                setLoading(false);
+                activeStreamConvIdRef.current = null;
+                abortRef.current = null;
+                inputRef.current?.focus();
+                getConversations().then(setConversations);
+                refreshBoard();
+                return;
+              }
+            } catch {
+              // Ignore history check error and fall back to polling
+            }
+
+            // If not found in chats.db yet, poll up to 5 times (every 2s) in case the background thread is still writing
+            let recovered = false;
+            for (let attempt = 0; attempt < 5; attempt++) {
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              try {
+                const polled = await getChatHistory(targetConvId);
+                const lastPolled = polled[polled.length - 1];
+                if (lastPolled && lastPolled.role === "assistant") {
+                  setMessages(
+                    polled.map((entry) => {
+                      const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
+                      const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
+                      return {
+                        role: entry.role,
+                        content: entry.content,
+                        agent: entry.agent,
+                        domain: entry.domain,
+                        confidence: entry.confidence,
+                        modelTier,
+                        modelName,
+                        costUsd,
+                        trace: entry.trace,
+                        timestamp: new Date(entry.timestamp),
+                      };
+                    })
+                  );
+                  setLiveTrace([]);
+                  liveTraceRef.current = [];
+                  setLoading(false);
+                  activeStreamConvIdRef.current = null;
+                  abortRef.current = null;
+                  inputRef.current?.focus();
+                  getConversations().then(setConversations);
+                  refreshBoard();
+                  recovered = true;
+                  break;
+                }
+              } catch {
+                // Continue polling
+              }
+            }
+
+            if (!recovered) {
+              const errorMsg: Message = {
+                role: "assistant",
+                content: `❌ ${errorMessage}`,
+                timestamp: new Date(),
+                modelTier: turnModelOption?.tier ?? selectedModelTier,
+                modelName: turnModelOption?.model_name ?? null,
+                trace: liveTraceRef.current.length > 0 ? liveTraceRef.current : undefined,
+              };
+              setMessages((msgs) => [...msgs, errorMsg]);
+              setLiveTrace([]);
+              liveTraceRef.current = [];
+              setLoading(false);
+              activeStreamConvIdRef.current = null;
+              abortRef.current = null;
+              inputRef.current?.focus();
+            }
           },
         },
         selectedModelTier

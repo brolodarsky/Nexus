@@ -3,6 +3,7 @@ agents.py — Agent status and interaction routes.
 Bridges the Next.js frontend to the existing LangGraph multi-agent swarm.
 """
 
+import asyncio
 import json
 import queue
 import threading
@@ -435,7 +436,10 @@ async def ask_brain_stream(request: AskRequest, req: Request):
     pipeline_thread.start()
 
     # Async generator function yielding formatted SSE packets
+    # - Non-blocking event_queue.get_nowait() prevents starving the asyncio event loop thread
+    # - Periodic SSE comment ping packets (': ping\n\n') keep HTTP connections open across browser and proxy timeouts
     async def event_generator():
+        last_ping_time = time.time()
         try:
             while True:
                 # Detect if the client closed browser tab or canceled request
@@ -443,11 +447,19 @@ async def ask_brain_stream(request: AskRequest, req: Request):
                     break
 
                 try:
-                    # Non-blocking poll with 100ms timeout to periodically check req.is_disconnected()
-                    event = event_queue.get(timeout=0.1)
+                    # Non-blocking poll of thread-safe FIFO queue
+                    event = event_queue.get_nowait()
                 except queue.Empty:
+                    # Yield execution to the asyncio event loop so other concurrent tasks can progress
+                    await asyncio.sleep(0.05)
+                    # RFC 8895: Emit periodic SSE comment line (': ping\n\n') every 10s of idle wait to keep TCP alive
+                    now_ts = time.time()
+                    if now_ts - last_ping_time >= 10.0:
+                        last_ping_time = now_ts
+                        yield ": ping\n\n"
                     continue
 
+                last_ping_time = time.time()
                 # SSE protocol format: 'data: <json_string>\n\n'
                 event_data = json.dumps(event, ensure_ascii=False)
                 yield f"data: {event_data}\n\n"
