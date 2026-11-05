@@ -288,13 +288,22 @@ function TraceStepCard({
   evt,
   index,
   forceExpanded,
+  expandVersion,
 }: {
   evt: TraceEvent;
   index: number;
-  forceExpanded: boolean;
+  forceExpanded?: boolean;
+  expandVersion?: number;
 }) {
-  const [localOpen, setLocalOpen] = useState(true);
-  const isOpen = forceExpanded || localOpen;
+  // isOpen: controls individual disclosure of this specific step card's payload body; defaults to false (collapsed by default)
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Synchronize local open state whenever parent triggers an explicit expand/collapse command or updates expandVersion
+  useEffect(() => {
+    if (typeof forceExpanded === "boolean") {
+      setIsOpen(forceExpanded);
+    }
+  }, [forceExpanded, expandVersion]);
 
   const icon = TRACE_ICONS[evt.type] ?? "·";
   const theme = AGENT_THEME[evt.color ?? "cyan"] ?? AGENT_THEME.white;
@@ -337,10 +346,16 @@ function TraceStepCard({
     <div
       className={`rounded-lg border ${theme.border} bg-bg-primary/60 p-2.5 transition-colors`}
     >
-      {/* Header bar for the step */}
+      {/* Header bar for the step: clicking toggles payload disclosure if structured data exists */}
       <div
-        onClick={() => setLocalOpen((prev) => !prev)}
-        className="flex items-start justify-between gap-2 cursor-pointer select-none"
+        onClick={() => {
+          if (hasStructuredPayload) {
+            setIsOpen((prev) => !prev);
+          }
+        }}
+        className={`flex items-start justify-between gap-2 select-none ${
+          hasStructuredPayload ? "cursor-pointer" : ""
+        }`}
       >
         <div className="flex items-start gap-2 min-w-0 flex-1 font-mono text-xs">
           <span className="shrink-0 text-text-muted text-[0.65rem] pt-0.5">
@@ -374,9 +389,19 @@ function TraceStepCard({
             </span>
           )}
           {hasStructuredPayload && (
-            <span className="text-[0.65rem] text-text-muted hover:text-text-primary">
-              {isOpen ? "▾ Hide details" : "▸ Show details"}
-            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen((prev) => !prev);
+              }}
+              className="text-[0.65rem] text-text-muted hover:text-text-primary transition-colors flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-bg-tertiary"
+              title={isOpen ? "Collapse step details" : "Expand step details"}
+              aria-expanded={isOpen}
+            >
+              <span>{isOpen ? "▾" : "▸"}</span>
+              <span>{isOpen ? "Collapse" : "Expand"}</span>
+            </button>
           )}
         </div>
       </div>
@@ -463,9 +488,9 @@ function TraceStepCard({
         </div>
       )}
 
-      {/* Fallback when collapsed */}
-      {hasStructuredPayload && !isOpen && (
-        <div className="mt-1 text-[0.7rem] font-mono text-text-muted whitespace-pre-wrap break-words">
+      {/* Fallback preview message when collapsed (clamped to 2 lines to preserve clean vertical space) */}
+      {hasStructuredPayload && !isOpen && evt.message && (
+        <div className="mt-1 text-[0.7rem] font-mono text-text-muted whitespace-pre-wrap break-words line-clamp-2">
           {evt.message}
         </div>
       )}
@@ -490,6 +515,14 @@ export const AgentGraphView = memo(function AgentGraphView({
   );
 
   const [selectedNodeId, setSelectedNodeId] = useState<string>("all");
+  // Controls expand/collapse state of execution step cards in the inspector or all-steps list; defaults to false (collapsed by default)
+  const [expandAllSteps, setExpandAllSteps] = useState<boolean>(false);
+  // Incrementing counter to ensure parent expand/collapse triggers cascade to children even when repeating the same boolean state
+  const [expandVersion, setExpandVersion] = useState<number>(0);
+  // promptExpanded: toggles disclosure of the prompt card in the Selected Node inspector (defaults to false / collapsed)
+  const [promptExpanded, setPromptExpanded] = useState<boolean>(false);
+  // responseExpanded: toggles disclosure of the final response markdown card in the Selected Node inspector (defaults to false / collapsed)
+  const [responseExpanded, setResponseExpanded] = useState<boolean>(false);
 
   // Ensure selectedNodeId stays valid if events change
   const activeSelectedId =
@@ -715,24 +748,68 @@ export const AgentGraphView = memo(function AgentGraphView({
             </div>
           </div>
 
-          {/* 1. Full Untruncated Prompt Dispatched to this Agent / Subagent */}
+          {/* 1. Full Untruncated Prompt Dispatched to this Agent / Subagent (Collapsible card, collapsed by default) */}
           {selectedNode.taskPrompt && (
-            <div>
-              <div className="text-[0.65rem] font-mono uppercase tracking-wider text-accent-cyan mb-1">
-                {selectedNode.parentId === null
-                  ? "Initial User Query:"
-                  : "Full Subagent Task Prompt (Untruncated):"}
+            <div className="rounded-lg border border-border-subtle bg-bg-primary/60 p-2.5">
+              <div
+                onClick={() => setPromptExpanded((prev) => !prev)}
+                className="flex items-center justify-between cursor-pointer select-none"
+              >
+                <div className="text-[0.65rem] font-mono uppercase tracking-wider text-accent-cyan flex items-center gap-1.5">
+                  <span>
+                    {selectedNode.parentId === null
+                      ? "Initial User Query"
+                      : "Full Subagent Task Prompt"}
+                  </span>
+                  <span className="text-text-muted font-normal">
+                    ({selectedNode.taskPrompt.length.toLocaleString()} chars)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPromptExpanded((prev) => !prev);
+                  }}
+                  className="text-[0.65rem] text-text-muted hover:text-text-primary transition-colors flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-bg-tertiary"
+                  title={promptExpanded ? "Collapse prompt window" : "Expand prompt window"}
+                  aria-expanded={promptExpanded}
+                >
+                  <span>{promptExpanded ? "▾" : "▸"}</span>
+                  <span>{promptExpanded ? "Collapse" : "Expand"}</span>
+                </button>
               </div>
-              <pre className="p-3 rounded-lg bg-bg-primary/90 border border-border-subtle text-text-primary font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
-                {selectedNode.taskPrompt}
-              </pre>
+              {promptExpanded ? (
+                <pre className="mt-2 p-3 rounded-lg bg-bg-secondary/90 border border-border-subtle text-text-primary font-mono text-xs leading-relaxed whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
+                  {selectedNode.taskPrompt}
+                </pre>
+              ) : (
+                <p className="mt-1 text-[0.7rem] font-mono text-text-muted line-clamp-2">
+                  {selectedNode.taskPrompt}
+                </p>
+              )}
             </div>
           )}
 
-          {/* 2. All Ordered Execution Steps for this Node */}
+          {/* 2. All Ordered Execution Steps for this Node (with dedicated Expand/Collapse All toggle) */}
           <div>
-            <div className="text-[0.65rem] font-mono uppercase tracking-wider text-text-muted mb-1.5">
-              Complete Step-by-Step Execution Log ({selectedNode.events.length} steps):
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-[0.65rem] font-mono uppercase tracking-wider text-text-muted">
+                Complete Step-by-Step Execution Log ({selectedNode.events.length} steps):
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setExpandAllSteps((prev) => !prev);
+                  setExpandVersion((v) => v + 1);
+                }}
+                className="text-[0.65rem] px-2 py-0.5 rounded-md border border-border-subtle bg-bg-primary/60 text-text-secondary hover:text-text-primary transition-colors flex items-center gap-1"
+                title={expandAllSteps ? "Collapse all step payloads" : "Expand all step payloads"}
+                aria-expanded={expandAllSteps}
+              >
+                <span>{expandAllSteps ? "▾" : "▸"}</span>
+                <span>{expandAllSteps ? "Collapse All" : "Expand All"}</span>
+              </button>
             </div>
             <div className="space-y-2">
               {selectedNode.events.map((evt, idx) => (
@@ -740,33 +817,76 @@ export const AgentGraphView = memo(function AgentGraphView({
                   key={evt.id ?? idx}
                   evt={evt}
                   index={idx}
-                  forceExpanded={true}
+                  forceExpanded={expandAllSteps}
+                  expandVersion={expandVersion}
                 />
               ))}
             </div>
           </div>
 
-          {/* 3. Final Synthesis Returned by this Agent */}
+          {/* 3. Final Synthesis Returned by this Agent (Collapsible card, collapsed by default) */}
           {selectedNode.finalResponse && (
-            <div>
-              <div className="text-[0.65rem] font-mono uppercase tracking-wider text-emerald-400 mb-1">
-                Final Output / Synthesis Returned:
+            <div className="rounded-lg border border-emerald-500/30 bg-bg-primary/60 p-2.5">
+              <div
+                onClick={() => setResponseExpanded((prev) => !prev)}
+                className="flex items-center justify-between cursor-pointer select-none"
+              >
+                <div className="text-[0.65rem] font-mono uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                  <span>Final Output / Synthesis Returned</span>
+                  <span className="text-text-muted font-normal">
+                    ({selectedNode.finalResponse.length.toLocaleString()} chars)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setResponseExpanded((prev) => !prev);
+                  }}
+                  className="text-[0.65rem] text-text-muted hover:text-text-primary transition-colors flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-bg-tertiary"
+                  title={responseExpanded ? "Collapse output window" : "Expand output window"}
+                  aria-expanded={responseExpanded}
+                >
+                  <span>{responseExpanded ? "▾" : "▸"}</span>
+                  <span>{responseExpanded ? "Collapse" : "Expand"}</span>
+                </button>
               </div>
-              <div className="p-3.5 rounded-lg bg-bg-primary/90 border border-emerald-500/30 text-text-primary text-xs">
-                <MarkdownMessage content={selectedNode.finalResponse} />
-              </div>
+              {responseExpanded && (
+                <div className="mt-2 p-3.5 rounded-lg bg-bg-secondary/90 border border-emerald-500/30 text-text-primary text-xs">
+                  <MarkdownMessage content={selectedNode.finalResponse} />
+                </div>
+              )}
             </div>
           )}
         </div>
       ) : (
         /* Show All Steps Chronologically when "Show All Nodes & Steps" is selected */
         <div className="space-y-2">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[0.65rem] font-mono uppercase tracking-wider text-text-muted">
+              All Chronological Steps ({events.length}):
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setExpandAllSteps((prev) => !prev);
+                setExpandVersion((v) => v + 1);
+              }}
+              className="text-[0.65rem] px-2 py-0.5 rounded-md border border-border-subtle bg-bg-primary/60 text-text-secondary hover:text-text-primary transition-colors flex items-center gap-1"
+              title={expandAllSteps ? "Collapse all step payloads" : "Expand all step payloads"}
+              aria-expanded={expandAllSteps}
+            >
+              <span>{expandAllSteps ? "▾" : "▸"}</span>
+              <span>{expandAllSteps ? "Collapse All" : "Expand All"}</span>
+            </button>
+          </div>
           {events.map((evt, idx) => (
             <TraceStepCard
               key={evt.id ?? idx}
               evt={evt}
               index={idx}
-              forceExpanded={true}
+              forceExpanded={expandAllSteps}
+              expandVersion={expandVersion}
             />
           ))}
         </div>
@@ -794,7 +914,10 @@ export const ThinkingPanel = memo(function ThinkingPanel({
   // expanded: controls visibility of the inner graph/step visualization; initialized via defaultExpanded (default: false)
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [viewMode, setViewMode] = useState<"graph" | "steps" | "raw">("graph");
-  const [expandAllSteps, setExpandAllSteps] = useState(true);
+  // expandAllSteps: toggles global expand/collapse of all steps in chronological list; defaults to false (collapsed by default)
+  const [expandAllSteps, setExpandAllSteps] = useState(false);
+  // expandVersion: ensures explicit expand/collapse triggers cascade to child cards
+  const [expandVersion, setExpandVersion] = useState(0);
   const [fullHeight, setFullHeight] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -896,10 +1019,16 @@ export const ThinkingPanel = memo(function ThinkingPanel({
             {viewMode === "steps" && (
               <button
                 type="button"
-                onClick={() => setExpandAllSteps((prev) => !prev)}
-                className="text-[0.65rem] px-2 py-1 rounded-md border border-border-subtle bg-bg-primary/60 text-text-secondary hover:text-text-primary"
+                onClick={() => {
+                  setExpandAllSteps((prev) => !prev);
+                  setExpandVersion((v) => v + 1);
+                }}
+                className="text-[0.65rem] px-2 py-1 rounded-md border border-border-subtle bg-bg-primary/60 text-text-secondary hover:text-text-primary flex items-center gap-1 transition-colors"
+                title={expandAllSteps ? "Collapse all step payloads" : "Expand all step payloads"}
+                aria-expanded={expandAllSteps}
               >
-                {expandAllSteps ? "Collapse Payloads" : "Expand All Payloads"}
+                <span>{expandAllSteps ? "▾" : "▸"}</span>
+                <span>{expandAllSteps ? "Collapse All" : "Expand All"}</span>
               </button>
             )}
 
@@ -935,6 +1064,7 @@ export const ThinkingPanel = memo(function ThinkingPanel({
                   evt={evt}
                   index={i}
                   forceExpanded={expandAllSteps}
+                  expandVersion={expandVersion}
                 />
               ))}
             </div>
