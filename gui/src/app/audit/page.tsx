@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useDeferredValue } from "react";
 import MarkdownMessage from "@/components/MarkdownMessage";
-import { AgentGraphView, AGENT_THEME } from "@/components/AgentTraceVisualizer";
+import { AgentGraphView, AGENT_THEME, formatHeaderArgValue } from "@/components/AgentTraceVisualizer";
 import { getAgentRuns, getAgentRun } from "@/lib/api";
 import type { RunSummary, RunSnapshot } from "@/lib/api";
 
@@ -467,10 +467,26 @@ export default function AuditPage() {
                                     key={tc.call_id ?? tcIdx}
                                     className="rounded-lg bg-bg-primary/80 border border-border-subtle p-3 space-y-2 text-xs"
                                   >
-                                    <div className="flex items-center justify-between font-mono text-[0.72rem]">
-                                      <span className="font-bold text-accent-cyan">
-                                        🔧 {tc.tool}()
-                                      </span>
+                                    <div className="flex items-center justify-between font-mono text-[0.72rem] flex-wrap gap-1">
+                                      <div className="inline-flex items-baseline gap-0.5 flex-wrap min-w-0">
+                                        <span className="font-bold text-accent-cyan">
+                                          🔧 {tc.tool}
+                                        </span>
+                                        <span className="text-text-muted">(</span>
+                                        {tc.args && Object.keys(tc.args).length > 0 ? (
+                                          Object.entries(tc.args).map(([k, v], i, arr) => (
+                                            <span key={k} className="inline-flex items-baseline">
+                                              <span className="text-cyan-300/80 font-medium">{k}</span>
+                                              <span className="text-text-muted">=</span>
+                                              <span className="text-text-primary" title={typeof v === "string" ? v : JSON.stringify(v, null, 2)}>
+                                                {formatHeaderArgValue(v)}
+                                              </span>
+                                              {i < arr.length - 1 && <span className="text-text-muted mr-1.5">,</span>}
+                                            </span>
+                                          ))
+                                        ) : null}
+                                        <span className="text-text-muted">)</span>
+                                      </div>
                                       {tc.timestamp && (
                                         <span className="text-text-muted text-[0.65rem]">
                                           {new Date(tc.timestamp).toLocaleTimeString()}

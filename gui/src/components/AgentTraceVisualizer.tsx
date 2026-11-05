@@ -284,6 +284,37 @@ export function buildAgentExecutionGraph(events: TraceEvent[]): {
 
 // ── Individual Uncut Step Row ────────────────────────────────────────────────
 
+/**
+ * formatHeaderArgValue — Formats an arbitrary tool argument value for compact inline display in the step header.
+ * - val: unknown — The argument value (string, number, boolean, array, or object) passed to the tool.
+ * - maxLen: number — Maximum character length threshold before truncating with an ellipsis (default: 80).
+ * Strings are sanitized of carriage returns and newlines so multi-line inputs do not disrupt the header line layout.
+ */
+export function formatHeaderArgValue(val: unknown, maxLen = 80): string {
+  if (val === null) return "null";
+  if (val === undefined) return "undefined";
+  if (typeof val === "string") {
+    // Replace newline breaks with single spaces to keep header text inline and clean
+    const singleLine = val.replace(/\r?\n/g, " ").trim();
+    if (singleLine.length > maxLen) {
+      return `"${singleLine.slice(0, maxLen)}…"`;
+    }
+    return `"${singleLine}"`;
+  }
+  if (typeof val === "number" || typeof val === "boolean") {
+    return String(val);
+  }
+  try {
+    const json = JSON.stringify(val);
+    if (json.length > maxLen) {
+      return `${json.slice(0, maxLen)}…`;
+    }
+    return json;
+  } catch {
+    return String(val);
+  }
+}
+
 function TraceStepCard({
   evt,
   index,
@@ -326,20 +357,34 @@ function TraceStepCard({
   const fullLlmResponse =
     typeof data.response === "string" ? data.response : null;
 
+  // Extract legacy arguments string from message if structured data.args is missing in older traces
+  const legacyArgsStr = useMemo(() => {
+    if (toolArgs && Object.keys(toolArgs).length > 0) return null;
+    if (evt.type !== "tool_call" || !evt.message) return null;
+    const match = evt.message.match(/Calling tool:\s*[\w_.-]+\(([\s\S]*)\)/);
+    return match ? match[1].trim() : null;
+  }, [toolArgs, evt.type, evt.message]);
+
+  // agentId: Unique machine/DAG identifier for the agent (e.g. "nexus", "subagent-1", "subagent-2")
+  // Resolves explicit `evt.agent_id` first, falling back to heuristic parsing for legacy historical traces
+  const agentId =
+    evt.agent_id ||
+    (evt.agent?.toLowerCase().startsWith("subagent") ? "subagent" : (evt.agent || "nexus"));
+
   const hasStructuredPayload = Boolean(
     (toolArgs && Object.keys(toolArgs).length > 0) ||
-      toolResult ||
-      toolError ||
-      fullTaskPrompt ||
-      fullLlmResponse
+    toolResult ||
+    toolError ||
+    fullTaskPrompt ||
+    fullLlmResponse
   );
 
   const timeLabel = evt.timestamp
     ? new Date(evt.timestamp).toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      })
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
     : "";
 
   return (
@@ -353,32 +398,60 @@ function TraceStepCard({
             setIsOpen((prev) => !prev);
           }
         }}
-        className={`flex items-start justify-between gap-2 select-none ${
-          hasStructuredPayload ? "cursor-pointer" : ""
-        }`}
+        className={`flex items-start justify-between gap-2 select-none ${hasStructuredPayload ? "cursor-pointer" : ""
+          }`}
       >
-        <div className="flex items-start gap-2 min-w-0 flex-1 font-mono text-xs">
+        <div className="flex items-start gap-2 min-w-0 flex-1 font-mono text-xs flex-wrap">
           <span className="shrink-0 text-text-muted text-[0.65rem] pt-0.5">
             #{index + 1}
           </span>
           <span className="shrink-0 w-4 text-center">{icon}</span>
           <span
-            className={`shrink-0 px-1.5 py-0.2 rounded border text-[0.65rem] font-semibold ${theme.badge}`}
+            className={`shrink-0 px-1.5 py-0.2 rounded border text-[0.65rem] font-mono font-semibold ${theme.badge}`}
+            title={`Agent ID: ${agentId}${evt.agent ? ` • Name: ${evt.agent}` : ""}`}
           >
-            {evt.agent ?? "System"}
+            {agentId}
           </span>
           <span className="px-1.5 py-0.2 rounded bg-bg-tertiary text-text-secondary text-[0.62rem] uppercase tracking-wider shrink-0">
             {evt.type}
           </span>
-          {toolName && (
-            <span className="text-accent-cyan font-semibold shrink-0">
-              {toolName}()
-            </span>
-          )}
-          {!hasStructuredPayload && (
-            <span className="text-text-primary whitespace-pre-wrap break-words">
-              {evt.message}
-            </span>
+
+          {/* Tool Call signature and parameters in header */}
+          {toolName ? (
+            <div className="inline-flex items-baseline gap-0.5 flex-wrap min-w-0">
+              <span className="text-accent-cyan font-semibold shrink-0">
+                {toolName}
+              </span>
+              <span className="text-text-muted">(</span>
+              {toolArgs && Object.keys(toolArgs).length > 0 ? (
+                Object.entries(toolArgs).map(([key, val], idx, arr) => (
+                  <span key={key} className="inline-flex items-baseline">
+                    <span className="text-cyan-300/80 font-medium">{key}</span>
+                    <span className="text-text-muted">=</span>
+                    <span
+                      className="text-text-primary"
+                      title={typeof val === "string" ? val : JSON.stringify(val, null, 2)}
+                    >
+                      {formatHeaderArgValue(val)}
+                    </span>
+                    {idx < arr.length - 1 && (
+                      <span className="text-text-muted mr-1.5">,</span>
+                    )}
+                  </span>
+                ))
+              ) : legacyArgsStr ? (
+                <span className="text-text-primary" title={legacyArgsStr}>
+                  {legacyArgsStr.length > 100 ? `${legacyArgsStr.slice(0, 100)}…` : legacyArgsStr}
+                </span>
+              ) : null}
+              <span className="text-text-muted">)</span>
+            </div>
+          ) : (
+            !hasStructuredPayload && (
+              <span className="text-text-primary whitespace-pre-wrap break-words">
+                {evt.message}
+              </span>
+            )
           )}
         </div>
 
@@ -488,8 +561,8 @@ function TraceStepCard({
         </div>
       )}
 
-      {/* Fallback preview message when collapsed (clamped to 2 lines to preserve clean vertical space) */}
-      {hasStructuredPayload && !isOpen && evt.message && (
+      {/* Fallback preview message when collapsed for non-tool-call events (omitted for tool_call since parameters are now displayed in the header) */}
+      {hasStructuredPayload && !isOpen && evt.type !== "tool_call" && evt.message && (
         <div className="mt-1 text-[0.7rem] font-mono text-text-muted whitespace-pre-wrap break-words line-clamp-2">
           {evt.message}
         </div>
@@ -557,11 +630,10 @@ export const AgentGraphView = memo(function AgentGraphView({
           <button
             type="button"
             onClick={() => setSelectedNodeId("all")}
-            className={`text-[0.68rem] px-2.5 py-1 rounded-md border transition-colors ${
-              activeSelectedId === "all"
+            className={`text-[0.68rem] px-2.5 py-1 rounded-md border transition-colors ${activeSelectedId === "all"
                 ? "bg-accent-cyan/20 border-accent-cyan/40 text-accent-cyan font-semibold"
                 : "bg-bg-tertiary border-border-subtle text-text-secondary hover:text-text-primary"
-            }`}
+              }`}
           >
             Show All Nodes &amp; Steps ({events.length})
           </button>
@@ -573,11 +645,10 @@ export const AgentGraphView = memo(function AgentGraphView({
             <button
               type="button"
               onClick={() => setSelectedNodeId(rootNode.id)}
-              className={`w-full max-w-xl text-left rounded-xl border p-3.5 transition-all ${
-                activeSelectedId === rootNode.id
+              className={`w-full max-w-xl text-left rounded-xl border p-3.5 transition-all ${activeSelectedId === rootNode.id
                   ? "border-cyan-400 bg-cyan-500/15 shadow-[0_0_20px_rgba(56,189,248,0.18)]"
                   : "border-cyan-500/35 bg-bg-secondary/90 hover:border-cyan-400/60"
-              }`}
+                }`}
             >
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <div className="flex items-center gap-2">
@@ -585,8 +656,8 @@ export const AgentGraphView = memo(function AgentGraphView({
                   <span className="font-bold text-xs text-cyan-300">
                     {rootNode.label}
                   </span>
-                  <span className="text-[0.62rem] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-200">
-                    Commander (Root)
+                  <span className="text-[0.62rem] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-200" title={`Unique Agent ID: ${rootNode.id}`}>
+                    Commander ({rootNode.id})
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-[0.65rem] font-mono">
@@ -607,13 +678,12 @@ export const AgentGraphView = memo(function AgentGraphView({
                     </span>
                   )}
                   <span
-                    className={`px-1.5 py-0.2 rounded-full text-[0.6rem] uppercase ${
-                      rootNode.status === "done"
+                    className={`px-1.5 py-0.2 rounded-full text-[0.6rem] uppercase ${rootNode.status === "done"
                         ? "bg-emerald-500/20 text-emerald-300"
                         : rootNode.status === "error"
                           ? "bg-rose-500/20 text-rose-300"
                           : "bg-cyan-500/20 text-cyan-300 animate-pulse"
-                    }`}
+                      }`}
                   >
                     {isLive && rootNode.status === "running" ? "running" : rootNode.status}
                   </span>
@@ -638,13 +708,12 @@ export const AgentGraphView = memo(function AgentGraphView({
 
                 {/* Subagent Node Cards Grid */}
                 <div
-                  className={`w-full grid gap-3 mt-2 ${
-                    subagentNodes.length === 1
+                  className={`w-full grid gap-3 mt-2 ${subagentNodes.length === 1
                       ? "grid-cols-1 max-w-xl"
                       : subagentNodes.length === 2
                         ? "grid-cols-1 md:grid-cols-2"
                         : "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
-                  }`}
+                    }`}
                 >
                   {subagentNodes.map((sub, idx) => {
                     const theme = AGENT_THEME[sub.color] ?? AGENT_THEME.magenta;
@@ -654,11 +723,10 @@ export const AgentGraphView = memo(function AgentGraphView({
                         key={sub.id}
                         type="button"
                         onClick={() => setSelectedNodeId(sub.id)}
-                        className={`text-left rounded-xl border p-3.5 transition-all flex flex-col justify-between ${
-                          isSelected
+                        className={`text-left rounded-xl border p-3.5 transition-all flex flex-col justify-between ${isSelected
                             ? `${theme.border} ${theme.bg} ring-1 ring-fuchsia-400/60 shadow-[0_0_18px_rgba(232,121,249,0.18)]`
                             : `${theme.border} bg-bg-secondary/85 hover:bg-bg-secondary`
-                        }`}
+                          }`}
                       >
                         <div>
                           <div className="flex items-center justify-between gap-1.5 mb-2">
@@ -667,6 +735,9 @@ export const AgentGraphView = memo(function AgentGraphView({
                               <span className={`font-bold text-xs truncate ${theme.text}`}>
                                 {sub.label}
                               </span>
+                              <span className="text-[0.6rem] font-mono px-1.5 py-0.2 rounded bg-bg-primary/80 text-text-muted border border-border-subtle/50" title={`Unique Agent ID: ${sub.id}`}>
+                                {sub.id}
+                              </span>
                               {sub.modelTier && (
                                 <span className="text-[0.6rem] font-mono px-1.5 py-0.2 rounded bg-bg-tertiary text-text-secondary uppercase">
                                   {sub.modelTier}
@@ -674,13 +745,12 @@ export const AgentGraphView = memo(function AgentGraphView({
                               )}
                             </div>
                             <span
-                              className={`px-1.5 py-0.2 rounded-full text-[0.6rem] font-mono uppercase shrink-0 ${
-                                sub.status === "done"
+                              className={`px-1.5 py-0.2 rounded-full text-[0.6rem] font-mono uppercase shrink-0 ${sub.status === "done"
                                   ? "bg-emerald-500/20 text-emerald-300"
                                   : sub.status === "error"
                                     ? "bg-rose-500/20 text-rose-300"
                                     : "bg-fuchsia-500/20 text-fuchsia-300 animate-pulse"
-                              }`}
+                                }`}
                             >
                               {sub.status}
                             </span>
@@ -727,6 +797,9 @@ export const AgentGraphView = memo(function AgentGraphView({
               <h4 className="text-xs font-bold text-text-primary">
                 {selectedNode.label} — Full Uncut Inspector
               </h4>
+              <span className="text-[0.62rem] font-mono px-1.5 py-0.5 rounded bg-bg-tertiary text-accent-cyan border border-accent-cyan/30" title={`Unique Agent ID: ${selectedNode.id}`}>
+                id: {selectedNode.id}
+              </span>
               <span className="text-[0.65rem] font-mono text-text-muted">
                 ({selectedNode.events.length} trace steps •{" "}
                 {selectedNode.toolCallsCount} tool calls)
@@ -939,9 +1012,8 @@ export const ThinkingPanel = memo(function ThinkingPanel({
     <div className="mt-3 rounded-xl border border-border-subtle/80 bg-bg-secondary/50 overflow-hidden">
       {/* ── Top Control Bar ── */}
       <div
-        className={`flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 bg-bg-tertiary/60 ${
-          expanded ? "border-b border-border-subtle/50" : ""
-        }`}
+        className={`flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 bg-bg-tertiary/60 ${expanded ? "border-b border-border-subtle/50" : ""
+          }`}
       >
         <button
           type="button"
@@ -984,33 +1056,30 @@ export const ThinkingPanel = memo(function ThinkingPanel({
               <button
                 type="button"
                 onClick={() => setViewMode("graph")}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                  viewMode === "graph"
+                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${viewMode === "graph"
                     ? "bg-accent-cyan/20 text-accent-cyan"
                     : "text-text-muted hover:text-text-primary"
-                }`}
+                  }`}
               >
                 🕸️ Graph View
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode("steps")}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                  viewMode === "steps"
+                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${viewMode === "steps"
                     ? "bg-accent-cyan/20 text-accent-cyan"
                     : "text-text-muted hover:text-text-primary"
-                }`}
+                  }`}
               >
                 📜 All Steps ({events.length})
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode("raw")}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                  viewMode === "raw"
+                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${viewMode === "raw"
                     ? "bg-accent-cyan/20 text-accent-cyan"
                     : "text-text-muted hover:text-text-primary"
-                }`}
+                  }`}
               >
                 {"{ }"} Raw JSON
               </button>
@@ -1048,9 +1117,8 @@ export const ThinkingPanel = memo(function ThinkingPanel({
       {expanded && (
         <div
           ref={scrollRef}
-          className={`p-3.5 ${
-            fullHeight ? "" : "max-h-[32rem] overflow-y-auto"
-          }`}
+          className={`p-3.5 ${fullHeight ? "" : "max-h-[32rem] overflow-y-auto"
+            }`}
         >
           {viewMode === "graph" && (
             <AgentGraphView events={events} isLive={isLive} />

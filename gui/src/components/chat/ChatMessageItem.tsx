@@ -44,14 +44,14 @@ const ChatMessageItem = memo(function ChatMessageItem({ message }: ChatMessageIt
         {/* Assistant routing & model execution metadata pills */}
         {!isUser && message.agent && (
           <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.65rem] font-medium bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.65rem] font-mono font-medium bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan">
               <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan" />
-              {"NexusAgent"}
+              {message.agent || "nexus"}
               {message.domain && (
-                <span className="text-text-muted">• {message.domain}</span>
+                <span className="text-text-muted font-sans">• {message.domain}</span>
               )}
               {message.confidence != null && (
-                <span className="text-text-muted">
+                <span className="text-text-muted font-sans">
                   • {Math.round(message.confidence * 100)}%
                 </span>
               )}
