@@ -36,6 +36,7 @@ const DIFF_OPTIONS = {
   fontFamily: "var(--font-mono)",
   fontSize: 14,
   padding: { top: 16 },
+  automaticLayout: true, // ResizeObserver listener ensures Monaco recalculates layout when parent dimensions change
 };
 
 // Formats a UUID or composite thread ID into a compact pill label while preserving subagent suffixes
@@ -96,8 +97,9 @@ export default function HitlPage() {
   const [revisions, setRevisions] = useState<HitlRevision[]>([]);
   // isQueueCollapsed: toggles the left review queue sidebar between expanded (w-1/3) and collapsed rail (w-14)
   const [isQueueCollapsed, setIsQueueCollapsed] = useState(false);
-  // isRecentCollapsed: accordion toggle to collapse/expand the Recently Applied undo ledger sub-menu
-  const [isRecentCollapsed, setIsRecentCollapsed] = useState(false);
+  // isRecentCollapsed: accordion toggle to collapse/expand the Recently Applied undo ledger sub-menu;
+  // defaults to true (collapsed) so historical ledger entries do not crowd out active pending transactions on mobile or desktop
+  const [isRecentCollapsed, setIsRecentCollapsed] = useState(true);
   // isReasoningCollapsed: allows collapsing the agent reasoning card to maximize vertical diff editor real estate
   const [isReasoningCollapsed, setIsReasoningCollapsed] = useState(false);
   // isMobile: tracks whether viewport width is below 768px (`md:`) so Monaco DiffEditor dynamically switches
@@ -108,7 +110,13 @@ export default function HitlPage() {
   useEffect(() => {
     const mql = window.matchMedia("(max-width: 767px)");
     const handleViewportChange = (e: MediaQueryListEvent | MediaQueryList) => {
-      setIsMobile(e.matches);
+      const mobile = e.matches;
+      setIsMobile(mobile);
+      if (mobile) {
+        // Auto-collapse queue menu and agent reasoning on mobile viewports to maximize vertical editor real estate
+        setIsQueueCollapsed(true);
+        setIsReasoningCollapsed(true);
+      }
     };
     handleViewportChange(mql);
     mql.addEventListener("change", handleViewportChange);
@@ -153,11 +161,14 @@ export default function HitlPage() {
     return () => { active = false; };
   }, []);
 
-  // Switching cards clears any conflict state that belonged to the previous card
+  // Switching cards clears any conflict state that belonged to the previous card; auto-collapses queue on mobile screens
   function selectTx(tx: Transaction) {
     setSelectedTx(tx);
     setConflict(null);
     setView("diff");
+    if (isMobile) {
+      setIsQueueCollapsed(true);
+    }
   }
 
   async function handleApprove(force = false) {
@@ -284,11 +295,19 @@ export default function HitlPage() {
       active ? "bg-accent-amber/15 text-accent-amber" : "text-text-muted hover:text-text-secondary"
     }`;
 
-  // diffOptions: merges static DIFF_OPTIONS with viewport-aware `renderSideBySide: !isMobile` so mobile screens (< 768px)
-  // render a readable inline unified diff without horizontal scrolling while desktop (`md:`) keeps side-by-side diffs
+  // diffOptions: merges static DIFF_OPTIONS with viewport-aware configurations:
+  // - renderSideBySide: !isMobile renders inline unified diff (< 768px) without horizontal split scrolling vs desktop side-by-side (`md:`)
+  // - fontSize: 12 on mobile maximizes character density across narrow phone viewports, 14 on desktop
+  // - lineNumbersMinChars: 3 on mobile reclaims horizontal gutter width for actual diff text
+  // - padding: compact 8px top padding on mobile vs 16px on desktop
+  // - automaticLayout: true guarantees ResizeObserver continuously adapts Monaco to container dimensions
   const diffOptions = {
     ...DIFF_OPTIONS,
     renderSideBySide: !isMobile,
+    fontSize: isMobile ? 12 : 14,
+    lineNumbersMinChars: isMobile ? 3 : 4,
+    padding: { top: isMobile ? 8 : 16 },
+    automaticLayout: true,
   };
 
   return (
@@ -665,9 +684,11 @@ export default function HitlPage() {
 
             {/* Diff Viewer */}
             {view === "diff" && (
-              <div className="flex-1 min-h-[360px] md:min-h-0 relative">
+              <div className="flex-1 h-[62vh] min-h-[460px] md:h-full md:min-h-0 relative">
                 <DiffEditor
-                  height="100%"
+                  // key: Forces Monaco to remount cleanly when switching between inline unified (< 768px) and split views, or switching transactions
+                  key={`diff-${selectedTx.id}-${isMobile ? "inline" : "split"}`}
+                  height={isMobile ? "62vh" : "100%"}
                   language="markdown"
                   original={selectedTx.original_content || ""}
                   modified={selectedTx.proposed_content}
@@ -718,11 +739,11 @@ export default function HitlPage() {
                       : "Left: current disk · Right: agent proposal (red on the left gets lost)"}
                   </span>
                 </div>
-                <div className="flex-1 min-h-[320px] md:min-h-0 relative">
+                <div className="flex-1 h-[60vh] min-h-[420px] md:h-full md:min-h-0 relative">
                   <DiffEditor
-                    // key: Forces Monaco to remount when switching panes so both models are swapped cleanly
-                    key={conflictPane}
-                    height="100%"
+                    // key: Forces Monaco to remount when switching panes or mobile/desktop viewports so models and layout swap cleanly
+                    key={`conflict-${selectedTx.id}-${conflictPane}-${isMobile ? "inline" : "split"}`}
+                    height={isMobile ? "60vh" : "100%"}
                     language="markdown"
                     original={conflictPane === "your_edits" ? (selectedTx.original_content || "") : (conflict.current_content ?? "")}
                     modified={conflictPane === "your_edits" ? (conflict.current_content ?? "") : selectedTx.proposed_content}
