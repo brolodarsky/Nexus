@@ -57,6 +57,7 @@ export interface ChatInputBarProps {
   onChangeInput: (value: string) => void;
   onSelectModelTier: (tierId: string) => void;
   onToggleCollapse: (collapsed: boolean) => void;
+  onStopAndRevert?: () => void;
   onSubmit: (e?: React.FormEvent) => void;
 }
 
@@ -75,6 +76,7 @@ const ChatInputBar = memo(function ChatInputBar({
   onChangeInput,
   onSelectModelTier,
   onToggleCollapse,
+  onStopAndRevert,
   onSubmit,
 }: ChatInputBarProps) {
   // Local typing buffer: keeps per-keystroke React state updates confined strictly inside ChatInputBar
@@ -450,29 +452,44 @@ const ChatInputBar = memo(function ChatInputBar({
               </svg>
             </button>
 
-            <button
-              type="submit"
-              disabled={
-                loading ||
-                isUploading ||
-                (!localInput.trim() && pendingImages.length === 0)
-              }
-              title="Send message (Enter) • Newline (Shift+Enter)"
-              className="flex items-center justify-center w-10 h-10 md:w-9 md:h-9 rounded-xl bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            {loading ? (
+              <button
+                type="button"
+                onClick={onStopAndRevert}
+                title="Stop agent run and revert turn (Esc)"
+                aria-label="Stop and revert turn"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-500/15 text-rose-400 hover:bg-rose-500/25 border border-rose-500/30 transition-all font-medium text-xs shadow-sm hover:scale-[1.02] active:scale-[0.98] shrink-0"
               >
-                <path d="M22 2L11 13" />
-                <path d="M22 2L15 22L11 13L2 9L22 2Z" />
-              </svg>
-            </button>
+                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                  <rect x="5" y="5" width="14" height="14" rx="2" />
+                </svg>
+                <span className="hidden sm:inline">Stop &amp; Revert</span>
+                <span className="sm:hidden">Stop</span>
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={
+                  isUploading ||
+                  (!localInput.trim() && pendingImages.length === 0)
+                }
+                title="Send message (Enter) • Newline (Shift+Enter)"
+                className="flex items-center justify-center w-10 h-10 md:w-9 md:h-9 rounded-xl bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M22 2L11 13" />
+                  <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
       </div>

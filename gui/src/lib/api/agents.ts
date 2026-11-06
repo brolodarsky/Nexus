@@ -261,4 +261,36 @@ export async function uploadImage(file: File): Promise<UploadImageResponse> {
   return res.json();
 }
 
+// Interface describing the JSON response returned by POST /api/agents/stop-and-revert
+export interface StopAndRevertResponse {
+  status: string;                  // Outcome status (e.g. "stopped_and_reverted")
+  restored_query: string;          // User prompt text restored from the reverted turn
+  restored_images?: string[];      // Attached image URLs restored from the reverted turn
+  cancelled_hitl_count: number;    // Count of unapproved HITL mutations cancelled
+  reverted_messages_count: number; // Count of messages purged from chats.db
+}
+
+/**
+ * Halts any active agent execution for the target thread and rolls back all state:
+ *   1. Signals the backend worker thread and LangGraph nodes to immediately stop.
+ *   2. Cancels all unapproved pending HITL transactions (file creations, edits, moves, deletions).
+ *   3. Rolls back LangGraph checkpointer SQLite database (`memory.sqlite`) to pre-turn state.
+ *   4. Purges the turn's user and assistant messages from SQLite `chats.db`.
+ *   5. Cleans up thread-scoped blackboard bulletins posted during the aborted turn.
+ *   6. Restores the user's prompt text and attached images for immediate composer recovery.
+ *
+ * @param conversationId The UUID of the conversation thread to stop and revert.
+ * @returns A promise resolving to the StopAndRevertResponse payload.
+ */
+export async function stopAndRevertTurn(
+  conversationId: string
+): Promise<StopAndRevertResponse> {
+  return apiFetch<StopAndRevertResponse>("/api/agents/stop-and-revert", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ conversation_id: conversationId }),
+  });
+}
+
+
 

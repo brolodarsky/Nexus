@@ -151,3 +151,76 @@ def get_chat_history(conversation_id: str, limit: int | None = None) -> list[dic
                 "images": parsed_images,
             })
         return history
+
+
+def revert_last_turn(conversation_id: str) -> dict | None:
+    """
+    Reverts the latest turn in a conversation by deleting its messages from SQLite `chats.db`.
+    
+    Handles two operational states:
+      1. Mid-turn Abort (Stop & Revert): Only the user prompt was persisted when execution was stopped;
+         deletes the solitary user message and restores its text and attached images.
+      2. Completed Turn Rollback: Both user prompt and assistant response were persisted;
+         deletes both messages in reverse chronological order and restores the user's prompt text.
+         
+    Parameters:
+      conversation_id: The UUID of the conversation thread.
+      
+    Returns:
+      Dictionary with restored user prompt, image URLs, and deleted message count:
+      `{"restored_query": str, "images": list[str], "deleted_count": int}`
+      or None if the conversation thread contains no messages.
+    """
+    if not conversation_id:
+        return None
+
+    with _get_conn() as conn:
+        # Fetch all messages for this conversation ordered chronologically
+        rows = conn.execute("""
+            SELECT id, role, content, images
+            FROM messages
+            WHERE conversation_id = ?
+            ORDER BY id ASC
+        """, (conversation_id,)).fetchall()
+
+        if not rows:
+            return None
+
+        last_row = rows[-1]
+        ids_to_delete: list[int] = []
+        restored_query = ""
+        restored_images: list[str] = []
+
+        if last_row["role"] == "assistant":
+            ids_to_delete.append(last_row["id"])
+            # Search backwards for the corresponding user message that prompted this assistant reply
+            for r in reversed(rows[:-1]):
+                if r["role"] == "user":
+                    ids_to_delete.append(r["id"])
+                    restored_query = r["content"] or ""
+                    raw_images = r["images"] if "images" in r.keys() else None
+                    restored_images = json.loads(raw_images) if raw_images else []
+                    break
+        elif last_row["role"] == "user":
+            # Mid-turn abort: only the user prompt exists at the tail of the message log
+            ids_to_delete.append(last_row["id"])
+            restored_query = last_row["content"] or ""
+            raw_images = last_row["images"] if "images" in last_row.keys() else None
+            restored_images = json.loads(raw_images) if raw_images else []
+
+        if ids_to_delete:
+            placeholders = ",".join("?" for _ in ids_to_delete)
+            conn.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", ids_to_delete)
+            # Update last_updated timestamp on parent conversation row
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute("UPDATE conversations SET last_updated = ? WHERE id = ?", (now, conversation_id))
+            conn.commit()
+
+            return {
+                "restored_query": restored_query,
+                "images": restored_images,
+                "deleted_count": len(ids_to_delete),
+            }
+
+        return None
+

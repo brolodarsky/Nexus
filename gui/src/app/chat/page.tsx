@@ -20,6 +20,7 @@ import {
   getBoardBulletins,
   clearBoardBulletins,
   deleteBoardBulletin,
+  stopAndRevertTurn,
   type Conversation,
   type TraceEvent,
   type BoardBulletin,
@@ -818,6 +819,66 @@ export default function ChatPage() {
     [loading, activeConvId, selectedModelTier, modelOptions, pendingImages, refreshBoard, setProgrammaticInput]
   );
 
+  // handleStopAndRevert: aborts active stream, halts backend graph execution, purges unapproved HITL mutations,
+  // rolls back LangGraph memory and chats.db, and restores the user prompt text + attachments to the composer
+  const handleStopAndRevert = useCallback(async () => {
+    if (!activeConvId) return;
+
+    // 1. Immediately terminate client SSE stream fetch connection
+    if (abortRef.current) {
+      abortRef.current();
+      abortRef.current = null;
+    }
+
+    setLoading(false);
+    setLiveTrace([]);
+    liveTraceRef.current = [];
+    activeStreamConvIdRef.current = null;
+
+    try {
+      // 2. Halt backend execution thread, cancel pending HITL mutations, rollback checkpoints & chats.db
+      const res = await stopAndRevertTurn(activeConvId);
+
+      // 3. Restore query into composer and textarea focus so user does not lose input
+      if (res.restored_query) {
+        setProgrammaticInput(res.restored_query);
+      }
+      if (res.restored_images && res.restored_images.length > 0) {
+        setPendingImages(res.restored_images);
+      }
+
+      // 4. Fetch updated ground-truth message history from database
+      const history = await getChatHistory(activeConvId);
+      setMessages(
+        history.map((entry) => {
+          const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
+          const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
+          return {
+            role: entry.role,
+            content: entry.content,
+            images: entry.images || [],
+            agent: entry.agent,
+            domain: entry.domain,
+            confidence: entry.confidence,
+            modelTier,
+            modelName,
+            costUsd,
+            trace: entry.trace,
+            timestamp: new Date(entry.timestamp),
+          };
+        })
+      );
+
+      // 5. Refresh blackboard bulletins and conversations list
+      refreshBoard();
+      getConversations().then(setConversations);
+    } catch (err) {
+      console.error("Failed to stop and revert turn:", err);
+    } finally {
+      inputRef.current?.focus();
+    }
+  }, [activeConvId, refreshBoard, setProgrammaticInput]);
+
   const handleClearBoard = useCallback(async () => {
     await clearBoardBulletins(activeConvId);
     refreshBoard();
@@ -891,9 +952,18 @@ export default function ChatPage() {
     [activeConvId, setProgrammaticInput]
   );
 
-  // Global keyboard shortcut: pressing '/' while viewing the thread expands the message bar and focuses the input
+  // Global keyboard shortcuts:
+  // - Escape while streaming: stops active agent execution and reverts the turn immediately
+  // - '/' while viewing thread: expands the message bar and focuses the input
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Esc shortcut: stops and reverts active streaming turn immediately
+      if (loading && e.key === "Escape") {
+        e.preventDefault();
+        handleStopAndRevert();
+        return;
+      }
+
       const activeElement = document.activeElement;
       const isEditing =
         activeElement instanceof HTMLInputElement ||
@@ -912,7 +982,7 @@ export default function ChatPage() {
     };
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
+  }, [loading, handleStopAndRevert]);
 
   // handleToggleBoard: memoized handler to toggle right Subagent Blackboard drawer and persist choice
   const handleToggleBoard = useCallback(() => {
@@ -981,6 +1051,8 @@ export default function ChatPage() {
           liveTrace={liveTrace}
           activeModelLabel={activeModelLabel}
           onSelectPromptSuggestion={handleSelectPromptSuggestion}
+          onStopAndRevert={handleStopAndRevert}
+          onRevertLastTurn={handleStopAndRevert}
         />
 
         <ChatInputBar
@@ -998,6 +1070,7 @@ export default function ChatPage() {
           onChangeInput={handleInputChange}
           onSelectModelTier={handleSelectModelTier}
           onToggleCollapse={handleToggleInputCollapse}
+          onStopAndRevert={handleStopAndRevert}
           onSubmit={handleSubmit}
         />
       </div>

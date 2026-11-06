@@ -18,11 +18,19 @@ import { extractTurnCost, type Message } from "./types";
 
 // ChatMessageItemProps: props for rendering a single conversation turn bubble
 // - message: Message object containing role, markdown content, agent/model metadata, and optional trace events
+// - isLastTurn: optional boolean indicating whether this message is the latest in the conversation thread
+// - onRevertTurn: optional callback to revert this turn and restore its prompt back to the composer
 export interface ChatMessageItemProps {
   message: Message;
+  isLastTurn?: boolean;
+  onRevertTurn?: () => void;
 }
 
-const ChatMessageItem = memo(function ChatMessageItem({ message }: ChatMessageItemProps) {
+const ChatMessageItem = memo(function ChatMessageItem({
+  message,
+  isLastTurn = false,
+  onRevertTurn,
+}: ChatMessageItemProps) {
   const isUser = message.role === "user";
   const hasTrace = Boolean(message.trace && message.trace.length > 0);
   // Memoize turn cost calculation so trace event scanning only runs once per message
@@ -86,6 +94,19 @@ const ChatMessageItem = memo(function ChatMessageItem({ message }: ChatMessageIt
                 <span>💰</span>
                 <span>${effectiveCost < 0.01 ? effectiveCost.toFixed(4) : effectiveCost.toFixed(3)}</span>
               </span>
+            )}
+
+            {isLastTurn && onRevertTurn && (
+              <button
+                type="button"
+                onClick={onRevertTurn}
+                title="Revert this turn, cancel staged mutations, and restore prompt to composer"
+                aria-label="Revert turn"
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[0.65rem] font-mono font-medium border bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30 text-rose-300 transition-colors ml-auto cursor-pointer"
+              >
+                <span>↩</span>
+                <span>Revert turn</span>
+              </button>
             )}
           </div>
         )}

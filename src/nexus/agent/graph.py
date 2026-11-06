@@ -16,6 +16,7 @@ or restricting directory access, Nexus runs ONE universal agent design (`NexusAg
      maximizing provider KV prompt-cache hit rates (90–97% cached tokens) across multi-turn sessions.
 """
 # sqlite3: Standard library SQL engine used for local thread checkpointing (`SqliteSaver`)
+import json
 import sqlite3
 # threading: Provides thread-safe locking (`Lock`) for assigning unique serial numbers to parallel subagents
 import threading
@@ -128,6 +129,121 @@ def _next_subagent_tracer(tier: str) -> tuple[int, str, AgentTracer]:
         parent_id="nexus",
     )
     return serial, sub_id, tracer
+
+
+# ── Thread Cancellation Registry & Checkpoint Rollback (Stop & Revert) ───────
+MEMORY_DB_PATH = Path(__file__).parent / "memory.sqlite"
+
+# Thread-safe dictionary mapping active conversation UUIDs to cancellation events (`threading.Event`)
+_CANCEL_EVENTS: dict[str, threading.Event] = {}
+_CANCEL_LOCK = threading.Lock()
+
+
+def register_cancel_event(thread_id: str, event: threading.Event) -> None:
+    """Registers a threading.Event used to signal immediate interruption for an in-flight agent turn."""
+    if not thread_id:
+        return
+    with _CANCEL_LOCK:
+        _CANCEL_EVENTS[thread_id] = event
+
+
+def unregister_cancel_event(thread_id: str) -> None:
+    """Removes a conversation's cancellation event after execution settles or is aborted."""
+    if not thread_id:
+        return
+    with _CANCEL_LOCK:
+        _CANCEL_EVENTS.pop(thread_id, None)
+
+
+def is_thread_cancelled(thread_id: Optional[str]) -> bool:
+    """Checks whether the given conversation thread has been signaled to stop and revert."""
+    if not thread_id:
+        return False
+    # Normalize subagent threads (e.g., 'conv_123:subagent-1' -> 'conv_123') to check root status
+    root_thread = thread_id.split(":")[0] if ":" in thread_id else thread_id
+    with _CANCEL_LOCK:
+        event = _CANCEL_EVENTS.get(thread_id) or _CANCEL_EVENTS.get(root_thread)
+        return event.is_set() if event else False
+
+
+def get_latest_checkpoint_id(thread_id: str) -> Optional[str]:
+    """Returns the most recent checkpoint_id for a given thread_id in `memory.sqlite`, or None if none exists."""
+    if not thread_id or not MEMORY_DB_PATH.exists():
+        return None
+    try:
+        with sqlite3.connect(MEMORY_DB_PATH) as check_conn:
+            cursor = check_conn.cursor()
+            cursor.execute(
+                "SELECT checkpoint_id FROM checkpoints WHERE thread_id = ? ORDER BY checkpoint_id DESC LIMIT 1",
+                (thread_id,),
+            )
+            row = cursor.fetchone()
+            return str(row[0]) if row else None
+    except Exception:
+        return None
+
+
+def rollback_checkpoints_for_thread(thread_id: str, pre_turn_checkpoint_id: Optional[str] = None) -> int:
+    """Rolls back LangGraph checkpointer SQLite database (`memory.sqlite`) to pre-turn state.
+
+    Ensures that conversation memory in LangGraph does not remember an aborted or reverted turn.
+
+    Parameters:
+      thread_id: Unique UUID string identifying the conversation thread.
+      pre_turn_checkpoint_id: Optional checkpoint ID captured immediately before this turn ran.
+
+    Returns:
+      Number of deleted checkpoint rows.
+    """
+    if not thread_id or not MEMORY_DB_PATH.exists():
+        return 0
+
+    deleted_checkpoints = 0
+    with sqlite3.connect(MEMORY_DB_PATH) as rollback_conn:
+        cursor = rollback_conn.cursor()
+
+        target_checkpoint_id = pre_turn_checkpoint_id
+        if target_checkpoint_id is None:
+            # Fallback inspection: find the most recent checkpoint with metadata.source == 'input'
+            cursor.execute(
+                """
+                SELECT checkpoint_id, parent_checkpoint_id, metadata
+                FROM checkpoints
+                WHERE thread_id = ?
+                ORDER BY checkpoint_id DESC
+                """,
+                (thread_id,),
+            )
+            rows = cursor.fetchall()
+            for cid, parent_id, meta_raw in rows:
+                try:
+                    meta = json.loads(meta_raw) if meta_raw else {}
+                except Exception:
+                    meta = {}
+                if meta.get("source") == "input":
+                    target_checkpoint_id = parent_id if parent_id else ""
+                    break
+
+        if target_checkpoint_id:
+            # Delete channel writes and checkpoints newer than target_checkpoint_id
+            cursor.execute(
+                "DELETE FROM writes WHERE thread_id = ? AND checkpoint_id > ?",
+                (thread_id, target_checkpoint_id),
+            )
+            cursor.execute(
+                "DELETE FROM checkpoints WHERE thread_id = ? AND checkpoint_id > ?",
+                (thread_id, target_checkpoint_id),
+            )
+            deleted_checkpoints = cursor.rowcount
+        else:
+            # First turn of the thread or no prior checkpoint exists: prune entire thread from checkpointer
+            cursor.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))
+            cursor.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
+            deleted_checkpoints = cursor.rowcount
+
+        rollback_conn.commit()
+
+    return deleted_checkpoints
 
 
 # ── State Schema ─────────────────────────────────────────────────────────────
@@ -325,6 +441,10 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
 
     try:
         while True:
+            # Cancellation guard: abort subagent immediately if the parent turn was stopped by user
+            if is_thread_cancelled(parent_convo) or is_thread_cancelled(parent_thread):
+                raise InterruptedError(f"Subagent #{serial} execution stopped by user via Stop & Revert.")
+
             turn_idx += 1
             local_tracer.llm_call(metadata={"turn": turn_idx, "model_tier": effective_tier, "model_name": sub_model_name})
             ai_msg = sub_llm.invoke(sub_messages)
@@ -522,6 +642,13 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     # 2. Extract optional per-turn `model_tier` override from LangGraph `RunnableConfig` (`configurable.model_tier`).
     # Keeping `model_tier` in `RunnableConfig` rather than `messages` preserves 100% KV prompt-cache prefix stability.
     configurable = (config or {}).get("configurable") or {}
+    active_thread_id = str(configurable.get("thread_id") or "nexus_primary")
+    active_convo_id = str(configurable.get("conversation_id") or active_thread_id)
+
+    # Pre-inference cancellation guard: abort immediately if user pressed Stop & Revert
+    if is_thread_cancelled(active_thread_id) or is_thread_cancelled(active_convo_id):
+        raise InterruptedError(f"Turn execution for thread '{active_thread_id}' stopped by user.")
+
     requested_tier = configurable.get("model_tier")
     resolved_model = resolve_model_config(requested_tier)
     effective_tier = resolved_model["tier"]
@@ -560,12 +687,14 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
         else:
             raise e
 
+    # Post-inference cancellation guard: prevent running subsequent tools if user stopped during LLM generation
+    if is_thread_cancelled(active_thread_id) or is_thread_cancelled(active_convo_id):
+        raise InterruptedError(f"Turn execution for thread '{active_thread_id}' stopped by user.")
+
     # Log input tokens, cached prompt tokens (`cache_read`), output tokens, and estimated cost to console and SSE trace bus
     _log_token_usage(nexus_tracer, response, model_name=active_model_name, tier=effective_tier)
 
     # Refresh HITL execution provenance so any tool calls executed next by `traced_tool_node` record exact session/agent metadata
-    active_thread_id = str(configurable.get("thread_id") or "nexus_primary")
-    active_convo_id = str(configurable.get("conversation_id") or active_thread_id)
     set_hitl_execution_context(
         conversation_id=active_convo_id,
         thread_id=active_thread_id,
@@ -589,17 +718,34 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
 
 def traced_tool_node(state: NexusAgentState) -> dict:
     """Node: Executes requested tool calls and broadcasts full, untruncated tool results to console and SSE trace bus."""
+    # Pre-tool cancellation check
+    ctx = get_hitl_execution_context()
+    thread_id = ctx.get("thread_id") or ctx.get("conversation_id")
+    if is_thread_cancelled(thread_id):
+        raise InterruptedError(f"Tool execution for thread '{thread_id}' stopped by user.")
+
     result = _invoke_tool_node_resilient(tool_node, state)
     for msg in result.get("messages", []):
         tool_name = getattr(msg, "name", "unknown")
         call_id = getattr(msg, "tool_call_id", None)
         content = extract_message_text(msg)
         nexus_tracer.tool_result(tool_name, content, call_id=call_id)
+
+    # Post-tool cancellation check
+    if is_thread_cancelled(thread_id):
+        raise InterruptedError(f"Tool execution for thread '{thread_id}' stopped by user.")
+
     return result
 
 
 def route_after_agent(state: NexusAgentState) -> Literal["tools", "__end__"]:
     """Conditional Edge: Routes to `tools` if the LLM emitted tool calls, otherwise terminates the turn (`END`)."""
+    # Cancellation check: route straight to END if turn was aborted
+    ctx = get_hitl_execution_context()
+    thread_id = ctx.get("thread_id") or ctx.get("conversation_id")
+    if is_thread_cancelled(thread_id):
+        return END
+
     messages = state.get("messages", [])
     if messages:
         last_msg = messages[-1]
@@ -623,7 +769,7 @@ workflow.add_edge("tools", "agent")
 
 # 3. Persistent Checkpointer: Co-located SQLite database for multi-turn conversation state
 # `check_same_thread=False` allows FastAPI background worker threads to share the SQLite connection safely
-db_path = Path(__file__).parent / "memory.sqlite"
+db_path = MEMORY_DB_PATH
 conn = sqlite3.connect(db_path, check_same_thread=False)
 memory = SqliteSaver(conn)
 

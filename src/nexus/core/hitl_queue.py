@@ -420,6 +420,44 @@ def update_transaction_status(tx_id: int, status: str):
     conn.close()
 
 
+def cancel_pending_transactions_for_conversation(conversation_id: str) -> List[int]:
+    """Cancels all staged pending transactions for a conversation thread.
+    
+    Used by Stop & Revert to guarantee that no unapproved file mutations (edits, creations,
+    moves, or deletions) proposed during the aborted or reverted turn remain in the HITL review queue.
+    
+    Parameters:
+      conversation_id: Unique UUID of the active conversation thread.
+      
+    Returns:
+      List of transaction IDs whose status was transitioned from 'pending' to 'cancelled'.
+    """
+    if not conversation_id:
+        return []
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # Match on either conversation_id or thread_id columns
+    cursor.execute(
+        """
+        SELECT id FROM transactions
+        WHERE (conversation_id = ? OR thread_id = ?) AND status = 'pending'
+        ORDER BY id ASC
+        """,
+        (conversation_id, conversation_id),
+    )
+    tx_ids = [row["id"] for row in cursor.fetchall()]
+    if tx_ids:
+        placeholders = ",".join("?" for _ in tx_ids)
+        cursor.execute(
+            f"UPDATE transactions SET status = 'cancelled' WHERE id IN ({placeholders})",
+            tx_ids,
+        )
+        conn.commit()
+    conn.close()
+    return tx_ids
+
+
 # ── Commit Integrity: Stale-Base Detection, Snapshots, Rollback & Rebase ─────
 # Why this layer exists: edits can sit in the queue for hours while the human keeps editing the same
 # note in Obsidian. Blindly writing `proposed_content` on approval would silently erase those edits.

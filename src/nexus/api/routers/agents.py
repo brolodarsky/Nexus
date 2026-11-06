@@ -37,7 +37,17 @@ from nexus.core.run_logger import log_run, list_runs, get_run
 from nexus.core.chats_db import (
     log_message, get_chat_history,
     create_conversation, get_conversations, get_conversation,
-    delete_conversation, update_conversation_title
+    delete_conversation, update_conversation_title,
+    revert_last_turn,
+)
+from nexus.core.hitl_queue import cancel_pending_transactions_for_conversation
+from nexus.core.blackboard import clear_bulletins
+from nexus.agent.graph import (
+    get_latest_checkpoint_id,
+    rollback_checkpoints_for_thread,
+    register_cancel_event,
+    unregister_cancel_event,
+    is_thread_cancelled,
 )
 
 # Upload storage directory for chat image attachments
@@ -74,6 +84,46 @@ class AskResponse(BaseModel):
     model_name: str | None = None       # Concrete provider model identifier (e.g., "gemini-4-argon", "gemini-3.8-flash")
     cost_usd: float | None = None       # Estimated USD inference cost for this execution turn
     timestamp: str                      # ISO-8601 UTC timestamp
+
+
+# Pydantic schemas for the Stop & Revert endpoint
+class StopAndRevertRequest(BaseModel):
+    conversation_id: str                # UUID identifying the conversation thread to stop and revert
+
+
+class StopAndRevertResponse(BaseModel):
+    status: str                         # Outcome status (e.g. "stopped_and_reverted")
+    restored_query: str                 # Reverted prompt text restored to the composer
+    restored_images: list[str] = []     # Any staged/attached image URLs restored to the composer
+    cancelled_hitl_count: int = 0       # Number of pending HITL file mutations cancelled
+    reverted_messages_count: int = 0    # Number of messages purged from chats.db
+
+
+class ActiveRun:
+    """Tracks runtime context, cancellation tokens, and SSE event queues for an in-flight agent turn."""
+
+    def __init__(
+        self,
+        conversation_id: str,
+        query: str,
+        images: Optional[list[str]],
+        cancel_event: threading.Event,
+        pre_turn_checkpoint_id: Optional[str],
+        event_queue: queue.Queue,
+    ):
+        self.conversation_id = conversation_id
+        self.query = query
+        self.images = images or []
+        self.cancel_event = cancel_event
+        self.pre_turn_checkpoint_id = pre_turn_checkpoint_id
+        self.event_queue = event_queue
+        self.start_time = time.time()
+        self.is_stopped = False
+
+
+# Thread-safe dictionary tracking active runs per conversation UUID
+_active_runs: dict[str, ActiveRun] = {}
+_active_runs_lock = threading.Lock()
 
 
 # ── Image Upload & Asset Routes ──────────────────────────────
@@ -417,9 +467,27 @@ def _run_pipeline(
     """
     Runs agent graph execution in a background thread so the async event loop is not blocked.
     Collects trace events via trace_bus subscription and pushes the final 'done' event to event_queue.
+    Supports atomic interruption and zero-vestige turn reversion via `Stop & Revert`.
     """
     t0 = time.time()
     effective_query = query.strip() or "Analyze the attached image(s)."
+
+    # Capture checkpointer baseline BEFORE writing messages or graph state so rollback is 100% deterministic
+    pre_turn_checkpoint_id = get_latest_checkpoint_id(conversation_id)
+    cancel_event = threading.Event()
+    register_cancel_event(conversation_id, cancel_event)
+
+    active_run = ActiveRun(
+        conversation_id=conversation_id,
+        query=effective_query,
+        images=images,
+        cancel_event=cancel_event,
+        pre_turn_checkpoint_id=pre_turn_checkpoint_id,
+        event_queue=event_queue,
+    )
+    with _active_runs_lock:
+        _active_runs[conversation_id] = active_run
+
     # Log user query and image attachments to database immediately
     log_message(
         role="user",
@@ -435,6 +503,10 @@ def _run_pipeline(
     unsub = trace_bus.subscribe(_on_trace)
 
     try:
+        # Check if already cancelled before invoking graph
+        if is_thread_cancelled(conversation_id) or active_run.is_stopped:
+            return
+
         # Invoke the unified NexusAgent directly with optional per-turn model and image overrides
         from nexus.agent.api import run_nexus_agent_with_trace
         result = run_nexus_agent_with_trace(
@@ -443,6 +515,10 @@ def _run_pipeline(
             model_tier=model_tier,
             images=images,
         )
+
+        # Post-execution cancellation check: do not commit results or logs if cancelled while agent was running
+        if is_thread_cancelled(conversation_id) or active_run.is_stopped:
+            return
 
         routed_domain = result.get("domain")
         agent_name = "nexus"
@@ -513,6 +589,19 @@ def _run_pipeline(
             "cost_usd": turn_cost_formatted,
             "timestamp": now,
         })
+    except InterruptedError:
+        # Interrupted cleanly by user via Stop & Revert: push clean terminal event without recording partial error
+        event_queue.put({
+            "type": "info",
+            "message": "⏹ Agent execution stopped and reverted by user.",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        event_queue.put({
+            "type": "done",
+            "response": "",
+            "stopped": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
     except Exception as e:
         # Push terminal 'error' event to thread queue on failure
         event_queue.put({
@@ -522,6 +611,10 @@ def _run_pipeline(
         })
     finally:
         unsub() # Unsubscribe trace listener to prevent memory leaks
+        unregister_cancel_event(conversation_id)
+        with _active_runs_lock:
+            if _active_runs.get(conversation_id) is active_run:
+                _active_runs.pop(conversation_id, None)
 
 
 # Server-Sent Events (SSE) streaming endpoint
@@ -596,6 +689,82 @@ async def ask_brain_stream(request: AskRequest, req: Request):
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+# ── Stop & Revert Endpoint ───────────────────────────────────
+
+@router.post("/stop-and-revert", response_model=StopAndRevertResponse)
+async def stop_and_revert_turn(req: StopAndRevertRequest):
+    """
+    Stops active agent execution for the target conversation thread and rolls back all state:
+      1. Signals the active background worker thread and LangGraph nodes to immediately halt.
+      2. Cancels all unapproved pending HITL transactions (file creations, edits, moves, deletions).
+      3. Rolls back LangGraph checkpointer SQLite database (`memory.sqlite`) to pre-turn state.
+      4. Deletes the turn's user and assistant messages from SQLite `chats.db`.
+      5. Cleans up any thread-scoped blackboard bulletins posted during the aborted turn.
+      6. Returns the user's prompt text and attached images for immediate composer restoration.
+    """
+    conv_id = req.conversation_id.strip()
+    if not conv_id:
+        raise HTTPException(status_code=400, detail="conversation_id cannot be empty.")
+
+    # Phase 1: Halt any active in-flight worker thread for this conversation
+    with _active_runs_lock:
+        active_run = _active_runs.get(conv_id)
+        if active_run:
+            active_run.is_stopped = True
+            active_run.cancel_event.set()
+            # Push clean interruption notice onto SSE event queue so frontend terminates streaming immediately
+            try:
+                active_run.event_queue.put({
+                    "type": "info",
+                    "message": "⏹ Execution stopped and reverted by user.",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+                active_run.event_queue.put({
+                    "type": "done",
+                    "response": "",
+                    "stopped": True,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception:
+                pass
+
+    # Phase 2: Cancel all staged unapproved HITL transactions for this thread
+    cancelled_tx_ids = cancel_pending_transactions_for_conversation(conv_id)
+
+    # Phase 3: Rollback LangGraph checkpointer memory in memory.sqlite
+    pre_checkpoint = active_run.pre_turn_checkpoint_id if active_run else None
+    rollback_checkpoints_for_thread(conv_id, pre_turn_checkpoint_id=pre_checkpoint)
+
+    # Phase 4: Rollback chats.db messages and extract prompt to restore
+    revert_data = revert_last_turn(conv_id)
+
+    restored_query = ""
+    restored_images: list[str] = []
+    reverted_count = 0
+
+    if revert_data:
+        restored_query = revert_data["restored_query"]
+        restored_images = revert_data["images"]
+        reverted_count = revert_data["deleted_count"]
+    elif active_run:
+        restored_query = active_run.query
+        restored_images = active_run.images
+
+    # Phase 5: Clean up thread Blackboard bulletins if any were created during this turn
+    try:
+        clear_bulletins(thread_id=conv_id)
+    except Exception:
+        pass
+
+    return StopAndRevertResponse(
+        status="stopped_and_reverted",
+        restored_query=restored_query,
+        restored_images=restored_images,
+        cancelled_hitl_count=len(cancelled_tx_ids),
+        reverted_messages_count=reverted_count,
     )
 
 
