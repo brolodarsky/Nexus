@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { VaultEntry, listVault, generatePodcast, getPodcastAudioUrl, getNote, NoteContentResponse } from "@/lib/api";
+import { VaultEntry, listVault, generatePodcast, getPodcastAudioUrl, getNote } from "@/lib/api";
 
 export default function BrainExplorerPage() {
   const [currentPath, setCurrentPath] = useState<string>("");
@@ -25,15 +25,17 @@ export default function BrainExplorerPage() {
 
   // Load pinned notes from localStorage on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("nexus_pinned_notes");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) setPinnedNotes(parsed);
+    queueMicrotask(() => {
+      try {
+        const saved = localStorage.getItem("nexus_pinned_notes");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) setPinnedNotes(parsed);
+        }
+      } catch {
+        // Ignore localStorage access restrictions
       }
-    } catch {
-      // Ignore localStorage access restrictions
-    }
+    });
   }, []);
 
   // togglePinNote: Toggles whether the currently selected note is pinned to the Home page
@@ -51,26 +53,30 @@ export default function BrainExplorerPage() {
 
   // Inspect URL search params on mount to automatically open linked notes (e.g. /vault?note=Tasks.md)
   useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const targetNote = params.get("note");
-      if (targetNote) {
-        const name = targetNote.split("/").pop() || targetNote;
-        const entry: VaultEntry = {
-          name,
-          path: targetNote,
-          type: "file",
-          has_audio: false,
-        };
-        handleSelectNote(entry);
+    queueMicrotask(() => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const targetNote = params.get("note");
+        if (targetNote) {
+          const name = targetNote.split("/").pop() || targetNote;
+          const entry: VaultEntry = {
+            name,
+            path: targetNote,
+            type: "file",
+            has_audio: false,
+          };
+          handleSelectNote(entry);
+        }
+      } catch {
+        // Ignore URL parsing errors
       }
-    } catch {
-      // Ignore URL parsing errors
-    }
+    });
   }, []);
 
   useEffect(() => {
-    fetchDirectory(currentPath);
+    queueMicrotask(() => {
+      fetchDirectory(currentPath);
+    });
   }, [currentPath]);
 
   async function fetchDirectory(path: string) {
@@ -92,7 +98,7 @@ export default function BrainExplorerPage() {
     try {
       const data = await getNote(entry.path);
       setNoteContent(data.content);
-    } catch (e) {
+    } catch {
       setNoteContent("Error loading note.");
     } finally {
       setLoadingNote(false);
@@ -128,46 +134,48 @@ export default function BrainExplorerPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh)] bg-bg-primary">
+    <div className="flex flex-col md:flex-row min-h-[calc(100dvh-4rem)] md:h-[calc(100vh)] bg-bg-primary">
       {/* ── Left Sidebar (Explorer Menu) ────────────────────── */}
       {isExplorerCollapsed ? (
-        // Collapsed Rail: Slim column with expand button and folder glyph
+        // Collapsed Rail: Slim horizontal bar on mobile (< 768px) or vertical column (w-14) on desktop (`md:`)
         <aside
-          className="w-14 border-r border-border-subtle flex flex-col bg-bg-secondary/40 py-4 items-center shrink-0 transition-all duration-300 ease-in-out select-none"
+          className="w-full md:w-14 border-b md:border-b-0 md:border-r border-border-subtle flex flex-row md:flex-col bg-bg-secondary/40 py-2.5 px-3 md:py-4 md:px-0 items-center gap-2 md:gap-0 shrink-0 transition-all duration-300 ease-in-out select-none"
           aria-label="Collapsed Brain Explorer"
         >
           <button
             onClick={() => setIsExplorerCollapsed(false)}
-            className="p-2 rounded-lg text-text-muted hover:text-accent-cyan hover:bg-bg-surface transition-colors flex items-center justify-center"
+            className="p-2 rounded-lg text-text-muted hover:text-accent-cyan hover:bg-bg-surface transition-colors flex items-center justify-center shrink-0"
             title="Expand Brain Explorer"
             aria-label="Expand Brain Explorer"
           >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4 rotate-90 md:rotate-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
             </svg>
           </button>
 
           <div
             onClick={() => setIsExplorerCollapsed(false)}
-            className="mt-3 cursor-pointer p-2 rounded-xl text-accent-cyan hover:bg-bg-surface transition-colors flex flex-col items-center gap-1"
+            className="md:mt-3 cursor-pointer p-1.5 md:p-2 rounded-xl text-accent-cyan hover:bg-bg-surface transition-colors flex flex-row md:flex-col items-center gap-1.5 md:gap-1"
             title="Brain Explorer — Click to expand"
           >
             <span className="text-xl">🗂️</span>
+            <span className="text-xs font-medium md:hidden">Vault Explorer</span>
           </div>
 
           {selectedNote && (
             <div
-              className="mt-auto mb-4 p-2 text-center"
+              className="ml-auto md:ml-0 md:mt-auto md:mb-4 p-1.5 md:p-2 text-center truncate max-w-[50%] md:max-w-none"
               title={`Active Note: ${selectedNote.name}`}
             >
               <span className="text-base opacity-70">📄</span>
+              <span className="text-xs text-text-muted ml-1 md:hidden truncate">{selectedNote.name}</span>
             </div>
           )}
         </aside>
       ) : (
         // Expanded Explorer Menu: Directory hierarchy, navigate up, and file list
         <aside
-          className="w-80 border-r border-border-subtle flex flex-col bg-bg-secondary/40 shrink-0 transition-all duration-300 ease-in-out"
+          className="w-full md:w-80 max-h-[38vh] md:max-h-none border-b md:border-b-0 md:border-r border-border-subtle flex flex-col bg-bg-secondary/40 shrink-0 transition-all duration-300 ease-in-out"
           aria-label="Brain Explorer Menu"
         >
           <div className="p-4 border-b border-border-subtle shrink-0 flex items-center justify-between">
@@ -184,7 +192,7 @@ export default function BrainExplorerPage() {
               title="Collapse Explorer Menu"
               aria-label="Collapse Explorer Menu"
             >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-4 h-4 rotate-90 md:rotate-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
               </svg>
             </button>
@@ -249,9 +257,9 @@ export default function BrainExplorerPage() {
       )}
 
       {/* ── Right Content Area ───────────────────────────── */}
-      <div className="flex-1 flex flex-col h-full bg-bg-primary overflow-hidden">
+      <div className="flex-1 flex flex-col min-h-[55vh] md:h-full bg-bg-primary overflow-hidden">
         {!selectedNote ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-text-muted animate-fade-in-up">
+          <div className="flex-1 flex flex-col items-center justify-center text-text-muted animate-fade-in-up p-6 text-center">
             <div className="text-6xl mb-4 opacity-50">🗂️</div>
             <p className="text-lg font-medium text-text-primary">No Note Selected</p>
             <p className="text-sm mt-2">Select a markdown file from the explorer to preview it or generate a podcast.</p>
@@ -259,7 +267,7 @@ export default function BrainExplorerPage() {
         ) : (
           <>
             {/* Header / Podcast Control Panel */}
-            <div className="p-6 border-b border-border-subtle bg-bg-secondary/20 shrink-0">
+            <div className="p-4 md:p-6 border-b border-border-subtle bg-bg-secondary/20 shrink-0">
               <div className="flex items-start justify-between gap-4 mb-1">
                 <h1 className="text-2xl font-bold text-text-primary truncate">
                   {selectedNote.name.replace(/\.md$/, "")}

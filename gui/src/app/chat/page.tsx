@@ -63,6 +63,8 @@ export default function ChatPage() {
   const [showBoard, setShowBoard] = useState<boolean>(true);
   // isSidebarCollapsed: toggles the left conversation history menu between full width (w-64) and compact rail (w-14)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  // isMobileSidebarOpen: controls whether the mobile (< 768px) slide-over conversation drawer overlay is open
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   // isInputCollapsed: toggles the bottom message bar between full multiline composer and compact collapsed rail
   const [isInputCollapsed, setIsInputCollapsed] = useState<boolean>(false);
   // Per-turn model selection state: catalog of available models from `/api/agents/models` + currently selected tier
@@ -155,10 +157,15 @@ export default function ChatPage() {
       }
 
       // Restore right Subagent Blackboard drawer visibility from localStorage so drawer choice survives tab navigation
+      // On mobile screens (< 768px), default to closed so the chat message thread gets 100% of the viewport width on load
       try {
-        const savedBoardOpen = localStorage.getItem(CHAT_BOARD_OPEN_KEY);
-        if (savedBoardOpen !== null) {
-          setShowBoard(savedBoardOpen === "true");
+        if (window.innerWidth < 768) {
+          setShowBoard(false);
+        } else {
+          const savedBoardOpen = localStorage.getItem(CHAT_BOARD_OPEN_KEY);
+          if (savedBoardOpen !== null) {
+            setShowBoard(savedBoardOpen === "true");
+          }
         }
       } catch {
         // Gracefully fall back to default open drawer if storage is inaccessible
@@ -911,16 +918,18 @@ export default function ChatPage() {
   const activeModelLabel = activeModelOption?.label ?? selectedModelTier;
 
   return (
-    <div className="flex h-full max-h-screen">
+    <div className="flex h-[calc(100dvh-4rem)] md:h-full md:max-h-screen relative overflow-hidden">
       {/* ── Collapsible Conversation History Sidebar Menu ──── */}
       <ChatSidebar
         conversations={conversations}
         activeConvId={activeConvId}
         isCollapsed={isSidebarCollapsed}
+        isMobileOpen={isMobileSidebarOpen}
         modelOptions={modelOptions}
         selectedModelTier={selectedModelTier}
         drafts={drafts}
         onToggleCollapse={handleToggleSidebarCollapse}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
         onSelectConversation={handleSelectConversation}
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
@@ -936,6 +945,7 @@ export default function ChatPage() {
           showBoard={showBoard}
           bulletinCount={bulletins.length}
           onToggleBoard={handleToggleBoard}
+          onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
           onUpdateTitle={handleUpdateTitle}
           onAutoGenerateTitle={handleAutoGenerateTitle}
         />

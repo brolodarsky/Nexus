@@ -45,7 +45,7 @@ export interface ChatHistoryEntry {
   agent?: string;             // Optional agent name if sent by an AI assistant
   domain?: string | null;     // Optional domain classification
   confidence?: number | null; // Optional routing confidence score
-  trace?: any[];              // Optional array of execution steps for post-run inspection
+  trace?: TraceEvent[];       // Optional array of execution steps for post-run inspection
   timestamp: string;          // ISO-8601 timestamp of message creation
 }
 

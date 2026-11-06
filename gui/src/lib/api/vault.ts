@@ -66,8 +66,8 @@ export async function getAllVaultNotes(): Promise<VaultNoteSummary[]> {
 }
 
 // Triggers background TTS podcast audio generation for a specific markdown note
-export async function generatePodcast(path: string, force: boolean = false): Promise<any> {
-  return apiFetch<any>("/api/vault/podcast/generate", {
+export async function generatePodcast(path: string, force: boolean = false): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>("/api/vault/podcast/generate", {
     method: "POST",
     body: JSON.stringify({ path, force }),
   });

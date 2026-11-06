@@ -332,7 +332,7 @@ function TraceStepCard({
   // Synchronize local open state whenever parent triggers an explicit expand/collapse command or updates expandVersion
   useEffect(() => {
     if (typeof forceExpanded === "boolean") {
-      setIsOpen(forceExpanded);
+      queueMicrotask(() => setIsOpen(forceExpanded));
     }
   }, [forceExpanded, expandVersion]);
 

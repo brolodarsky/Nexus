@@ -82,7 +82,7 @@ export default function PinnedNotesReader({
                 <button
                   type="button"
                   onClick={(e) => onUnpinNote(path, e)}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-text-muted hover:text-accent-rose rounded transition-opacity"
+                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 text-text-muted hover:text-accent-rose rounded transition-opacity"
                   title="Unpin note"
                 >
                   <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -111,19 +111,19 @@ export default function PinnedNotesReader({
         {activeReaderPath && activeNote ? (
           <>
             {/* Reader Header */}
-            <div className="p-5 border-b border-border-subtle/60 bg-bg-secondary/30 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold text-text-primary mb-1">
+            <div className="p-4 md:p-5 border-b border-border-subtle/60 bg-bg-secondary/30 flex flex-col sm:flex-row sm:items-start justify-between gap-3 md:gap-4">
+              <div className="min-w-0">
+                <h2 className="text-lg md:text-xl font-bold text-text-primary mb-1 break-words">
                   {activeNote.title}
                 </h2>
-                <div className="flex items-center gap-2 text-xs text-text-muted font-mono">
-                  <span>{activeNote.path}</span>
+                <div className="flex items-center flex-wrap gap-2 text-xs text-text-muted font-mono">
+                  <span className="break-all">{activeNote.path}</span>
                   <span>•</span>
                   <span>{wordCount} words</span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center flex-wrap gap-2 shrink-0">
                 {/* Copy Markdown */}
                 <button
                   type="button"

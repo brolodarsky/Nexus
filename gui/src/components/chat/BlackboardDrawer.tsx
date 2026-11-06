@@ -40,10 +40,20 @@ const BlackboardDrawer = memo(function BlackboardDrawer({
   const [expandedBulletinIds, setExpandedBulletinIds] = useState<Record<number, boolean>>({});
 
   return (
-    <aside className="w-80 xl:w-96 border-l border-border-subtle bg-bg-secondary flex flex-col shrink-0 max-h-screen">
-      <div className="p-4 border-b border-border-subtle flex items-center justify-between">
+    <>
+      {/* Mobile Backdrop (`< 768px` / `md:hidden`): allows tapping outside the right Blackboard drawer to dismiss it */}
+      <div
+        className="md:hidden fixed inset-0 bottom-16 z-30 bg-black/60 backdrop-blur-xs"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <aside className="fixed inset-y-0 right-0 bottom-16 z-40 w-80 max-w-[88vw] shadow-2xl md:shadow-none md:static md:bottom-auto md:z-auto md:w-80 xl:w-96 border-l border-border-subtle bg-bg-secondary flex flex-col shrink-0 md:max-h-screen">
+        <div className="p-4 border-b border-border-subtle flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
+          <h2
+            className="text-sm font-semibold text-text-primary flex items-center gap-1.5"
+            title={threadId ? `Scoped to thread ${threadId}` : "Agent Blackboard"}
+          >
             <span>📋</span>
             <span>Agent Blackboard</span>
           </h2>
@@ -142,7 +152,8 @@ const BlackboardDrawer = memo(function BlackboardDrawer({
           })
         )}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 });
 

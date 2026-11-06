@@ -110,7 +110,7 @@ const ChatInputBar = memo(function ChatInputBar({
   // Render compact collapsed bottom rail if minimized by the user
   if (isCollapsed) {
     return (
-      <div className="px-8 py-2.5 border-t border-border-subtle shrink-0">
+      <div className="px-4 md:px-8 py-2.5 border-t border-border-subtle shrink-0">
         <div
           role="button"
           tabIndex={0}
@@ -176,10 +176,11 @@ const ChatInputBar = memo(function ChatInputBar({
   return (
     <form
       onSubmit={onSubmit}
-      className="px-8 py-4 border-t border-border-subtle shrink-0"
+      className="px-3 sm:px-4 md:px-8 py-3 md:py-4 border-t border-border-subtle shrink-0"
     >
       <div className="glass-card p-3 rounded-2xl flex flex-col gap-2.5 border border-border-subtle focus-within:border-accent-cyan/40 transition-colors">
         <div className="flex items-start gap-3 px-1 pt-1">
+          {/* text-base (16px) on mobile (< 768px) prevents iOS Safari from auto-zooming the viewport on focus; md:text-sm restores 14px on desktop */}
           <textarea
             ref={inputRef}
             value={localInput}
@@ -189,7 +190,7 @@ const ChatInputBar = memo(function ChatInputBar({
             disabled={loading}
             rows={1}
             spellCheck={true}
-            className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none resize-none leading-relaxed disabled:opacity-50 max-h-60 overflow-y-auto"
+            className="flex-1 bg-transparent text-base md:text-sm text-text-primary placeholder:text-text-muted focus:outline-none resize-none leading-relaxed disabled:opacity-50 max-h-60 overflow-y-auto"
             id="chat-input"
           />
           <button
@@ -217,7 +218,7 @@ const ChatInputBar = memo(function ChatInputBar({
         <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap pt-2 border-t border-border-subtle/50 px-1">
           {/* Per-Turn Model Selector: segmented toggle pills + native select accessibility */}
           <div
-            className="flex items-center gap-1 p-1 rounded-xl bg-bg-secondary/80 border border-border-subtle shrink-0 flex-wrap"
+            className="flex items-center gap-1 p-1 rounded-xl bg-bg-secondary/80 border border-border-subtle min-w-0 flex-wrap"
             role="group"
             aria-label="Select model for this turn"
           >
@@ -231,7 +232,7 @@ const ChatInputBar = memo(function ChatInputBar({
                   disabled={loading}
                   onClick={() => onSelectModelTier(opt.id)}
                   title={opt.description}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 disabled:opacity-50 ${isSelected
+                  className={`px-2 md:px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 disabled:opacity-50 ${isSelected
                     ? isStrong
                       ? "bg-accent-violet/20 text-purple-300 border border-accent-violet/40 shadow-sm"
                       : "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40 shadow-sm"
@@ -247,12 +248,12 @@ const ChatInputBar = memo(function ChatInputBar({
             })}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 ml-auto shrink-0">
             <button
               type="submit"
               disabled={loading || !localInput.trim()}
               title="Send message (Enter) • Newline (Shift+Enter)"
-              className="flex items-center justify-center w-9 h-9 rounded-xl bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+              className="flex items-center justify-center w-10 h-10 md:w-9 md:h-9 rounded-xl bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
             >
               <svg
                 viewBox="0 0 24 24"

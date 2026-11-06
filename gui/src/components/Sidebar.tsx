@@ -5,24 +5,26 @@ import { usePathname } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
 
 // NavItem interface: models the shape of global navigation destinations
-// - label: user-facing text description of the route
+// - label: user-facing text description of the route on desktop viewports
+// - mobileLabel: compact single-word tab label rendered inside the mobile bottom navigation bar (< 768px)
 // - href: Next.js routing path
-// - icon: emoji or glyph rendered beside the label
+// - icon: emoji or glyph rendered beside or above the label
 // - disabled: flag indicating upcoming features not yet implemented
 interface NavItem {
   label: string;
+  mobileLabel: string;
   href: string;
   icon: string;
   disabled?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "Home", href: "/", icon: "📌" },
-  { label: "Chat", href: "/chat", icon: "💬" },
-  { label: "Brain Explorer", href: "/vault", icon: "🗂️" },
-  { label: "Tools", href: "/tools", icon: "🛠️" },
-  { label: "HITL Queue", href: "/hitl", icon: "🔒" },
-  { label: "Audit Log", href: "/audit", icon: "📜" },
+  { label: "Home", mobileLabel: "Home", href: "/", icon: "📌" },
+  { label: "Chat", mobileLabel: "Chat", href: "/chat", icon: "💬" },
+  { label: "Brain Explorer", mobileLabel: "Vault", href: "/vault", icon: "🗂️" },
+  { label: "Tools", mobileLabel: "Tools", href: "/tools", icon: "🛠️" },
+  { label: "HITL Queue", mobileLabel: "HITL", href: "/hitl", icon: "🔒" },
+  { label: "Audit Log", mobileLabel: "Audit", href: "/audit", icon: "📜" },
 ];
 
 export default function Sidebar() {
@@ -30,16 +32,18 @@ export default function Sidebar() {
   // isCollapsed state: controls whether the global sidebar displays as a full-width drawer (w-64) or a compact icon rail (w-[72px])
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  // Read persisted user preference on mount; running inside useEffect prevents Next.js SSR hydration mismatch
+  // Read persisted user preference on mount; running inside useEffect + queueMicrotask prevents Next.js SSR hydration mismatch and React 19 cascading render warnings
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("nexus_sidebar_collapsed");
-      if (saved !== null) {
-        setIsCollapsed(saved === "true");
+    queueMicrotask(() => {
+      try {
+        const saved = localStorage.getItem("nexus_sidebar_collapsed");
+        if (saved !== null) {
+          setIsCollapsed(saved === "true");
+        }
+      } catch {
+        // Gracefully fall back to expanded state if localStorage is inaccessible (e.g. private mode)
       }
-    } catch {
-      // Gracefully fall back to expanded state if localStorage is inaccessible (e.g. private mode)
-    }
+    });
   }, []);
 
   // toggleCollapsed: memoized handler to toggle sidebar state and sync with persistent client storage
@@ -68,113 +72,145 @@ export default function Sidebar() {
   }, [toggleCollapsed]);
 
   return (
-    <aside
-      className={`flex flex-col min-h-screen border-r border-border-subtle bg-bg-secondary/50 py-6 transition-all duration-300 ease-in-out shrink-0 select-none ${
-        isCollapsed ? "w-[72px] px-2 items-center" : "w-64 px-4"
-      }`}
-      aria-label="Main Navigation Menu"
-    >
-      {/* ── Logo & Toggle Header ──────────────────────────── */}
-      <div className={`flex items-center mb-8 ${isCollapsed ? "flex-col gap-3 justify-center w-full" : "justify-between px-2"}`}>
-        <div className="flex items-center gap-3">
-          <div
-            className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-accent-cyan to-accent-violet shadow-lg shadow-accent-cyan/20 cursor-pointer shrink-0"
-            onClick={toggleCollapsed}
-            title={isCollapsed ? "Expand navigation (Ctrl+B)" : "Nexus Engine"}
-          >
-            <span className="text-lg font-bold text-white">N</span>
-          </div>
-          {!isCollapsed && (
-            <div className="overflow-hidden">
-              <h1 className="text-base font-semibold tracking-tight text-text-primary leading-tight">
-                Nexus
-              </h1>
-              <p className="text-[0.65rem] font-medium uppercase tracking-widest text-text-muted">
-                Engine v0.1
-              </p>
+    <>
+      {/* ── Desktop Collapsible Left Sidebar (`md:` and up) ─────────────── */}
+      <aside
+        className={`hidden md:flex flex-col min-h-screen border-r border-border-subtle bg-bg-secondary/50 py-6 transition-all duration-300 ease-in-out shrink-0 select-none ${
+          isCollapsed ? "w-[72px] px-2 items-center" : "w-64 px-4"
+        }`}
+        aria-label="Main Navigation Menu"
+      >
+        {/* ── Logo & Toggle Header ──────────────────────────── */}
+        <div className={`flex items-center mb-8 ${isCollapsed ? "flex-col gap-3 justify-center w-full" : "justify-between px-2"}`}>
+          <div className="flex items-center gap-3">
+            <div
+              className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-accent-cyan to-accent-violet shadow-lg shadow-accent-cyan/20 cursor-pointer shrink-0"
+              onClick={toggleCollapsed}
+              title={isCollapsed ? "Expand navigation (Ctrl+B)" : "Nexus Engine"}
+            >
+              <span className="text-lg font-bold text-white">N</span>
             </div>
-          )}
+            {!isCollapsed && (
+              <div className="overflow-hidden">
+                <h1 className="text-base font-semibold tracking-tight text-text-primary leading-tight">
+                  Nexus
+                </h1>
+                <p className="text-[0.65rem] font-medium uppercase tracking-widest text-text-muted">
+                  Engine v0.1
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Collapse / Expand Toggle Button */}
+          <button
+            onClick={toggleCollapsed}
+            className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors flex items-center justify-center"
+            title={isCollapsed ? "Expand menu (Ctrl+B)" : "Collapse menu (Ctrl+B)"}
+            aria-label={isCollapsed ? "Expand menu" : "Collapse menu"}
+          >
+            {isCollapsed ? (
+              // Double right chevron indicates expanding the menu outward
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+              </svg>
+            ) : (
+              // Double left chevron indicates collapsing the menu inward
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+              </svg>
+            )}
+          </button>
         </div>
 
-        {/* Collapse / Expand Toggle Button */}
-        <button
-          onClick={toggleCollapsed}
-          className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors flex items-center justify-center"
-          title={isCollapsed ? "Expand menu (Ctrl+B)" : "Collapse menu (Ctrl+B)"}
-          aria-label={isCollapsed ? "Expand menu" : "Collapse menu"}
-        >
-          {isCollapsed ? (
-            // Double right chevron indicates expanding the menu outward
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-            </svg>
-          ) : (
-            // Double left chevron indicates collapsing the menu inward
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-            </svg>
+        {/* ── Navigation Items ────────────────────────────────── */}
+        <nav className={`flex flex-col gap-1.5 flex-1 w-full ${isCollapsed ? "items-center" : ""}`}>
+          {!isCollapsed && (
+            <p className="px-3 mb-2 text-[0.65rem] font-semibold uppercase tracking-widest text-text-muted">
+              Navigation
+            </p>
           )}
-        </button>
-      </div>
+          {NAV_ITEMS.map((item) => {
+            const isActive = pathname === item.href;
+            return isCollapsed ? (
+              // Collapsed Rail Item: Centered icon with HTML title tooltip for compact footprint
+              <Link
+                key={item.href}
+                href={item.disabled ? "#" : item.href}
+                title={`${item.label}${item.disabled ? " (Coming Soon)" : ""}`}
+                className={`flex items-center justify-center w-11 h-11 rounded-xl transition-all ${
+                  isActive
+                    ? "bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/30 shadow-[0_0_12px_rgba(56,189,248,0.15)]"
+                    : "text-text-secondary hover:bg-bg-surface hover:text-text-primary"
+                } ${item.disabled ? "opacity-35 cursor-not-allowed pointer-events-none" : ""}`}
+                aria-disabled={item.disabled}
+                tabIndex={item.disabled ? -1 : undefined}
+              >
+                <span className="text-lg">{item.icon}</span>
+              </Link>
+            ) : (
+              // Expanded Menu Item: Full-width link with icon, text label, and badges
+              <Link
+                key={item.href}
+                href={item.disabled ? "#" : item.href}
+                className={`sidebar-link ${isActive ? "sidebar-link-active" : ""} ${
+                  item.disabled ? "opacity-40 cursor-not-allowed pointer-events-none" : ""
+                }`}
+                aria-disabled={item.disabled}
+                tabIndex={item.disabled ? -1 : undefined}
+              >
+                <span className="text-lg">{item.icon}</span>
+                <span className="truncate">{item.label}</span>
+                {item.disabled && (
+                  <span className="ml-auto text-[0.6rem] uppercase tracking-wider opacity-60">
+                    Soon
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
 
-      {/* ── Navigation Items ────────────────────────────────── */}
-      <nav className={`flex flex-col gap-1.5 flex-1 w-full ${isCollapsed ? "items-center" : ""}`}>
-        {!isCollapsed && (
-          <p className="px-3 mb-2 text-[0.65rem] font-semibold uppercase tracking-widest text-text-muted">
-            Navigation
-          </p>
-        )}
+        {/* ── Footer / System Status ──────────────────────────── */}
+        <div className={`mt-auto pt-4 border-t border-border-subtle w-full ${isCollapsed ? "flex justify-center" : "px-3"}`}>
+          <div
+            className="flex items-center gap-2"
+            title="System Online — Nexus Engine Background Core Active"
+          >
+            <div className="w-2.5 h-2.5 rounded-full bg-accent-emerald animate-pulse shrink-0" />
+            {!isCollapsed && <span className="text-xs text-text-secondary">System Online</span>}
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Mobile Fixed Bottom Navigation Bar (`< 768px` / below `md:`) ── */}
+      {/* Uses h-16, z-50, backdrop-blur, and iOS safe-area bottom inset padding for effortless one-handed thumb navigation */}
+      <nav
+        className="md:hidden fixed bottom-0 inset-x-0 h-16 z-50 border-t border-border-subtle bg-bg-secondary/90 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] flex items-center justify-around px-1 select-none"
+        aria-label="Mobile Bottom Navigation"
+      >
         {NAV_ITEMS.map((item) => {
           const isActive = pathname === item.href;
-          return isCollapsed ? (
-            // Collapsed Rail Item: Centered icon with HTML title tooltip for compact footprint
+          return (
             <Link
               key={item.href}
               href={item.disabled ? "#" : item.href}
-              title={`${item.label}${item.disabled ? " (Coming Soon)" : ""}`}
-              className={`flex items-center justify-center w-11 h-11 rounded-xl transition-all ${
+              aria-disabled={item.disabled}
+              tabIndex={item.disabled ? -1 : undefined}
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 h-12 mx-0.5 rounded-xl transition-all ${
                 isActive
-                  ? "bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/30 shadow-[0_0_12px_rgba(56,189,248,0.15)]"
-                  : "text-text-secondary hover:bg-bg-surface hover:text-text-primary"
+                  ? "bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/30 shadow-[0_0_10px_rgba(56,189,248,0.12)] font-semibold"
+                  : "text-text-secondary hover:text-text-primary active:bg-bg-surface"
               } ${item.disabled ? "opacity-35 cursor-not-allowed pointer-events-none" : ""}`}
-              aria-disabled={item.disabled}
-              tabIndex={item.disabled ? -1 : undefined}
             >
-              <span className="text-lg">{item.icon}</span>
-            </Link>
-          ) : (
-            // Expanded Menu Item: Full-width link with icon, text label, and badges
-            <Link
-              key={item.href}
-              href={item.disabled ? "#" : item.href}
-              className={`sidebar-link ${isActive ? "sidebar-link-active" : ""} ${
-                item.disabled ? "opacity-40 cursor-not-allowed pointer-events-none" : ""
-              }`}
-              aria-disabled={item.disabled}
-              tabIndex={item.disabled ? -1 : undefined}
-            >
-              <span className="text-lg">{item.icon}</span>
-              <span className="truncate">{item.label}</span>
-              {item.disabled && (
-                <span className="ml-auto text-[0.6rem] uppercase tracking-wider opacity-60">
-                  Soon
-                </span>
-              )}
+              <span className="text-base leading-none">{item.icon}</span>
+              <span className="text-[0.65rem] leading-tight tracking-tight truncate max-w-full px-0.5">
+                {item.mobileLabel}
+              </span>
             </Link>
           );
         })}
       </nav>
-
-      {/* ── Footer / System Status ──────────────────────────── */}
-      <div className={`mt-auto pt-4 border-t border-border-subtle w-full ${isCollapsed ? "flex justify-center" : "px-3"}`}>
-        <div
-          className="flex items-center gap-2"
-          title="System Online — Nexus Engine Background Core Active"
-        >
-          <div className="w-2.5 h-2.5 rounded-full bg-accent-emerald animate-pulse shrink-0" />
-          {!isCollapsed && <span className="text-xs text-text-secondary">System Online</span>}
-        </div>
-      </div>
-    </aside>
+    </>
   );
 }

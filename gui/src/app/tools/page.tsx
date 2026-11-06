@@ -198,7 +198,7 @@ const ResumeMarkdownEditor = memo(function ResumeMarkdownEditor({
       <textarea
         value={localContent}
         onChange={handleChange}
-        className="w-full h-[520px] bg-bg-secondary/90 border border-border-subtle rounded-xl p-4 font-mono text-xs text-text-primary leading-relaxed focus:outline-none focus:border-accent-cyan/50 resize-y"
+        className="w-full h-[520px] bg-bg-secondary/90 border border-border-subtle rounded-xl p-4 font-mono text-base md:text-xs text-text-primary leading-relaxed focus:outline-none focus:border-accent-cyan/50 resize-y"
         placeholder="Markdown content..."
         spellCheck={false}
       />
@@ -228,14 +228,14 @@ export default function ToolsPage() {
 
   // Loading and execution indicators
   const [loadingDocs, setLoadingDocs] = useState<boolean>(true);
-  const [loadingDetail, setLoadingDetail] = useState<boolean>(false);
+  const [, setLoadingDetail] = useState<boolean>(false);
   const [savingDoc, setSavingDoc] = useState<boolean>(false);
   const [rendering, setRendering] = useState<boolean>(false);
   const [renderStatusMsg, setRenderStatusMsg] = useState<string>("");
   const [lastRenderResponse, setLastRenderResponse] = useState<RenderResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
-  const [pdfPreviewKey, setPdfPreviewKey] = useState<number>(Date.now());
+  const [pdfPreviewKey, setPdfPreviewKey] = useState<number>(0);
 
   // ── Initial Document Scan ──────────────────────────────────────────────────
   const fetchDocuments = useCallback(async (selectPathAfter?: string) => {
@@ -264,14 +264,18 @@ export default function ToolsPage() {
   }, [selectedDocPath]);
 
   useEffect(() => {
-    fetchDocuments();
+    queueMicrotask(() => {
+      fetchDocuments();
+    });
   }, [fetchDocuments]);
 
   // ── Load Active Document Detail ────────────────────────────────────────────
   useEffect(() => {
     if (!selectedDocPath) {
-      setActiveDetail(null);
-      setIsEditorDirty(false);
+      queueMicrotask(() => {
+        setActiveDetail(null);
+        setIsEditorDirty(false);
+      });
       return;
     }
 
@@ -388,7 +392,7 @@ export default function ToolsPage() {
         );
         setTimeout(() => setSuccessToast(null), 5000);
         // Force PDF iframe refresh
-        setPdfPreviewKey(Date.now());
+        setPdfPreviewKey((prev) => prev + 1);
         // Reload documents list & active detail to pick up new metrics and artifact presence
         await fetchDocuments(selectedDocPath || undefined);
         if (selectedDocPath) {
@@ -433,7 +437,7 @@ export default function ToolsPage() {
   const verdictMeta = getVerdictBadge(activeMetrics?.verdict);
 
   return (
-    <div className="flex flex-col min-h-screen bg-bg-primary text-text-primary p-6 lg:p-8 max-w-[1700px] mx-auto w-full">
+    <div className="flex flex-col min-h-screen bg-bg-primary text-text-primary p-4 md:p-6 lg:p-8 max-w-[1700px] mx-auto w-full">
       {/* ── Page Header & Tool Switcher ────────────────────────── */}
       <header className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border-subtle pb-6">
         <div>
@@ -567,7 +571,7 @@ export default function ToolsPage() {
                   placeholder="Filter documents..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-bg-surface/80 border border-border-subtle rounded-lg px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-cyan/50"
+                  className="w-full bg-bg-surface/80 border border-border-subtle rounded-lg px-3 py-1.5 text-base md:text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-cyan/50"
                 />
                 {searchQuery && (
                   <button

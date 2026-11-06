@@ -50,7 +50,7 @@ export default function AuditPage() {
   // Fetch full untruncated run snapshot when selectedRunId changes
   useEffect(() => {
     if (!selectedRunId) {
-      setActiveSnapshot(null);
+      queueMicrotask(() => setActiveSnapshot(null));
       return;
     }
     let cancelled = false;
@@ -111,9 +111,9 @@ export default function AuditPage() {
   }, [activeSnapshot]);
 
   return (
-    <div className="flex h-full max-h-screen">
+    <div className="flex flex-col md:flex-row min-h-[calc(100dvh-4rem)] md:h-full md:max-h-screen">
       {/* ── Left Sidebar: Run Ledger List ──────────────────────────────────── */}
-      <aside className="w-80 xl:w-96 border-r border-border-subtle bg-bg-secondary flex flex-col shrink-0 select-none">
+      <aside className="w-full md:w-80 xl:w-96 max-h-[38vh] md:max-h-none border-b md:border-b-0 md:border-r border-border-subtle bg-bg-secondary flex flex-col shrink-0 select-none">
         <div className="p-4 border-b border-border-subtle space-y-3">
           <div className="flex items-center justify-between">
             <div>
@@ -130,14 +130,14 @@ export default function AuditPage() {
             </span>
           </div>
 
-          {/* Search / Filter input */}
+          {/* Search / Filter input (uses text-base on mobile < 768px to prevent iOS Safari auto-zoom) */}
           <div className="relative">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search runs by query, run ID, or conversation..."
-              className="w-full text-xs px-3 py-1.5 rounded-lg bg-bg-primary/70 border border-border-subtle text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-cyan"
+              className="w-full text-base md:text-xs px-3 py-1.5 rounded-lg bg-bg-primary/70 border border-border-subtle text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-cyan"
             />
             {searchQuery && (
               <button
@@ -153,6 +153,11 @@ export default function AuditPage() {
 
         {/* Run List Items */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          {error && (
+            <div className="p-2.5 rounded-lg bg-accent-rose/10 border border-accent-rose/30 text-accent-rose text-xs">
+              {error}
+            </div>
+          )}
           {loadingList ? (
             <div className="space-y-2 p-2">
               {[...Array(5)].map((_, i) => (
@@ -233,9 +238,9 @@ export default function AuditPage() {
       </aside>
 
       {/* ── Main Panel: Run Detail Inspector ───────────────────────────────── */}
-      <main className="flex-1 flex flex-col min-w-0 max-h-screen bg-bg-primary">
+      <main className="flex-1 flex flex-col min-w-0 min-h-[55vh] md:max-h-screen bg-bg-primary">
         {loadingDetail && !activeSnapshot ? (
-          <div className="flex-1 flex items-center justify-center text-xs text-text-muted animate-pulse">
+          <div className="flex-1 flex items-center justify-center text-xs text-text-muted animate-pulse p-8">
             Loading run snapshot #{selectedRunId}...
           </div>
         ) : !activeSnapshot ? (
@@ -248,7 +253,7 @@ export default function AuditPage() {
         ) : (
           <div className="flex-1 flex flex-col min-h-0">
             {/* ── Run Overview Header ── */}
-            <header className="px-8 py-4 border-b border-border-subtle bg-bg-secondary/40 shrink-0">
+            <header className="px-4 md:px-8 py-3 md:py-4 border-b border-border-subtle bg-bg-secondary/40 shrink-0">
               <div className="flex items-center justify-between gap-4 flex-wrap mb-2">
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">🧠</span>
@@ -319,11 +324,11 @@ export default function AuditPage() {
               </div>
 
               {/* View Navigation Tabs */}
-              <div className="flex items-center gap-1 pt-2 border-t border-border-subtle/50 text-xs">
+              <div className="flex items-center gap-1 pt-2 border-t border-border-subtle/50 text-xs overflow-x-auto">
                 <button
                   type="button"
                   onClick={() => setActiveTab("graph")}
-                  className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 shrink-0 ${
                     activeTab === "graph"
                       ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40"
                       : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
@@ -336,7 +341,7 @@ export default function AuditPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("subagents")}
-                  className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 shrink-0 ${
                     activeTab === "subagents"
                       ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40"
                       : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
@@ -351,7 +356,7 @@ export default function AuditPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("steps")}
-                  className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 shrink-0 ${
                     activeTab === "steps"
                       ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40"
                       : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
@@ -366,7 +371,7 @@ export default function AuditPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("io")}
-                  className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 shrink-0 ${
                     activeTab === "io"
                       ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40"
                       : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
@@ -379,7 +384,7 @@ export default function AuditPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("json")}
-                  className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 ${
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-colors flex items-center gap-1.5 shrink-0 ${
                     activeTab === "json"
                       ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40"
                       : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
@@ -392,7 +397,7 @@ export default function AuditPage() {
             </header>
 
             {/* ── Tab Content Body ── */}
-            <div className="flex-1 overflow-y-auto px-8 py-6">
+            <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6">
               {/* Tab 1: Visual Execution Graph (DAG) */}
               {activeTab === "graph" && (
                 <div className="max-w-6xl mx-auto">

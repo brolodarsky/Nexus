@@ -15,6 +15,7 @@ import { useState, useRef, memo } from "react";
 // - showBoard: boolean indicating whether the right-hand Subagent Blackboard drawer is open
 // - bulletinCount: number of active bulletins currently on the Blackboard
 // - onToggleBoard: callback invoked when the user clicks the Subagent Board toggle button
+// - onOpenMobileSidebar: optional callback invoked on mobile (< 768px) to open the slide-over conversation drawer
 // - onUpdateTitle: optional async callback invoked when committing an edited conversation title
 // - onAutoGenerateTitle: optional async callback invoked to generate a smart AI title via fast low-tier model
 export interface ChatHeaderProps {
@@ -23,6 +24,7 @@ export interface ChatHeaderProps {
   showBoard: boolean;
   bulletinCount: number;
   onToggleBoard: () => void;
+  onOpenMobileSidebar?: () => void;
   onUpdateTitle?: (id: string, newTitle: string) => Promise<void> | void;
   onAutoGenerateTitle?: (id: string) => Promise<void> | void;
 }
@@ -33,6 +35,7 @@ const ChatHeader = memo(function ChatHeader({
   showBoard,
   bulletinCount,
   onToggleBoard,
+  onOpenMobileSidebar,
   onUpdateTitle,
   onAutoGenerateTitle,
 }: ChatHeaderProps) {
@@ -83,11 +86,26 @@ const ChatHeader = memo(function ChatHeader({
   };
 
   return (
-    <header className="px-8 py-4 border-b border-border-subtle shrink-0 flex items-center justify-between">
-      <div className="flex items-center min-w-0 mr-4">
+    <header className="px-4 md:px-8 py-3 md:py-4 border-b border-border-subtle shrink-0 flex items-center justify-between gap-2">
+      <div className="flex items-center min-w-0 mr-2 md:mr-4 flex-1">
+        {/* Mobile Hamburger / Threads Drawer Trigger (`< 768px` / `md:hidden`): Opens ChatSidebar as a slide-over overlay */}
+        {onOpenMobileSidebar && (
+          <button
+            type="button"
+            onClick={onOpenMobileSidebar}
+            className="md:hidden mr-2.5 p-2 -ml-1 rounded-xl border border-border-subtle bg-bg-tertiary/70 text-text-secondary hover:text-accent-cyan hover:border-accent-cyan/40 transition-colors shrink-0 flex items-center justify-center"
+            title="Open conversations drawer"
+            aria-label="Open conversations drawer"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h10" />
+            </svg>
+          </button>
+        )}
+
         {isEditing ? (
-          // Inline Edit Mode: Input box with save and cancel buttons
-          <div className="flex items-center gap-2">
+          // Inline Edit Mode: Input box with save and cancel buttons (uses text-base on mobile to prevent iOS Safari auto-zoom)
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <input
               ref={headerInputRef}
               type="text"
@@ -102,7 +120,7 @@ const ChatHeader = memo(function ChatHeader({
                   handleCancelEdit();
                 }
               }}
-              className="bg-bg-tertiary border border-accent-cyan/50 rounded-lg px-3 py-1 text-lg font-bold text-text-primary focus:outline-none focus:ring-1 focus:ring-accent-cyan shadow-inner"
+              className="min-w-0 flex-1 md:flex-initial bg-bg-tertiary border border-accent-cyan/50 rounded-lg px-3 py-1 text-base md:text-lg font-bold text-text-primary focus:outline-none focus:ring-1 focus:ring-accent-cyan shadow-inner"
               placeholder="Conversation title..."
             />
             <button
@@ -126,9 +144,9 @@ const ChatHeader = memo(function ChatHeader({
           </div>
         ) : (
           // Standard Display Mode: Title with always-visible rename pencil and AI auto-generate sparkle pill
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <h1
-              className={`text-xl font-bold tracking-tight truncate ${activeConvId ? "cursor-pointer hover:opacity-90" : ""}`}
+              className={`text-lg md:text-xl font-bold tracking-tight truncate ${activeConvId ? "cursor-pointer hover:opacity-90" : ""}`}
               onClick={handleStartEdit}
               title={activeConvId ? "Click or double-click to rename chat" : undefined}
             >
@@ -136,7 +154,7 @@ const ChatHeader = memo(function ChatHeader({
             </h1>
 
             {activeConvId ? (
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex items-center gap-1 md:gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={handleStartEdit}
@@ -153,7 +171,7 @@ const ChatHeader = memo(function ChatHeader({
                     type="button"
                     disabled={isGenerating}
                     onClick={handleAutoTitle}
-                    className={`text-xs px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1.5 font-medium ${
+                    className={`text-xs px-2 md:px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1.5 font-medium ${
                       isGenerating
                         ? "bg-accent-violet/20 border-accent-violet/40 text-purple-300 animate-pulse"
                         : "bg-accent-violet/10 border-accent-violet/30 text-purple-300 hover:bg-accent-violet/20 hover:border-accent-violet/50"
@@ -162,13 +180,13 @@ const ChatHeader = memo(function ChatHeader({
                     aria-label="Auto-generate title with AI"
                   >
                     <span className="text-xs">✨</span>
-                    <span>{isGenerating ? "Generating..." : "Auto-title"}</span>
+                    <span className="hidden sm:inline">{isGenerating ? "Generating..." : "Auto-title"}</span>
                   </button>
                 )}
               </div>
             ) : (
               // Blank draft state: renders a subtle disabled pill so users see the capability upfront
-              <div className="flex items-center gap-1.5 shrink-0 opacity-40">
+              <div className="hidden sm:flex items-center gap-1.5 shrink-0 opacity-40">
                 <span
                   className="text-xs px-2.5 py-1 rounded-lg border border-border-subtle bg-bg-tertiary/40 text-text-muted flex items-center gap-1.5 cursor-not-allowed select-none"
                   title="Send a message first to generate title with AI"
@@ -185,13 +203,15 @@ const ChatHeader = memo(function ChatHeader({
       <div className="flex items-center gap-2 shrink-0">
         <button
           onClick={onToggleBoard}
-          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 ${showBoard
+          className={`text-xs px-2.5 md:px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 ${showBoard
             ? "bg-accent-cyan/15 border-accent-cyan/30 text-accent-cyan"
             : "bg-bg-tertiary border-border-subtle text-text-secondary hover:text-text-primary"
             }`}
           title="Toggle Agent Blackboard"
         >
-          <span>Subagent Board</span>
+          <span>
+            <span className="hidden sm:inline">Subagent </span>Board
+          </span>
           <span className="px-1.5 py-0.2 rounded-full bg-bg-primary/60 text-[0.65rem] font-mono">
             {bulletinCount}
           </span>

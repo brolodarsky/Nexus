@@ -54,7 +54,7 @@ const ChatMessageThread = memo(function ChatMessageThread({
   return (
     <div
       ref={scrollRef}
-      className="flex-1 overflow-y-auto px-8 py-6 space-y-5"
+      className="flex-1 overflow-y-auto px-4 md:px-8 py-4 md:py-6 space-y-5"
     >
       {/* Empty state starter screen */}
       {messages.length === 0 && !loading && (

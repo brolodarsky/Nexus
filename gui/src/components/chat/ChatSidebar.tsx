@@ -20,11 +20,13 @@ import {
 // ChatSidebarProps: defines data and callbacks required by the conversation history sidebar
 // - conversations: array of persisted Conversation records fetched from SQLite chats.db
 // - activeConvId: UUID of the currently selected conversation thread (or null for a fresh draft)
-// - isCollapsed: boolean controlling whether the sidebar renders as a slim rail (w-14) or full drawer (w-64)
+// - isCollapsed: boolean controlling whether the desktop sidebar renders as a slim rail (w-14) or full drawer (w-64)
+// - isMobileOpen: optional boolean controlling whether the mobile (< 768px) slide-over overlay drawer is open
 // - modelOptions: available LLM tiers returned by GET /api/agents/models
 // - selectedModelTier: currently selected model tier ID ("strong", "medium", "low")
 // - drafts: optional dictionary mapping conversation IDs (and DRAFT_NEW_KEY) to unsubmitted prompt drafts
-// - onToggleCollapse: callback invoked to expand or collapse the conversation history panel
+// - onToggleCollapse: callback invoked to expand or collapse the desktop conversation history panel
+// - onCloseMobile: optional callback invoked to close the mobile slide-over drawer
 // - onSelectConversation: callback invoked when the user clicks a conversation row
 // - onNewChat: callback to start a blank conversation, optionally pre-selecting a model tier
 // - onDeleteChat: callback to delete a conversation thread without triggering row selection
@@ -34,10 +36,12 @@ export interface ChatSidebarProps {
   conversations: Conversation[];
   activeConvId: string | null;
   isCollapsed: boolean;
+  isMobileOpen?: boolean;
   modelOptions: ModelOption[];
   selectedModelTier: string;
   drafts?: Record<string, string>;
   onToggleCollapse: (collapsed: boolean) => void;
+  onCloseMobile?: () => void;
   onSelectConversation: (id: string) => void;
   onNewChat: (initialTier?: string) => void;
   onDeleteChat: (id: string, e: React.MouseEvent) => void;
@@ -49,10 +53,12 @@ const ChatSidebar = memo(function ChatSidebar({
   conversations,
   activeConvId,
   isCollapsed,
+  isMobileOpen = false,
   modelOptions,
   selectedModelTier,
   drafts,
   onToggleCollapse,
+  onCloseMobile,
   onSelectConversation,
   onNewChat,
   onDeleteChat,
@@ -177,91 +183,17 @@ const ChatSidebar = memo(function ChatSidebar({
   };
   const hasNewChatDraft = Boolean(drafts?.[DRAFT_NEW_KEY]?.trim());
 
-  if (isCollapsed) {
-    // Collapsed Rail: Slim column with expand button, new chat icon, and conversation switcher
-    return (
-      <aside
-        className="w-14 border-r border-border-subtle bg-bg-secondary flex flex-col items-center py-4 shrink-0 transition-all duration-300 ease-in-out select-none"
-        aria-label="Collapsed Conversations Menu"
-      >
-        <button
-          onClick={() => onToggleCollapse(false)}
-          className="p-2 rounded-lg text-text-muted hover:text-accent-cyan hover:bg-bg-tertiary transition-colors flex items-center justify-center"
-          title="Expand"
-          aria-label="Expand chat history menu"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-          </svg>
-        </button>
-
-        {/* Compact New Chat Action */}
-        <button
-          onClick={() => onNewChat()}
-          className="relative mt-3 w-9 h-9 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors flex items-center justify-center text-lg font-bold"
-          title={`Start New Chat${hasNewChatDraft ? " (Draft saved)" : ""}`}
-          aria-label="Start New Chat"
-        >
-          +
-          {hasNewChatDraft && (
-            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-cyan border border-bg-secondary" />
-          )}
-        </button>
-
-        {/* Conversation history icons for fast switching */}
-        <div className="mt-4 flex-1 overflow-y-auto space-y-1.5 w-full px-2 flex flex-col items-center">
-          {conversations.map((conv) => {
-            const hasDraft = Boolean(drafts?.[conv.id]?.trim());
-            return (
-              <button
-                key={conv.id}
-                onClick={() => onSelectConversation(conv.id)}
-                className={`relative w-9 h-9 rounded-lg flex items-center justify-center text-xs transition-all ${activeConvId === conv.id
-                  ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40 shadow-[0_0_10px_rgba(56,189,248,0.15)] font-bold"
-                  : "text-text-muted hover:text-text-primary hover:bg-bg-tertiary"
-                  }`}
-                title={`${conv.title}${hasDraft ? " (Draft saved)" : ""}`}
-              >
-                💬
-                {hasDraft && (
-                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-cyan border border-bg-secondary" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </aside>
-    );
-  }
-
-  // Expanded Conversation Menu: Full titles, model preset buttons, resizable border handle, and delete actions
-  return (
-    <aside
-      ref={sidebarRef}
-      style={{ width: `${sidebarWidth}px` }}
-      className={`relative border-r border-border-subtle bg-bg-secondary flex flex-col shrink-0 ${
-        isResizing ? "select-none transition-none" : "transition-[width] duration-300 ease-in-out"
-      }`}
-      aria-label="Conversations Menu"
-    >
-      {/* Draggable Resize Handle: Sits along the right border to allow smooth mouse dragging */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize conversations menu"
-        tabIndex={0}
-        onPointerDown={handleResizeStart}
-        onDoubleClick={handleResetWidth}
-        className={`absolute top-0 -right-1 w-2 h-full cursor-col-resize z-20 transition-colors ${
-          isResizing ? "bg-accent-cyan" : "hover:bg-accent-cyan/60 active:bg-accent-cyan"
-        }`}
-        title="Drag to resize sidebar (double-click to reset width)"
-      />
-
+  // Helper to render the expanded drawer body (shared between desktop expanded `<aside>` and mobile slide-over overlay)
+  // - isMobileDrawer: boolean indicating whether the drawer is rendered inside the mobile (< 768px) overlay
+  const renderExpandedContent = (isMobileDrawer: boolean) => (
+    <>
       <div className="p-4 border-b border-border-subtle space-y-2">
         <div className="flex items-center gap-2">
           <button
-            onClick={() => onNewChat()}
+            onClick={() => {
+              onNewChat();
+              if (isMobileDrawer) onCloseMobile?.();
+            }}
             className="flex-1 flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors text-sm font-medium"
           >
             <span className="text-lg">+</span>
@@ -275,16 +207,27 @@ const ChatSidebar = memo(function ChatSidebar({
               </span>
             )}
           </button>
-          <button
-            onClick={() => onToggleCollapse(true)}
-            className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary transition-colors shrink-0"
-            title="Collapse"
-            aria-label="Collapse chat history menu"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-            </svg>
-          </button>
+          {isMobileDrawer ? (
+            <button
+              onClick={() => onCloseMobile?.()}
+              className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary transition-colors shrink-0"
+              title="Close conversations drawer"
+              aria-label="Close conversations drawer"
+            >
+              ✕
+            </button>
+          ) : (
+            <button
+              onClick={() => onToggleCollapse(true)}
+              className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary transition-colors shrink-0"
+              title="Collapse"
+              aria-label="Collapse chat history menu"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
         </div>
 
         {/* Quick New Chat Model Preset Buttons (2-column grid for Gemini & Anthropic Strong/Fast presets) */}
@@ -296,7 +239,10 @@ const ChatSidebar = memo(function ChatSidebar({
               <button
                 key={opt.id}
                 type="button"
-                onClick={() => onNewChat(opt.id)}
+                onClick={() => {
+                  onNewChat(opt.id);
+                  if (isMobileDrawer) onCloseMobile?.();
+                }}
                 title={`Open new chat with ${opt.description}`}
                 className={`py-1 px-2 rounded-lg text-[0.68rem] font-medium border transition-all flex items-center justify-center gap-1 ${isSelected
                   ? isStrong
@@ -338,7 +284,7 @@ const ChatSidebar = memo(function ChatSidebar({
                       handleCancelEdit();
                     }
                   }}
-                  className="flex-1 min-w-0 bg-bg-primary/90 border border-border-subtle rounded px-2 py-1 text-xs text-text-primary focus:outline-none focus:border-accent-cyan"
+                  className="flex-1 min-w-0 bg-bg-primary/90 border border-border-subtle rounded px-2 py-1 text-base md:text-xs text-text-primary focus:outline-none focus:border-accent-cyan"
                   placeholder="Chat title..."
                 />
                 <button
@@ -368,7 +314,10 @@ const ChatSidebar = memo(function ChatSidebar({
           return (
             <div
               key={conv.id}
-              onClick={() => onSelectConversation(conv.id)}
+              onClick={() => {
+                onSelectConversation(conv.id);
+                if (isMobileDrawer) onCloseMobile?.();
+              }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
                 handleStartEdit(conv);
@@ -395,9 +344,11 @@ const ChatSidebar = memo(function ChatSidebar({
                 </div>
               </div>
 
-              {/* Hover Actions: Floats over the right end on hover with a crisp background pill so it never cramps title text */}
+              {/* Hover Actions: Floats over the right end on hover on desktop (or stays accessible on mobile drawer) */}
               <div
-                className={`absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity rounded-md px-1 py-0.5 z-10 ${
+                className={`absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 ${
+                  isMobileDrawer ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                } transition-opacity rounded-md px-1 py-0.5 z-10 ${
                   activeConvId === conv.id
                     ? "bg-bg-secondary/95 border border-border-subtle shadow-md"
                     : "bg-bg-secondary/95 backdrop-blur-sm border border-border-subtle shadow-md"
@@ -451,7 +402,110 @@ const ChatSidebar = memo(function ChatSidebar({
           );
         })}
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* ── Desktop Persistent Conversation Sidebar (`md:` and up) ───────── */}
+      {isCollapsed ? (
+        // Collapsed Rail: Slim column with expand button, new chat icon, and conversation switcher
+        <aside
+          className="hidden md:flex w-14 border-r border-border-subtle bg-bg-secondary flex-col items-center py-4 shrink-0 transition-all duration-300 ease-in-out select-none"
+          aria-label="Collapsed Conversations Menu"
+        >
+          <button
+            onClick={() => onToggleCollapse(false)}
+            className="p-2 rounded-lg text-text-muted hover:text-accent-cyan hover:bg-bg-tertiary transition-colors flex items-center justify-center"
+            title="Expand"
+            aria-label="Expand chat history menu"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+            </svg>
+          </button>
+
+          {/* Compact New Chat Action */}
+          <button
+            onClick={() => onNewChat()}
+            className="relative mt-3 w-9 h-9 rounded-xl bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors flex items-center justify-center text-lg font-bold"
+            title={`Start New Chat${hasNewChatDraft ? " (Draft saved)" : ""}`}
+            aria-label="Start New Chat"
+          >
+            +
+            {hasNewChatDraft && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-cyan border border-bg-secondary" />
+            )}
+          </button>
+
+          {/* Conversation history icons for fast switching */}
+          <div className="mt-4 flex-1 overflow-y-auto space-y-1.5 w-full px-2 flex flex-col items-center">
+            {conversations.map((conv) => {
+              const hasDraft = Boolean(drafts?.[conv.id]?.trim());
+              return (
+                <button
+                  key={conv.id}
+                  onClick={() => onSelectConversation(conv.id)}
+                  className={`relative w-9 h-9 rounded-lg flex items-center justify-center text-xs transition-all ${activeConvId === conv.id
+                    ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40 shadow-[0_0_10px_rgba(56,189,248,0.15)] font-bold"
+                    : "text-text-muted hover:text-text-primary hover:bg-bg-tertiary"
+                    }`}
+                  title={`${conv.title}${hasDraft ? " (Draft saved)" : ""}`}
+                >
+                  💬
+                  {hasDraft && (
+                    <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-cyan border border-bg-secondary" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+      ) : (
+        // Expanded Conversation Menu: Full titles, model preset buttons, resizable border handle, and delete actions
+        <aside
+          ref={sidebarRef}
+          style={{ width: `${sidebarWidth}px` }}
+          className={`hidden md:flex relative border-r border-border-subtle bg-bg-secondary flex-col shrink-0 ${
+            isResizing ? "select-none transition-none" : "transition-[width] duration-300 ease-in-out"
+          }`}
+          aria-label="Conversations Menu"
+        >
+          {/* Draggable Resize Handle: Sits along the right border to allow smooth mouse dragging */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize conversations menu"
+            tabIndex={0}
+            onPointerDown={handleResizeStart}
+            onDoubleClick={handleResetWidth}
+            className={`absolute top-0 -right-1 w-2 h-full cursor-col-resize z-20 transition-colors ${
+              isResizing ? "bg-accent-cyan" : "hover:bg-accent-cyan/60 active:bg-accent-cyan"
+            }`}
+            title="Drag to resize sidebar (double-click to reset width)"
+          />
+          {renderExpandedContent(false)}
+        </aside>
+      )}
+
+      {/* ── Mobile Slide-Over Overlay Drawer (`< 768px` / `md:hidden`) ─────── */}
+      {isMobileOpen && (
+        <div className="md:hidden fixed inset-0 bottom-16 z-40 flex">
+          {/* Translucent Backdrop: Tapping anywhere outside the drawer closes it */}
+          <div
+            className="fixed inset-0 bottom-16 bg-black/60 backdrop-blur-xs"
+            onClick={() => onCloseMobile?.()}
+            aria-hidden="true"
+          />
+          <aside
+            className="relative z-10 w-72 max-w-[85vw] h-full border-r border-border-subtle bg-bg-secondary flex flex-col shadow-2xl"
+            aria-label="Mobile Conversations Drawer"
+          >
+            {renderExpandedContent(true)}
+          </aside>
+        </div>
+      )}
+    </>
   );
 });
 

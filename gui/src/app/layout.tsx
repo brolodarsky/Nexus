@@ -51,7 +51,8 @@ export default function RootLayout({
     >
       <body className="min-h-full flex bg-bg-primary text-text-primary">
         <Sidebar />
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        {/* pb-16 md:pb-0 reserves 4rem (64px) bottom clearance on mobile viewports (< 768px) so page content is never obscured behind the fixed h-16 mobile bottom navigation bar */}
+        <main className="flex-1 overflow-y-auto pb-16 md:pb-0 min-w-0">{children}</main>
       </body>
     </html>
   );

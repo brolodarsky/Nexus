@@ -100,6 +100,20 @@ export default function HitlPage() {
   const [isRecentCollapsed, setIsRecentCollapsed] = useState(false);
   // isReasoningCollapsed: allows collapsing the agent reasoning card to maximize vertical diff editor real estate
   const [isReasoningCollapsed, setIsReasoningCollapsed] = useState(false);
+  // isMobile: tracks whether viewport width is below 768px (`md:`) so Monaco DiffEditor dynamically switches
+  // from side-by-side split view (`renderSideBySide: true`) to inline unified diff (`renderSideBySide: false`) on phones
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Listen to "(max-width: 767px)" media query changes so Monaco DiffEditor adapts immediately on mobile or resize
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 767px)");
+    const handleViewportChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      setIsMobile(e.matches);
+    };
+    handleViewportChange(mql);
+    mql.addEventListener("change", handleViewportChange);
+    return () => mql.removeEventListener("change", handleViewportChange);
+  }, []);
 
   // useCallback: Memoizes the function so callers can reuse a stable reference across renders.
   // keepId: After approve/rebase we re-select by ID from the FRESH list, so the panel never shows a stale
@@ -270,22 +284,29 @@ export default function HitlPage() {
       active ? "bg-accent-amber/15 text-accent-amber" : "text-text-muted hover:text-text-secondary"
     }`;
 
+  // diffOptions: merges static DIFF_OPTIONS with viewport-aware `renderSideBySide: !isMobile` so mobile screens (< 768px)
+  // render a readable inline unified diff without horizontal scrolling while desktop (`md:`) keeps side-by-side diffs
+  const diffOptions = {
+    ...DIFF_OPTIONS,
+    renderSideBySide: !isMobile,
+  };
+
   return (
-    <div className="flex h-[calc(100vh-4rem)]">
+    <div className="flex flex-col md:flex-row min-h-[calc(100dvh-4rem)] md:h-[calc(100vh-4rem)]">
       {/* ── Collapsible Queue Sidebar Menu ────────────────── */}
       {isQueueCollapsed ? (
-        // Collapsed Rail: Slim column maximizing editor width, with quick-nav IDs and expand button
+        // Collapsed Rail: Slim horizontal pill strip on mobile (< 768px) or vertical rail (w-14) on desktop (`md:`)
         <aside
-          className="w-14 border-r border-background-light flex flex-col bg-background-dark/30 py-4 items-center shrink-0 transition-all duration-300 ease-in-out select-none"
+          className="w-full md:w-14 border-b md:border-b-0 md:border-r border-background-light flex flex-row md:flex-col bg-background-dark/30 py-2.5 px-3 md:py-4 md:px-0 items-center gap-2 md:gap-0 shrink-0 transition-all duration-300 ease-in-out select-none"
           aria-label="Collapsed Review Queue"
         >
           <button
             onClick={() => setIsQueueCollapsed(false)}
-            className="p-2 rounded-lg text-text-muted hover:text-accent-amber hover:bg-background-light/50 transition-colors flex items-center justify-center"
+            className="p-2 rounded-lg text-text-muted hover:text-accent-amber hover:bg-background-light/50 transition-colors flex items-center justify-center shrink-0"
             title="Expand Review Queue"
             aria-label="Expand Review Queue"
           >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4 rotate-90 md:rotate-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
             </svg>
           </button>
@@ -293,20 +314,20 @@ export default function HitlPage() {
           {/* Pending Counter Badge */}
           <div
             onClick={() => setIsQueueCollapsed(false)}
-            className="mt-3 cursor-pointer flex flex-col items-center gap-1 px-1.5 py-2 rounded-lg bg-accent-amber/10 border border-accent-amber/30 text-accent-amber text-[10px] font-semibold"
+            className="md:mt-3 cursor-pointer flex flex-row md:flex-col items-center gap-1 px-2 py-1 md:px-1.5 md:py-2 rounded-lg bg-accent-amber/10 border border-accent-amber/30 text-accent-amber text-[10px] font-semibold shrink-0"
             title={`${transactions.length} Pending Decisions — Click to expand`}
           >
             <span>🔒</span>
             <span>{transactions.length}</span>
           </div>
 
-          {/* Vertical list of pending transaction IDs for direct switching while collapsed */}
-          <div className="mt-4 flex-1 overflow-y-auto space-y-2 w-full px-2 flex flex-col items-center">
+          {/* List of pending transaction IDs for direct switching while collapsed */}
+          <div className="md:mt-4 flex-1 overflow-x-auto md:overflow-x-visible md:overflow-y-auto flex flex-row md:flex-col items-center gap-1.5 md:gap-0 md:space-y-2 w-full md:px-2">
             {transactions.map((tx) => (
               <button
                 key={tx.id}
                 onClick={() => selectTx(tx)}
-                className={`w-9 h-9 rounded-lg flex items-center justify-center text-xs font-mono transition-all ${
+                className={`w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-xs font-mono transition-all ${
                   selectedTx?.id === tx.id
                     ? "bg-accent-amber/20 text-accent-amber border border-accent-amber/50 shadow-[0_0_10px_rgba(251,191,36,0.2)] font-bold"
                     : "text-text-muted hover:text-text-primary hover:bg-background-light/40"
@@ -321,7 +342,7 @@ export default function HitlPage() {
       ) : (
         // Expanded Menu: Full details for pending transactions and collapsible Recently Applied undo ledger
         <aside
-          className="w-1/3 max-w-sm border-r border-background-light flex flex-col bg-background-dark/30 shrink-0 transition-all duration-300 ease-in-out"
+          className="w-full md:w-1/3 md:max-w-sm max-h-[38vh] md:max-h-none border-b md:border-b-0 md:border-r border-background-light flex flex-col bg-background-dark/30 shrink-0 transition-all duration-300 ease-in-out"
           aria-label="Review Queue Menu"
         >
           <div className="p-4 border-b border-background-light flex justify-between items-center">
@@ -338,7 +359,7 @@ export default function HitlPage() {
               title="Collapse Review Queue"
               aria-label="Collapse Review Queue"
             >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-4 h-4 rotate-90 md:rotate-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
               </svg>
             </button>
@@ -472,7 +493,7 @@ export default function HitlPage() {
       )}
 
       {/* Main Review Area */}
-      <div className="flex-1 flex flex-col bg-background-dark/10">
+      <div className="flex-1 flex flex-col min-h-[60vh] md:min-h-0 bg-background-dark/10">
         {error && (
           <div className="p-4 bg-accent-rose/10 text-accent-rose border-b border-accent-rose/20 text-sm flex justify-between items-center">
             {error}
@@ -487,16 +508,16 @@ export default function HitlPage() {
         )}
 
         {!selectedTx ? (
-          <div className="flex-1 flex items-center justify-center text-text-muted flex-col gap-4">
+          <div className="flex-1 flex items-center justify-center text-text-muted flex-col gap-4 p-8">
             <span className="text-4xl">🕵️‍♂️</span>
             <p>Select a transaction to review</p>
           </div>
         ) : (
           <>
             {/* Header / Context */}
-            <div className="p-6 border-b border-background-light shrink-0">
-              <div className="flex justify-between items-start mb-4">
-                <div>
+            <div className="p-4 md:p-6 border-b border-background-light shrink-0">
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
+                <div className="min-w-0">
                   {/* Top metadata badge bar: Tool Name / Action Badge, Agent Role, Agent ID, Conversation ID, Thread ID, and Ticket # */}
                   <div className="flex items-center flex-wrap gap-2 mb-1.5">
                     <span className={`px-2 py-0.5 text-xs font-mono font-bold rounded capitalize border shadow-xs ${getActionTheme(selectedTx.action_type).badge}`}>
@@ -534,7 +555,7 @@ export default function HitlPage() {
                     </span>
                   </div>
                   {/* Primary Header: Target Note Filename */}
-                  <h1 className="text-xl font-bold text-text-primary mb-1">
+                  <h1 className="text-lg md:text-xl font-bold text-text-primary mb-1 break-words">
                     {selectedTx.destination_file
                       ? `${selectedTx.target_file.split("/").pop()} → ${selectedTx.destination_file.split("/").pop()}`
                       : (selectedTx.target_file.split("/").pop() || selectedTx.target_file)}
@@ -546,18 +567,19 @@ export default function HitlPage() {
                       : selectedTx.target_file}
                   </p>
                 </div>
-                <div className="flex gap-3">
+                {/* Thumb-friendly full-width buttons on mobile (`flex-1 sm:flex-initial`), compact on desktop */}
+                <div className="flex gap-2.5 md:gap-3 w-full sm:w-auto shrink-0">
                   <button 
                     onClick={handleReject} 
                     disabled={actionLoading}
-                    className="px-4 py-2 rounded-lg border border-accent-rose/30 text-accent-rose hover:bg-accent-rose/10 transition-colors font-medium text-sm disabled:opacity-50"
+                    className="flex-1 sm:flex-initial justify-center px-4 py-2.5 md:py-2 rounded-lg border border-accent-rose/30 text-accent-rose hover:bg-accent-rose/10 transition-colors font-medium text-sm disabled:opacity-50 flex items-center"
                   >
                     Reject
                   </button>
                   <button 
                     onClick={() => handleApprove(false)} 
                     disabled={actionLoading || conflict !== null}
-                    className="px-4 py-2 rounded-lg bg-accent-amber/10 border border-accent-amber/50 text-accent-amber hover:bg-accent-amber/20 transition-colors font-medium text-sm flex items-center gap-2 disabled:opacity-50 shadow-[0_0_15px_rgba(251,191,36,0.1)] hover:shadow-[0_0_20px_rgba(251,191,36,0.2)]"
+                    className="flex-1 sm:flex-initial justify-center px-4 py-2.5 md:py-2 rounded-lg bg-accent-amber/10 border border-accent-amber/50 text-accent-amber hover:bg-accent-amber/20 transition-colors font-medium text-sm flex items-center gap-2 disabled:opacity-50 shadow-[0_0_15px_rgba(251,191,36,0.1)] hover:shadow-[0_0_20px_rgba(251,191,36,0.2)]"
                   >
                     {actionLoading ? "Processing..." : "Approve Change"}
                   </button>
@@ -606,24 +628,24 @@ export default function HitlPage() {
                     {conflict.message} Approving as-is would erase whatever changed on disk. Rebase merges the agent&apos;s
                     edit onto the current note; Force overwrites it (the overwritten version stays recoverable via Undo).
                   </p>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap sm:flex-nowrap gap-2">
                     <button
                       onClick={handleRebase}
                       disabled={actionLoading}
-                      className="px-3 py-1.5 rounded-lg bg-accent-cyan/10 border border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/20 text-xs font-medium disabled:opacity-50"
+                      className="flex-1 sm:flex-initial justify-center px-3 py-2 md:py-1.5 rounded-lg bg-accent-cyan/10 border border-accent-cyan/40 text-accent-cyan hover:bg-accent-cyan/20 text-xs font-medium disabled:opacity-50"
                     >
                       Rebase onto current
                     </button>
                     <button
                       onClick={() => handleApprove(true)}
                       disabled={actionLoading}
-                      className="px-3 py-1.5 rounded-lg border border-accent-rose/40 text-accent-rose hover:bg-accent-rose/10 text-xs font-medium disabled:opacity-50"
+                      className="flex-1 sm:flex-initial justify-center px-3 py-2 md:py-1.5 rounded-lg border border-accent-rose/40 text-accent-rose hover:bg-accent-rose/10 text-xs font-medium disabled:opacity-50"
                     >
                       Force approve
                     </button>
                     <button
                       onClick={() => { setConflict(null); setView("diff"); }}
-                      className="px-3 py-1.5 rounded-lg text-text-muted hover:text-text-secondary text-xs"
+                      className="w-full sm:w-auto justify-center px-3 py-2 md:py-1.5 rounded-lg text-text-muted hover:text-text-secondary text-xs"
                     >
                       Cancel
                     </button>
@@ -632,7 +654,7 @@ export default function HitlPage() {
               )}
 
               {/* View Tabs */}
-              <div className="mt-4 flex gap-1">
+              <div className="mt-4 flex gap-1 flex-wrap">
                 <button onClick={() => setView("diff")} className={tabClass(view === "diff")}>Diff</button>
                 <button onClick={() => setView("preview")} className={tabClass(view === "preview")}>Preview Result</button>
                 {conflict && (
@@ -643,21 +665,21 @@ export default function HitlPage() {
 
             {/* Diff Viewer */}
             {view === "diff" && (
-              <div className="flex-1 min-h-0 relative">
+              <div className="flex-1 min-h-[360px] md:min-h-0 relative">
                 <DiffEditor
                   height="100%"
                   language="markdown"
                   original={selectedTx.original_content || ""}
                   modified={selectedTx.proposed_content}
                   theme="vs-dark"
-                  options={DIFF_OPTIONS}
+                  options={diffOptions}
                 />
               </div>
             )}
 
             {/* Pre-Commit Preview - full rendered note after the change */}
             {view === "preview" && (
-              <div className="flex-1 min-h-0 overflow-y-auto p-8">
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-8">
                 <div className="max-w-3xl mx-auto">
                   {selectedTx.action_type === "delete" ? (
                     <div className="p-6 rounded-lg border border-accent-rose/30 bg-accent-rose/10 text-accent-rose text-center">
@@ -682,21 +704,21 @@ export default function HitlPage() {
 
             {/* 3-Way Conflict Viewer - your drift vs. what approval would overwrite */}
             {view === "conflict" && conflict && (
-              <div className="flex-1 min-h-0 flex flex-col">
-                <div className="px-6 py-2 flex items-center gap-1 border-b border-background-light text-xs">
+              <div className="flex-1 min-h-[360px] md:min-h-0 flex flex-col">
+                <div className="px-4 md:px-6 py-2 flex items-center flex-wrap gap-1 border-b border-background-light text-xs">
                   <button onClick={() => setConflictPane("your_edits")} className={tabClass(conflictPane === "your_edits")}>
                     What changed on disk
                   </button>
                   <button onClick={() => setConflictPane("would_write")} className={tabClass(conflictPane === "would_write")}>
                     What Force would write
                   </button>
-                  <span className="ml-3 text-text-muted">
+                  <span className="ml-0 sm:ml-3 text-text-muted">
                     {conflictPane === "your_edits"
                       ? "Left: agent's baseline · Right: current disk"
                       : "Left: current disk · Right: agent proposal (red on the left gets lost)"}
                   </span>
                 </div>
-                <div className="flex-1 min-h-0 relative">
+                <div className="flex-1 min-h-[320px] md:min-h-0 relative">
                   <DiffEditor
                     // key: Forces Monaco to remount when switching panes so both models are swapped cleanly
                     key={conflictPane}
@@ -705,7 +727,7 @@ export default function HitlPage() {
                     original={conflictPane === "your_edits" ? (selectedTx.original_content || "") : (conflict.current_content ?? "")}
                     modified={conflictPane === "your_edits" ? (conflict.current_content ?? "") : selectedTx.proposed_content}
                     theme="vs-dark"
-                    options={DIFF_OPTIONS}
+                    options={diffOptions}
                   />
                 </div>
               </div>

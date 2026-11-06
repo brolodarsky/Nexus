@@ -3,7 +3,7 @@
  * Connects to FastAPI `/api/hitl` routes.
  */
 
-import { apiFetch, ApiError } from "./client";
+import { apiFetch } from "./client";
 
 // Interface representing a pending file modification in the HITL transaction queue
 export interface Transaction {
