@@ -3,6 +3,82 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.3.0] - 2026-11-05
+
+### Added
+- **Atomic File Move & Delete Tools (`src/nexus/shared_tools/shared.py`):** Added `@tool move_file(source_path, destination_path, reasoning, overwrite=False)` and `@tool delete_file(file_path, reasoning)` to the core tool library, enabling clean note relocation and archival (e.g. concluded Missions from `Campaign - */` to `Archive/YYYY/`) without leaving orphaned active documents on disk.
+- **Core Tool Binding (`src/nexus/agent/graph.py`):** Bound `move_file` and `delete_file` into `CORE_TOOLS`, granting direct access to both the primary orchestrator (`NexusAgent` / Astra) and parallel subagents spawned via `spawn_subagent`.
+- **HITL Two-Phase Commit Schema & Handlers (`src/nexus/core/hitl_queue.py`):**
+  - Added `destination_file TEXT` column to `transactions` and `revisions` with automatic idempotent schema migrations in `init_db()`.
+  - Added atomic commit and rollback support for `action_type="move"` and `action_type="delete"`:
+    - Pre-commit stale-base verification ensuring source files have not drifted on disk in Obsidian.
+    - Destination collision guards preventing un-flagged overwrites.
+    - Pre-commit snapshots in `revisions` enabling 100% reversible rollbacks (re-linking deleted files or moving files back to source).
+    - Updated `get_pending_for_file` to match across both `target_file` and `destination_file`.
+    - Updated `read_file` to surface staged relocation and deletion warning banners.
+- **FastAPI Endpoints (`src/nexus/api/routers/hitl.py`):** Added `destination_file` to `TransactionResponse` and `MockTransactionRequest`.
+- **Next.js Control Panel Integration (`gui/src/app/hitl/page.tsx`, `gui/src/lib/api/hitl.ts`):** Updated HITL UI to display `source → destination` relocation arrows across ticket items and headers, render pre-commit deletion warnings, and preview destination relocation badges.
+- **Unit Test Suite (`tests/test_hitl_commit.py`):** Added test coverage for `commit_transaction` and `rollback_transaction` on moves and deletions, stale-base detection on human edits, collision detection, and tool invocation guards (112 passing pytest tests).
+- **Mobile Bottom Navigation Bar (`Sidebar.tsx` & `layout.tsx`):** Added a fixed `h-16` bottom navigation bar (`md:hidden`) with backdrop blur, iOS safe-area bottom inset padding, and compact icon+label tabs (`Home`, `Chat`, `Vault`, `Tools`, `HITL`, `Audit`), plus `pb-16 md:pb-0` on `<main>` while keeping the desktop collapsible `Sidebar` (`hidden md:flex`) 100% unchanged.
+- **Mobile Slide-Over Conversation & Blackboard Drawers (`ChatHeader.tsx`, `ChatSidebar.tsx`, `BlackboardDrawer.tsx`, `chat/page.tsx`):** Added a mobile hamburger/threads trigger in `ChatHeader` that opens `ChatSidebar` as a slide-over overlay drawer with backdrop on `< 768px` viewports, defaulted the Blackboard drawer to closed on mobile (and rendered it as a slide-over overlay when opened), and set `ChatInputBar` to `text-base` (`16px`) on mobile to prevent iOS Safari viewport auto-zoom.
+- **Per-Conversation Draft Persistence (`gui/src/components/chat/types.ts`):** Added `CHAT_DRAFTS_STORAGE_KEY` (`nexus_chat_drafts`), `DRAFT_NEW_KEY` (`_new`), and `loadPersistedDrafts` / `persistDrafts` helpers with automatic backward-compatibility migration for legacy single-draft storage.
+- **Sidebar Draft Indicators (`gui/src/components/chat/ChatSidebar.tsx`):** Added visual `Draft` indicator pills next to conversation titles and on the "New Chat" button when unsubmitted drafts are saved, as well as cyan dot indicators on collapsed sidebar icons.
+- **Dynamic Host Resolution in Next.js Client (`gui/src/lib/api/client.ts`):** Added `getApiBase()` helper that dynamically detects the client origin hostname (`window.location.hostname`) in browser sessions, automatically routing API requests, SSE streams, resume artifact downloads, and podcast audio to the host machine's port 8000 when accessed over Tailscale (`http://100.x.y.z:3000`) or LAN (`http://192.168.x.y:3000`), with `NEXT_PUBLIC_API_URL` override support and SSR fallback to `http://127.0.0.1:8000`.
+- **Installable Mobile PWA Metadata (`gui/src/app/manifest.ts` & `gui/src/app/layout.tsx`):** Added Web App Manifest route (`MetadataRoute.Manifest`) with standalone display mode, dark background and theme colors matching the design system (`#06080f` and `#0a0a0f`), maskable application icons, and dedicated Next.js `Viewport` export with iOS `appleWebApp` translucent status bar configuration.
+- **Tailscale and LAN Discovery Banner (`start.ps1`):** Added automated network interface inspection on startup that extracts the machine's Tailscale IPv4 (`100.x.y.z`) and private LAN IPv4 (`192.168.x.y` / `10.x.y.z`), printing clickable mobile access URLs directly to the terminal banner.
+- **Thread-Scoped Shared Agent Blackboard (`src/nexus/core/blackboard.py`, `src/nexus/agent/graph.py`, `src/nexus/shared_tools/shared.py`, `src/nexus/api/routers/board.py`):** Added `thread_id TEXT` column, automatic schema migration in `init_board_db()`, and SQLite index `idx_bulletins_thread_id` to isolate subagent bulletins to active conversation threads.
+- **Ambient Execution Context Propagation:** Subagents spawned in parallel or tools calling `post_to_board` / `read_board` automatically inherit and normalize their parent thread ID via ambient HITL execution context (`_resolve_effective_thread_id`), preventing point-in-time sweeps (Gmail, Calendar, Vault scans) from leaking into unrelated conversations.
+- **Thread-Scoped Bulletin Deletion & REST API:** Added `thread_id` query filtering to `GET /api/board` and thread-specific unpinned deletion in `DELETE /api/board` (`clear_bulletins(thread_id=...)`), leaving bulletins in other sessions intact.
+- **Dynamic Next.js Blackboard Feed (`gui/src/components/chat/BlackboardDrawer.tsx`, `gui/src/app/chat/page.tsx`, `gui/src/lib/api/board.ts`):** Wired `BlackboardDrawer` to track `activeConvId` in the Next.js Chat interface, showing thread-scoped bulletins, clearing only within the active session, and presenting an empty-state card for fresh conversations.
+- **Unit Test Suite (`tests/test_blackboard.py`):** Added 4 test suites verifying thread filtering, cross-thread isolation during clear, ambient execution context inheritance, and idempotent schema migration adding `thread_id` to legacy un-scoped tables (11 total passing tests).
+
+### Changed
+- **AgentTracer Telemetry Window Headers: Renamed Commander to Head Agent & Inline Tool Call Parameters (`src/nexus/agent/`, `gui/src/`):**
+  - Renamed the root commander agent from generic `"nexus"` / `"NexusAgent"` to **`"Head Agent"`** across console tracer (`nexus_tracer = AgentTracer("Head Agent", ...)`), HITL execution context roles (`Head Agent (<tier>)`), and UI step card badges (`TraceStepCard`).
+  - Child subagents retain their clean thread-safe serial IDs (`subagent-1`, `subagent-2`, ...), creating an intuitive visual hierarchy: `Head Agent` $\to$ `subagent-1`, `subagent-2`.
+  - Promoted tool call parameters directly into window headers next to the tool name (`tool_name(k1=v1, k2=v2)`), formatted cleanly via `formatHeaderArgValue` with newline sanitization, key-value highlighting, and full tooltip previews.
+  - Eliminated the redundant collapsed preview body underneath `tool_call` windows (`evt.type !== "tool_call"`), keeping collapsed tool cards as a single, clean, high-density line.
+  - Synchronized DAG node cards in `AgentGraphView` to display explicit `Head Agent (Root)` and `sub.id` badges alongside display labels.
+  - Updated `ChatMessageItem.tsx` and `AuditPage` (`gui/src/app/audit/page.tsx`) to display `Head Agent` and inline tool call parameters consistently across chat bubbles and the Subagent Fleet inspector.
+- **Default Disclosure & Expand/Collapse Functionality for AgentTracer Telemetry Windows (`gui/src/components/AgentTraceVisualizer.tsx`):**
+  - Updated individual trace step cards (`TraceStepCard`) to mount collapsed by default (`isOpen = false`), replacing forced wide-open disclosures that produced massive vertical walls of text during runs.
+  - Fixed non-functional Expand/Collapse button on individual step cards: replaced static `forceExpanded || localOpen` boolean short-circuit with synchronized `useEffect` state updates and decoupled individual click handlers, allowing step details to expand or collapse freely.
+  - Added dedicated, accessible Expand/Collapse toggle buttons (`▾ Collapse All` / `▸ Expand All`) to `AgentGraphView` (both for the active Node Deep-Dive Inspector and the chronological steps list), ensuring users inspecting DAG nodes can collapse or expand all execution payloads in a single click.
+  - Made the initial task prompt card and final assistant synthesis card in `AgentGraphView` collapsible by default with functional `▾ Collapse` / `▸ Expand` controls and clamped 2-line preview fallbacks.
+  - Updated `ThinkingPanel` to initialize `expandAllSteps = false` and wired the toolbar toggle to cascade collapse/expand triggers to all child trace cards.
+- **HITL Review Queue & GUI Inspector Tile Hierarchy (`gui/src/app/hitl/page.tsx`):**
+  - Promoted the tool name / action (`modify`, `create`, `move`, `delete`, `write_file`) to the colored top header position across review queue tiles and inspector badges, rendering with semantic color theming (`getActionTheme`: rose for deletions, emerald for creations, violet for relocations, and amber for modifications).
+  - Maintained the primary filename header intact (`{target_file} → {destination_file}` or `{target_file}`).
+  - Relocated the ticket number (`Ticket #{id}`) down into the secondary metadata row where the action type was previously placed, preserving clean alignment alongside agent role, agent ID, conversation ID, and thread provenance pills.
+  - Updated collapsed queue rail tooltips to reflect the action-first hierarchy (`[{action}] {file} · Ticket #{id}`).
+- **Mobile-Responsive HITL Diff Reviewer (`hitl/page.tsx`) & Workspaces (`vault/page.tsx`, `audit/page.tsx`, `tools/page.tsx`, `PinnedNotesReader.tsx`):** Stacked HITL, Vault Explorer, and Audit Log queues vertically on mobile (`flex-col md:flex-row`), dynamically configured Monaco `DiffEditor` with `renderSideBySide: false` (inline unified diff) when viewport width `< 768px`, and made Approve / Reject / Rebase controls thumb-friendly on mobile screens.
+- Standardized canonical access on the Next.js + FastAPI Control Panel (`start.ps1`, `gui/`, `src/nexus/api/`) and headless agent execution (`python -m nexus.agent.api`).
+- Updated `src/nexus/agent/api.py` docstring to eliminate legacy interface call sites.
+- Cleaned `README.md` repository tree and meta-scripts table to remove all references to legacy pre-GUI interfaces and entrypoints.
+- **LAN & Tailscale CORS Permissiveness (`src/nexus/api/main.py`):** Configured Starlette `CORSMiddleware` with `allow_origin_regex` to permit requests from localhost, RFC 1918 private subnets (`192.168.*`, `10.*`), Tailscale CGNAT addresses (`100.*`), and Tailscale MagicDNS domains (`*.ts.net`) with full credential and header support.
+- **Universal Network Listener Binding (`start.ps1`):** Configured FastAPI `uvicorn` (`--host 0.0.0.0 --port 8000`) and Next.js dev server (`npx next dev -H 0.0.0.0 -p 3000`) to bind to `0.0.0.0`, allowing mobile devices to connect seamlessly without proxy buffering.
+- **API Callers Refactor (`gui/src/lib/api/stream.ts`, `tools.ts`, `vault.ts`):** Migrated stream, PDF/DOCX compiler URL, and podcast audio endpoints to call `getApiBase()` dynamically.
+
+### Fixed
+- **Chat Page Initial Active Conversation Restoration (`gui/src/app/chat/page.tsx`):** Fixed race condition where active conversation state initialized to `null` on mount prematurely wrote `"__new__"` to `ACTIVE_CONV_STORAGE_KEY` before conversations resolved from SQLite, causing the chat page to always default to an empty screen rather than loading the most recent conversation (`convos[0]`). Guarded persistence effect with `isInitialLoadDoneRef`, ensured `savedActiveConv` is restored when valid, and defaulted to `convos[0].id` when refreshed or returned to.
+- **Agent Responses Auto-Refresh & SSE Stream Keep-Alive (`src/nexus/api/routers/agents.py`, `gui/src/lib/api/stream.ts`, `gui/src/app/chat/page.tsx`):**
+  - Upgraded `/api/agents/ask/stream` from blocking `queue.Queue.get(timeout=0.1)` to non-blocking `get_nowait()` with `await asyncio.sleep(0.05)`, and added RFC 8895 SSE keep-alive comment pings (`: ping\n\n`) every 10 seconds of idle wait to prevent proxy, browser Fetch, and OS TCP socket drops during long LLM/subagent turns.
+  - Added `activeStreamConvIdRef` in `ChatPage` to prevent `useEffect([activeConvId])` from wiping messages or prematurely setting `loading = false` when an active SSE stream initiates a new conversation thread.
+  - Added background reconciliation in `onError` and `visibilitychange` that polls/syncs `getChatHistory(targetConvId)` directly against SQLite `chats.db`, automatically recovering and displaying agent responses even if network hiccups or browser tab backgrounding severed the streaming transport.
+- **Zero-Lag Typing & Subtree Memoization Across Nexus GUI (`gui/src/app/chat/page.tsx`, `gui/src/components/chat/`, `gui/src/components/MarkdownMessage.tsx` & `gui/src/app/tools/page.tsx`):**
+  - Isolated active keystroke buffers inside `ChatInputBar.tsx` (`localInput` synchronized via render-phase `inputSyncId` tracking) and `ResumeMarkdownEditor` (`gui/src/app/tools/page.tsx`), preventing per-character root page re-renders when typing prompts or editing resume markdown.
+  - Wrapped `MarkdownMessage`, `ChatMessageThread`, `ChatMessageItem`, `ChatSidebar`, `ChatHeader`, `BlackboardDrawer`, `ThinkingPanel`, and `AgentGraphView` in `React.memo`, hoisted `REMARK_PLUGINS` (`[remarkGfm]`) and `MARKDOWN_COMPONENTS` to module scope, and memoized `preprocessObsidianMarkdown()` so historical chat messages never re-parse Markdown ASTs during typing.
+  - Replaced post-render `useEffect` textarea height recalculations with inline event-handler resizing (`syncTextareaHeight`) to eliminate forced synchronous DOM reflows, debounced `localStorage` draft persistence (`persistDrafts`) by 300ms with `beforeunload`/unmount flush guarantees, added `useDeferredValue` to search inputs in `/audit`, `/tools`, and `PinNoteModal.tsx`, and scoped `.glass-card` CSS transitions in `gui/src/app/globals.css` to non-layout properties.
+- **Per-Conversation Input Isolation (`gui/src/app/chat/page.tsx`):** Fixed chat input retaining the same global draft across conversation switches. Switching conversations now seamlessly saves the outgoing thread's draft, clears or restores the target thread's draft, preserves the "New Chat" draft independently, and clears drafts upon successful message submission or thread deletion.
+
+### Removed
+- Retired legacy pre-GUI interfaces and audio transcription scaffolding in a Zero-Vestige refactoring:
+  - Deleted `src/nexus/interfaces/telegram.py`, `src/nexus/interfaces/voice.py`, `src/nexus/interfaces/cli.py`, `src/nexus/interfaces/__init__.py`, and removed `src/nexus/interfaces/` directory.
+  - Deleted `src/nexus/core/audio.py` (Whisper STT helper) and `src/nexus/main.py` (legacy terminal mission control / Telegram runner).
+  - Pruned orphaned package dependencies `python-telegram-bot` and `pyaudio` from `pyproject.toml` and `uv.lock` via `uv remove`.
+  - Removed obsolete console script entrypoint `[project.scripts]` `nexus = "nexus.main:main"` from `pyproject.toml`.
+  - Removed dead config settings `telegram_bot_token` and `allowed_user_ids` from `EngineSettings` in `src/nexus/core/config.py`.
+
 ## [3.2.0] - 2026-11-04
 
 ### Added
