@@ -1,7 +1,7 @@
 """
 api.py — Public entry points for the Universal NexusAgent.
 Provides synchronous and trace-enriched execution helpers used by FastAPI (`/api/agents/ask`),
-CLI (`src/nexus/main.py`), Telegram (`src/nexus/interfaces/telegram.py`), Voice (`voice.py`),
+the Next.js + FastAPI Control Panel, direct invocation (`python -m nexus.agent.api`),
 and the Evaluation Suite (`src/nexus/evals/runner.py`).
 """
 import time

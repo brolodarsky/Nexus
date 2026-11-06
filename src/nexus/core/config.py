@@ -41,10 +41,6 @@ class EngineSettings(BaseSettings):
     ai_max_retries: int = 3
     tavily_api_key: Optional[str] = None
     
-    # Telegram Interface
-    telegram_bot_token: Optional[str] = None
-    allowed_user_ids: str = ""
-    
     # Gmail: auth lives in .secrets/token_gmail*.json (see shared_tools/gmail_engine.py); supports multiple accounts.
 
     # LangSmith Tracing

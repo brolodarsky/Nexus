@@ -122,7 +122,6 @@ dependencies = [
     "pure-eval==0.2.3",
     "pyasn1==0.6.3",
     "pyasn1-modules==0.4.2",
-    "pyaudio==0.2.14",
     "pybase64==1.4.3",
     "pycparser==3.0",
     "pydantic==2.13.0",
@@ -135,7 +134,6 @@ dependencies = [
     "python-dateutil==2.9.0.post0",
     "python-docx==1.2.0",
     "python-dotenv==1.2.2",
-    "python-telegram-bot==22.7",
     "pytz==2026.2",
     "pyyaml==6.0.3",
     "referencing==0.37.0",
@@ -180,9 +178,6 @@ dependencies = [
     "zipp==3.23.1",
     "zstandard==0.25.0",
 ]
-
-[project.scripts]
-nexus = "nexus.main:main"
 
 [dependency-groups]
 dev = [

@@ -43,12 +43,11 @@ Nexus/
 ├── AGENTS.md                   # AI agent constitution
 ├── CHANGELOG.md                # Running log of notable changes
 ├── src/nexus/                      # Agentic search & coordinator engine
-│   ├── main.py                  # Universal coordinator & mission control
 │   ├── agent/                   # Single Universal Agent (NexusAgent)
 │   │   ├── api.py               # Public entrypoints (run_nexus_agent, route_content, execute_vault_query)
 │   │   └── graph.py             # LangGraph StateGraph (inject_root_instructions, core tools, spawn_subagent, <=5 circuit breaker)
+│   ├── api/                     # FastAPI backend application & routers
 │   ├── core/                    # Shared engine configuration
-│   │   ├── audio.py             # Whisper transcription service
 │   │   ├── constants.py         # Global constants
 │   │   ├── engine_constitution.py # Loader for Vault/Master Instructions.md (inject_root_instructions())
 │   │   ├── google_auth.py       # Reusable OAuth2 manager
@@ -57,7 +56,6 @@ Nexus/
 │   │   ├── dataset.json         # 12 real-world Q&A cases
 │   │   ├── runner.py            # Automated eval script
 │   │   └── results/             # Structured eval reports
-│   ├── interfaces/              # Entry-point implementations (cli, voice, telegram)
 │   └── shared_tools/            # Shared engine utilities & deterministic CLI tools
 │       ├── vault_reader.py      # Pure-Python Vault navigation & search functions
 │       ├── shared.py            # Shared LangChain @tool wrappers (read_file, modify_file, create_file, move_file, delete_file, get_directory_structure, search_vault)
@@ -135,8 +133,6 @@ This repository distinguishes between capabilities and constraints that define h
 | `audit_run_costs.py` | Parses execution run snapshots, calculates token costs & prompt-caching savings ($ USD), and backfills legacy snapshots. | `python scripts/audit_run_costs.py [--backfill] [--top 10]` |
 | `release.py` | Compiles `.changeset/*.md` fragments into the changelog and bumps version. | `python scripts/release.py` |
 | `sync_vault.py` | Automatically commits and pushes the nested Vault repository (The Nested Heart). | `python scripts/sync_vault.py` |
-| `src/nexus/main.py` | Universal coordinator for the Nexus Engine. Features a persistent mission control menu and background Telegram bot. | `nexus` |
-| `src/nexus/interfaces/telegram.py` | Remote Telegram bot interface (`NexusAgent` text + Whisper voice queries, 4,000-char auto-chunking, `/new` thread switching, and `/pending`, `/approve`, `/reject` HITL controls). | `python -m nexus.interfaces.telegram` |
 | `src/nexus/evals/runner.py` | Benchmarks `NexusAgent` against the Golden Dataset. | `python -m nexus.evals.runner` |
 | `src/nexus/agent/graph.py` | Single Universal Agent (`NexusAgent`). Boots with prompt-cache-isolated `inject_root_instructions()`, routes across native `ChatGoogleGenerativeAI` (Argon / Flash) and OpenAI tiers (`get_chat_model` / `resolve_model_config`) with per-turn `model_tier` selection via LangGraph `RunnableConfig`, configurable timeout (`ai_request_timeout`), and resilient tier fallback on 504 Deadline Exceeded, preserves 100% lossless KV-cached history, binds core Vault/HITL/Blackboard tools, and spawns parallel isolated subagents (`spawn_subagent(task_prompt, model_tier="low")`). | `python -m nexus.agent.api` |
 | `src/nexus/shared_tools/vault_reader.py` | Pure-Python filesystem utilities for Vault navigation and recent modification queries (`get_recent_modifications`, `get_directory_tree`, `resolve_vault_note_path`, `read_note_content`, `search_within`). | `python -m nexus.shared_tools.vault_reader --today` |
