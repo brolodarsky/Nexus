@@ -124,7 +124,7 @@ This repository distinguishes between capabilities and constraints that define h
 | `generate_podcast.py` | Converts a specific markdown note to MP3 via edge-tts. | `python src/nexus/shared_tools/generate_podcast.py <path> [--force]` |
 | `medical_xml_parser.py` | Parses HL7 CDA medical XML files to structured Markdown. | `python src/nexus/shared_tools/medical_xml_parser.py <path> <output_dir>` |
 | `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python src/nexus/shared_tools/ingest_phone.py --screens 50` |
-| `export_conversation.py` | Universal JSON/JSONL chat transcript parser and formatter (supports JSON arrays, JSONL streams, ChatGPT exports, stdin piping, and local Antigravity transcripts). | `python src/nexus/shared_tools/export_conversation.py <file_or_id> [-o out.md] [-v]` |
+| `export_conversation.py` | Universal JSON/JSONL chat transcript exporter with Turn Coalescing and collapsible tool summaries (supports JSON arrays, JSONL streams, ChatGPT exports, stdin piping, and local Antigravity transcripts). | `python -m nexus.shared_tools.export_conversation <id|file> [-o out.md] [-v] [--raw]` |
 | `vault_reader.py` | Deterministic Vault filesystem inspector: lists documents created or edited today (`--today`), within the last N hours (`--hours`), or since a date (`--since`), plus folder tree browsing (`--tree`), note reading (`--read`), and keyword search (`--search`). | `python -m nexus.shared_tools.vault_reader --today` / `--hours 6` / `--since YYYY-MM-DD` / `--path "<section>"` / `--tree` |
 
 ### Meta Scripts (`scripts/`)

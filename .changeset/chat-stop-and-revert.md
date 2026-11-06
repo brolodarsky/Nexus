@@ -16,3 +16,4 @@ type: minor
   - Added a `[ ↩ Revert turn ]` pill button to the latest assistant message bubble when idle for post-turn rollback.
   - Restored query text and images into the composer and focused the textarea upon stop or revert.
 - **Automated Regression Suite (`tests/test_stop_and_revert.py`):** Added 9 unit and integration tests verifying mid-turn aborts, completed turn rollbacks, HITL cancellation, checkpointer DAG pruning, thread cancellation lifecycles, and FastAPI endpoint handling.
+- **Universal Conversation Exporter Modernization (`src/nexus/shared_tools/export_conversation.py`):** Overhauled transcript exporter with Turn Coalescing to aggregate intermediate tool actions into collapsible `<details>` blocks, classify `type: GENERIC` tool stdout accurately, eliminate 12,000-line transcript bloat, and authored unit tests (`tests/test_export_conversation.py`).
