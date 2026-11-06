@@ -84,11 +84,15 @@ export default function Sidebar() {
         <div className={`flex items-center mb-8 ${isCollapsed ? "flex-col gap-3 justify-center w-full" : "justify-between px-2"}`}>
           <div className="flex items-center gap-3">
             <div
-              className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-accent-cyan to-accent-violet shadow-lg shadow-accent-cyan/20 cursor-pointer shrink-0"
+              className="flex items-center justify-center w-9 h-9 rounded-xl overflow-hidden cursor-pointer shrink-0 border border-white/10 hover:border-accent-cyan/50 transition-colors shadow-lg shadow-accent-cyan/10 bg-bg-surface"
               onClick={toggleCollapsed}
               title={isCollapsed ? "Expand navigation (Ctrl+B)" : "Nexus Engine"}
             >
-              <span className="text-lg font-bold text-white">N</span>
+              <img
+                src="/logo.png"
+                alt="Nexus Logo"
+                className="w-full h-full object-cover"
+              />
             </div>
             {!isCollapsed && (
               <div className="overflow-hidden">

@@ -3,7 +3,7 @@
  * Connects to FastAPI `/api/agents` routes.
  */
 
-import { apiFetch } from "./client";
+import { apiFetch, getApiBase } from "./client";
 import type { TraceEvent } from "./stream";
 
 // Interface for synchronous chat response returned by POST /api/agents/ask
@@ -47,6 +47,7 @@ export interface ChatHistoryEntry {
   confidence?: number | null; // Optional routing confidence score
   trace?: TraceEvent[];       // Optional array of execution steps for post-run inspection
   timestamp: string;          // ISO-8601 timestamp of message creation
+  images?: string[];          // Optional array of attached image URLs or relative asset paths
 }
 
 // Interface representing a persistent conversation thread in the sidebar
@@ -219,4 +220,45 @@ export async function getAgentRuns(limit = 50, agent?: string): Promise<RunSumma
 export async function getAgentRun(runId: string): Promise<RunSnapshot> {
   return apiFetch<RunSnapshot>(`/api/agents/runs/${encodeURIComponent(runId)}`);
 }
+
+// Interface describing the JSON metadata returned by POST /api/agents/upload
+export interface UploadImageResponse {
+  url: string;         // Relative URL endpoint (e.g. /api/agents/uploads/<uuid>.png)
+  filename: string;    // Unique disk filename in logs/uploads/
+  mime_type: string;   // Image MIME type (e.g. image/png, image/jpeg)
+  width: number;       // Resized/verified pixel width
+  height: number;      // Resized/verified pixel height
+}
+
+// Resolves a relative upload path, absolute URL, or base64 data URI to an absolute URL for <img> tags
+export function resolveImageUrl(urlOrPath: string): string {
+  if (!urlOrPath) return "";
+  if (
+    urlOrPath.startsWith("http://") ||
+    urlOrPath.startsWith("https://") ||
+    urlOrPath.startsWith("data:") ||
+    urlOrPath.startsWith("blob:")
+  ) {
+    return urlOrPath;
+  }
+  const base = getApiBase();
+  return `${base}${urlOrPath.startsWith("/") ? "" : "/"}${urlOrPath}`;
+}
+
+// Uploads a binary image file via multipart/form-data to POST /api/agents/upload
+export async function uploadImage(file: File): Promise<UploadImageResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/agents/upload`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Upload failed (${res.status}): ${errText}`);
+  }
+  return res.json();
+}
+
 

@@ -11,12 +11,15 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: "/",
     name: "Nexus Control Panel",
     short_name: "Nexus",
     description:
       "Personal Knowledge Workspace and Engine Control Panel for the Nexus Agentic Engine.",
-    start_url: "/chat",
+    start_url: "/",
+    scope: "/",
     display: "standalone",
+    display_override: ["standalone", "minimal-ui"],
     // Matches --color-bg-primary (#06080f) from globals.css for seamless splash/launch screen transitions
     background_color: "#06080f",
     // Matches the mobile viewport themeColor and dark titlebar styling
@@ -28,7 +31,19 @@ export default function manifest(): MetadataRoute.Manifest {
         type: "image/x-icon",
       },
       {
-        src: "/icons/sync-vault.png",
+        src: "/icons/icon-192.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/icons/icon-512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/icons/icon-maskable-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",

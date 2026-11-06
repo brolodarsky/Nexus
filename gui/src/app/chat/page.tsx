@@ -70,6 +70,8 @@ export default function ChatPage() {
   // Per-turn model selection state: catalog of available models from `/api/agents/models` + currently selected tier
   const [modelOptions, setModelOptions] = useState<ModelOption[]>(FALLBACK_MODELS);
   const [selectedModelTier, setSelectedModelTier] = useState<string>("strong");
+  // Staged image attachments uploaded via composer or clipboard paste for the upcoming turn
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
 
   const liveTraceRef = useRef<TraceEvent[]>([]);
   // currentInputRef: holds the live unsubmitted string in the composer so submit/switch callbacks read it without re-rendering ChatPage on every keystroke
@@ -114,6 +116,16 @@ export default function ChatPage() {
       .then((res) => setBulletins(res.bulletins || []))
       .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
   }, [activeConvId]);
+
+  // Appends newly uploaded image URLs to the staged attachments list
+  const handleAddImages = useCallback((urls: string[]) => {
+    setPendingImages((prev) => [...prev, ...urls]);
+  }, []);
+
+  // Removes a staged image attachment by its index
+  const handleRemoveImage = useCallback((index: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   // Fetch conversations, selectable model catalog, initial Blackboard bulletins, and restore draft state on mount
   useEffect(() => {
@@ -275,6 +287,7 @@ export default function ChatPage() {
             return {
               role: entry.role,
               content: entry.content,
+              images: entry.images || [],
               agent: entry.agent,
               domain: entry.domain,
               confidence: entry.confidence,
@@ -336,6 +349,7 @@ export default function ChatPage() {
                 return {
                   role: entry.role,
                   content: entry.content,
+                  images: entry.images || [],
                   agent: entry.agent,
                   domain: entry.domain,
                   confidence: entry.confidence,
@@ -425,6 +439,7 @@ export default function ChatPage() {
       // 2. Load the target conversation's draft (or blank if none exists)
       const nextDraft = updated[newConvId] ?? "";
       setProgrammaticInput(nextDraft);
+      setPendingImages([]);
 
       // 3. Switch active thread and persist selection
       setActiveConvId(newConvId);
@@ -471,6 +486,7 @@ export default function ChatPage() {
       // 2. Restore new chat draft (or blank if none exists)
       const nextDraft = updated[DRAFT_NEW_KEY] ?? "";
       setProgrammaticInput(nextDraft);
+      setPendingImages([]);
 
       // 3. Reset active thread to null and persist new chat indicator
       setActiveConvId(null);
@@ -560,19 +576,24 @@ export default function ChatPage() {
     async (e?: React.FormEvent) => {
       e?.preventDefault();
       const query = currentInputRef.current.trim();
-      if (!query || loading) return;
+      if ((!query && pendingImages.length === 0) || loading) return;
 
       if (draftPersistTimerRef.current) {
         clearTimeout(draftPersistTimerRef.current);
         draftPersistTimerRef.current = null;
       }
 
+      // Snapshot and clear staged image attachments
+      const imagesToSend = [...pendingImages];
+      setPendingImages([]);
+
       let targetConvId = activeConvId;
       let isNewConv = false;
       if (!targetConvId) {
         // Create new conversation on first message
         isNewConv = true;
-        const title = query.slice(0, 30) + (query.length > 30 ? "..." : "");
+        const initialTitleText = query || "Image Analysis";
+        const title = initialTitleText.slice(0, 30) + (initialTitleText.length > 30 ? "..." : "");
         const res = await createConversation(title);
         targetConvId = res.conversation_id;
         // Mark active stream thread BEFORE updating activeConvId so useEffect([activeConvId]) doesn't clobber live state
@@ -594,6 +615,7 @@ export default function ChatPage() {
       const userMsg: Message = {
         role: "user",
         content: query,
+        images: imagesToSend.length > 0 ? imagesToSend : undefined,
         timestamp: new Date(),
         modelTier: turnModelOption?.tier ?? selectedModelTier,
         modelName: turnModelOption?.model_name ?? null,
@@ -616,7 +638,7 @@ export default function ChatPage() {
       liveTraceRef.current = [];
 
       const abort = askBrainStream(
-        query,
+        query || "Analyze the attached image(s).",
         targetConvId,
         {
           onTrace: (event) => {
@@ -699,6 +721,7 @@ export default function ChatPage() {
                     return {
                       role: entry.role,
                       content: entry.content,
+                      images: entry.images || [],
                       agent: entry.agent,
                       domain: entry.domain,
                       confidence: entry.confidence,
@@ -739,6 +762,7 @@ export default function ChatPage() {
                       return {
                         role: entry.role,
                         content: entry.content,
+                        images: entry.images || [],
                         agent: entry.agent,
                         domain: entry.domain,
                         confidence: entry.confidence,
@@ -785,12 +809,13 @@ export default function ChatPage() {
             }
           },
         },
-        selectedModelTier
+        selectedModelTier,
+        imagesToSend.length > 0 ? imagesToSend : undefined
       );
 
       abortRef.current = abort;
     },
-    [loading, activeConvId, selectedModelTier, modelOptions, refreshBoard, setProgrammaticInput]
+    [loading, activeConvId, selectedModelTier, modelOptions, pendingImages, refreshBoard, setProgrammaticInput]
   );
 
   const handleClearBoard = useCallback(async () => {
@@ -967,6 +992,9 @@ export default function ChatPage() {
           selectedModelTier={selectedModelTier}
           activeModelLabel={activeModelLabel}
           inputRef={inputRef}
+          pendingImages={pendingImages}
+          onAddImages={handleAddImages}
+          onRemoveImage={handleRemoveImage}
           onChangeInput={handleInputChange}
           onSelectModelTier={handleSelectModelTier}
           onToggleCollapse={handleToggleInputCollapse}

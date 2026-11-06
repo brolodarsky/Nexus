@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { Geist_Mono } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import "./globals.css";
 
 const inter = Inter({
@@ -50,6 +51,7 @@ export default function RootLayout({
       className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex bg-bg-primary text-text-primary">
+        <ServiceWorkerRegister />
         <Sidebar />
         {/* pb-16 md:pb-0 reserves 4rem (64px) bottom clearance on mobile viewports (< 768px) so page content is never obscured behind the fixed h-16 mobile bottom navigation bar */}
         <main className="flex-1 overflow-y-auto pb-16 md:pb-0 min-w-0">{children}</main>

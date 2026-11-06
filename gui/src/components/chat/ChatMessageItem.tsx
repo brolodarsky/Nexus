@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 /**
  * ChatMessageItem.tsx — Renders an individual user or assistant message bubble in the Chat thread.
@@ -10,6 +11,7 @@
 import { memo, useMemo } from "react";
 // MarkdownMessage: Shared GFM + Obsidian [[Wiki-Link]] renderer (also used by the HITL Pre-Commit Preview)
 import MarkdownMessage from "@/components/MarkdownMessage";
+import { resolveImageUrl } from "@/lib/api";
 // ThinkingPanel: Lossless agent execution trace viewer with Graph View, full step payloads, and raw JSON
 import { ThinkingPanel } from "@/components/AgentTraceVisualizer";
 import { extractTurnCost, type Message } from "./types";
@@ -92,7 +94,41 @@ const ChatMessageItem = memo(function ChatMessageItem({ message }: ChatMessageIt
         {!isUser ? (
           <MarkdownMessage content={message.content} />
         ) : (
-          <p className="whitespace-pre-wrap">{message.content}</p>
+          <div className="space-y-2">
+            {/* Attached images preview grid */}
+            {message.images && message.images.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-0.5">
+                {message.images.map((imgUrl, idx) => {
+                  const resolved = resolveImageUrl(imgUrl);
+                  return (
+                    <div
+                      key={idx}
+                      className="relative group rounded-xl overflow-hidden border border-white/10 bg-black/30 shadow-md max-w-xs"
+                    >
+                      <a
+                        href={resolved}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block focus:outline-none"
+                        title="Click to view full image in new tab"
+                      >
+                        <img
+                          src={resolved}
+                          alt="Attached user image"
+                          className="max-h-60 w-auto object-contain rounded-lg hover:scale-[1.02] transition-transform duration-200 cursor-pointer"
+                          loading="lazy"
+                        />
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {/* User prompt text (rendered with 100% full visibility alongside attached images) */}
+            {message.content && (
+              <p className="whitespace-pre-wrap">{message.content}</p>
+            )}
+          </div>
         )}
 
         {/* Persisted trace log (collapsed by default for past messages) */}

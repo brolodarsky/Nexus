@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 /**
  * ChatInputBar.tsx — Multiline auto-expanding chat input with per-turn model tier selector.
@@ -7,8 +8,9 @@
  * Isolates live keystroke buffer state locally so typing never triggers full-page re-renders.
  */
 
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import type { ModelOption } from "@/lib/api";
+import { uploadImage, resolveImageUrl } from "@/lib/api";
 
 // Height bounds (in pixels) for the auto-expanding multiline chat textarea
 const MIN_TEXTAREA_HEIGHT = 10;
@@ -33,6 +35,9 @@ function syncTextareaHeight(el: HTMLTextAreaElement | null): void {
 // - selectedModelTier: active model tier identifier ("strong", "medium", "low")
 // - activeModelLabel: human-readable label of the currently selected model tier
 // - inputRef: React RefObject pointing to the underlying HTMLTextAreaElement for programmatic focus and auto-sizing
+// - pendingImages: optional array of uploaded image URLs staged for the upcoming turn
+// - onAddImages: optional callback appending freshly uploaded image URLs to the staged attachments list
+// - onRemoveImage: optional callback removing an attachment by array index
 // - onChangeInput: callback notifying parent of updated draft text (without forcing parent re-renders on every keystroke)
 // - onSelectModelTier: callback updating and persisting the user's selected model tier
 // - onToggleCollapse: callback updating and persisting whether the input bar is minimized or expanded
@@ -46,6 +51,9 @@ export interface ChatInputBarProps {
   selectedModelTier: string;
   activeModelLabel: string;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  pendingImages?: string[];
+  onAddImages?: (urls: string[]) => void;
+  onRemoveImage?: (index: number) => void;
   onChangeInput: (value: string) => void;
   onSelectModelTier: (tierId: string) => void;
   onToggleCollapse: (collapsed: boolean) => void;
@@ -61,6 +69,9 @@ const ChatInputBar = memo(function ChatInputBar({
   selectedModelTier,
   activeModelLabel,
   inputRef,
+  pendingImages = [],
+  onAddImages,
+  onRemoveImage,
   onChangeInput,
   onSelectModelTier,
   onToggleCollapse,
@@ -73,6 +84,13 @@ const ChatInputBar = memo(function ChatInputBar({
     input,
     inputSyncId,
   });
+  // Upload status and transient error banner state for chat image attachments
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  // Drag-and-drop hover feedback state
+  const [isDragOver, setIsDragOver] = useState<boolean>(false);
+  // Hidden input element ref for triggering browser file dialog on paperclip click
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Render-phase prop synchronization: when the parent switches conversations, clears on submit, or injects a prompt suggestion,
   // immediately snap `localInput` to the new `input` value in the same render pass without a cascading effect re-render.
@@ -87,6 +105,74 @@ const ChatInputBar = memo(function ChatInputBar({
     syncTextareaHeight(inputRef.current);
   }, [input, inputSyncId, inputRef, isCollapsed]);
 
+  // Uploads one or more selected/pasted image files to the FastAPI /api/agents/upload endpoint
+  const handleUploadFiles = async (files: FileList | File[]) => {
+    const imageFiles = Array.from(files).filter(
+      (f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)
+    );
+    if (imageFiles.length === 0) return;
+
+    setUploadError(null);
+    setIsUploading(true);
+    try {
+      const uploadedUrls: string[] = [];
+      for (const file of imageFiles) {
+        const res = await uploadImage(file);
+        uploadedUrls.push(res.url);
+      }
+      onAddImages?.(uploadedUrls);
+    } catch (err: unknown) {
+      console.error("Image upload failed:", err);
+      setUploadError(err instanceof Error ? err.message : "Failed to upload image.");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  // Clipboard paste listener: enables instant screenshot pasting (Ctrl+V) directly into the chat composer
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const pastedFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        const file = items[i].getAsFile();
+        if (file) pastedFiles.push(file);
+      }
+    }
+
+    if (pastedFiles.length > 0) {
+      e.preventDefault();
+      handleUploadFiles(pastedFiles);
+    }
+  };
+
+  // Drag-and-drop handlers for dropping screenshots or image files directly onto the composer
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragOver) setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      handleUploadFiles(e.dataTransfer.files);
+    }
+  };
+
   // Handles user typing inside the textarea: updates local buffer, resizes inline in the event handler, and notifies parent
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextValue = e.target.value;
@@ -96,12 +182,13 @@ const ChatInputBar = memo(function ChatInputBar({
   };
 
   // Keyboard shortcut handler for multiline chat textarea:
-  // - Enter (without Shift) triggers immediate submission
+  // - Enter (without Shift) triggers immediate submission if prompt text or pending images exist
   // - Shift+Enter inserts a newline, allowing the user to type structured multi-paragraph prompts
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      if (!loading && localInput.trim()) {
+      const hasContent = Boolean(localInput.trim()) || pendingImages.length > 0;
+      if (!loading && !isUploading && hasContent) {
         onSubmit();
       }
     }
@@ -178,7 +265,83 @@ const ChatInputBar = memo(function ChatInputBar({
       onSubmit={onSubmit}
       className="px-3 sm:px-4 md:px-8 py-3 md:py-4 border-t border-border-subtle shrink-0"
     >
-      <div className="glass-card p-3 rounded-2xl flex flex-col gap-2.5 border border-border-subtle focus-within:border-accent-cyan/40 transition-colors">
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`glass-card p-3 rounded-2xl flex flex-col gap-2.5 border transition-all ${
+          isDragOver
+            ? "border-accent-cyan bg-accent-cyan/5 ring-2 ring-accent-cyan/20"
+            : "border-border-subtle focus-within:border-accent-cyan/40"
+        }`}
+      >
+        {/* Staged Image Attachments Ribbon: Displays removable thumbnail preview cards before sending */}
+        {((pendingImages && pendingImages.length > 0) || isUploading) && (
+          <div className="flex items-center gap-2 px-1 pt-1 overflow-x-auto pb-1 max-w-full">
+            {pendingImages?.map((url, idx) => (
+              <div
+                key={idx}
+                className="relative group rounded-xl overflow-hidden border border-border-subtle bg-bg-secondary shrink-0 shadow-sm"
+              >
+                <img
+                  src={resolveImageUrl(url)}
+                  alt="Staged attachment"
+                  className="w-14 h-14 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => onRemoveImage?.(idx)}
+                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/80 hover:bg-red-500 text-white flex items-center justify-center text-xs opacity-90 group-hover:opacity-100 transition-colors"
+                  title="Remove image"
+                  aria-label="Remove image attachment"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+
+            {isUploading && (
+              <div className="w-14 h-14 rounded-xl border border-dashed border-accent-cyan/50 flex flex-col items-center justify-center shrink-0 bg-accent-cyan/5 text-accent-cyan animate-pulse">
+                <svg
+                  className="animate-spin w-4 h-4 text-accent-cyan mb-1"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v8H4z"
+                  />
+                </svg>
+                <span className="text-[0.6rem] font-mono">Uploading</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Transient upload error alert */}
+        {uploadError && (
+          <div className="px-2 py-1 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-between">
+            <span>⚠️ {uploadError}</span>
+            <button
+              type="button"
+              onClick={() => setUploadError(null)}
+              className="text-text-muted hover:text-text-primary ml-2 text-sm"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         <div className="flex items-start gap-3 px-1 pt-1">
           {/* text-base (16px) on mobile (< 768px) prevents iOS Safari from auto-zooming the viewport on focus; md:text-sm restores 14px on desktop */}
           <textarea
@@ -186,7 +349,12 @@ const ChatInputBar = memo(function ChatInputBar({
             value={localInput}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
-            placeholder={`Type message...`}
+            onPaste={handlePaste}
+            placeholder={
+              pendingImages.length > 0
+                ? "Add an optional prompt or question for the image..."
+                : "Type message, paste screenshot (Ctrl+V), or drag & drop image..."
+            }
             disabled={loading}
             rows={1}
             spellCheck={true}
@@ -214,7 +382,7 @@ const ChatInputBar = memo(function ChatInputBar({
           </button>
         </div>
 
-        {/* Bottom toolbar inside input card: Per-turn model pills + send action */}
+        {/* Bottom toolbar inside input card: Per-turn model pills + attachment + send action */}
         <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap pt-2 border-t border-border-subtle/50 px-1">
           {/* Per-Turn Model Selector: segmented toggle pills + native select accessibility */}
           <div
@@ -248,10 +416,47 @@ const ChatInputBar = memo(function ChatInputBar({
             })}
           </div>
 
-          <div className="flex items-center gap-3 ml-auto shrink-0">
+          <div className="flex items-center gap-2 ml-auto shrink-0">
+            {/* Hidden file input invoked by the paperclip attachment button */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif,image/bmp"
+              multiple
+              onChange={(e) => {
+                if (e.target.files) handleUploadFiles(e.target.files);
+              }}
+              className="hidden"
+              id="chat-file-upload"
+            />
+            <button
+              type="button"
+              disabled={loading || isUploading}
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload image or screenshot (PNG, JPG, WEBP, GIF)"
+              aria-label="Upload image"
+              className="flex items-center justify-center w-10 h-10 md:w-9 md:h-9 rounded-xl text-text-muted hover:text-accent-cyan hover:bg-accent-cyan/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
+
             <button
               type="submit"
-              disabled={loading || !localInput.trim()}
+              disabled={
+                loading ||
+                isUploading ||
+                (!localInput.trim() && pendingImages.length === 0)
+              }
               title="Send message (Enter) • Newline (Shift+Enter)"
               className="flex items-center justify-center w-10 h-10 md:w-9 md:h-9 rounded-xl bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
             >

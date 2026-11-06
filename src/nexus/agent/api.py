@@ -4,22 +4,59 @@ Provides synchronous and trace-enriched execution helpers used by FastAPI (`/api
 the Next.js + FastAPI Control Panel, direct invocation (`python -m nexus.agent.api`),
 and the Evaluation Suite (`src/nexus/evals/runner.py`).
 """
+import base64
+import mimetypes
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from langchain_core.messages import HumanMessage, ToolMessage
 
 from nexus.agent.graph import extract_message_text, nexus_graph, nexus_tracer, reset_subagent_counter
-from nexus.core.constants import resolve_model_config
+from nexus.core.constants import PROJECT_ROOT, resolve_model_config
 from nexus.core.hitl_queue import reset_hitl_execution_context, set_hitl_execution_context
 
 
-# Optional[dict] and Optional[str] allow callers to omit metadata filters, explicit thread IDs, or per-turn model overrides.
+# Resolves a relative upload path or URI into a base64 data URL for multimodal LLM consumption
+def resolve_image_to_data_url(image_ref: str) -> str:
+    """Converts a local file path, upload endpoint URL, or existing data URL into a base64 data URL.
+    
+    Cloud multimodal LLMs (Gemini, Claude, GPT) require direct base64 data URLs (`data:image/...;base64,...`)
+    or public HTTPS URLs rather than private local disk paths or localhost server links.
+    """
+    if image_ref.startswith("data:"):
+        return image_ref
+    
+    # Strip any URL query parameters or leading route prefixes (e.g. /api/agents/uploads/xyz.png -> xyz.png)
+    filename = Path(image_ref.split("?")[0]).name
+    uploads_dir = PROJECT_ROOT / "logs" / "uploads"
+    file_path = uploads_dir / filename
+    
+    if not file_path.is_file():
+        # Fallback check directly in PROJECT_ROOT or as an absolute path
+        candidate = Path(image_ref)
+        if candidate.is_file():
+            file_path = candidate
+        else:
+            raise FileNotFoundError(f"Image attachment not found on disk: {image_ref}")
+            
+    mime, _ = mimetypes.guess_type(str(file_path))
+    if not mime:
+        mime = "image/png"
+        
+    data = file_path.read_bytes()
+    encoded = base64.b64encode(data).decode("utf-8")
+    return f"data:{mime};base64,{encoded}"
+
+
+# Optional[dict], Optional[str], and Optional[list[str]] allow callers to omit metadata filters, explicit thread IDs,
+# per-turn model overrides, or multimodal image attachments.
 def run_nexus_agent_with_trace(
     query: str,
     filters: Optional[dict] = None,
     thread_id: Optional[str] = None,
     model_tier: Optional[str] = None,
+    images: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """
     Execute a user query against the universal `NexusAgent` and return the final response + lossless tool trace metadata.
@@ -29,6 +66,7 @@ def run_nexus_agent_with_trace(
         filters: Optional CLI metadata filters (`domain`, `tag`, `type`) to prepend as search context hints.
         thread_id: Optional conversation UUID for persistent `SqliteSaver` checkpointer state.
         model_tier: Optional per-turn model tier or model identifier (`"strong"`, `"medium"`, `"low"`, or explicit model name).
+        images: Optional list of image file paths, upload endpoint URLs, or data URLs for multimodal analysis.
 
     Returns:
         Dictionary with keys: `response`, `agent`, `domain`, `confidence`, `reasoning`, `model_tier`, `model_name`, `tool_calls`, `final_state`.
@@ -39,14 +77,22 @@ def run_nexus_agent_with_trace(
     active_model_name = resolved_model["model_name"]
 
     reset_subagent_counter()
+    # Format start banner with optional image attachment count for live Thinking Panel observability
+    start_label = f"Query ({effective_tier} · {active_model_name})"
+    if images:
+        start_label += f" [+{len(images)} image{'s' if len(images) > 1 else ''}]"
+    start_label += f": {query}"
+
     # Emit 100% untruncated query context + active per-turn model tier and model name for the Thinking Panel & DAG
     nexus_tracer.agent_start(
-        f"Query ({effective_tier} · {active_model_name}): {query}",
+        start_label,
         metadata={
             "query": query,
             "thread_id": active_thread,
             "model_tier": effective_tier,
             "model_name": active_model_name,
+            "has_images": bool(images),
+            "image_count": len(images) if images else 0,
         },
     )
 
@@ -56,6 +102,18 @@ def run_nexus_agent_with_trace(
         filter_str = ", ".join(f"{k}={v}" for k, v in filters.items() if v)
         if filter_str:
             user_prompt = f"[Context Filter Hint: {filter_str}]\n\n{query}"
+
+    # Construct HumanMessage: plain text if no images, or structured multimodal content blocks if images are present
+    if images:
+        content_blocks: list[dict[str, Any]] = []
+        effective_text = user_prompt.strip() if user_prompt else "Analyze the attached image(s)."
+        content_blocks.append({"type": "text", "text": effective_text})
+        for img_ref in images:
+            data_url = resolve_image_to_data_url(img_ref)
+            content_blocks.append({"type": "image_url", "image_url": {"url": data_url}})
+        human_msg = HumanMessage(content=content_blocks)
+    else:
+        human_msg = HumanMessage(content=user_prompt)
 
     # Pass `model_tier` and provenance inside LangGraph `configurable` so `call_model` and HITL tools resolve active context
     config = {
@@ -75,7 +133,7 @@ def run_nexus_agent_with_trace(
 
     try:
         final_state = nexus_graph.invoke(
-            {"messages": [HumanMessage(content=user_prompt)]},
+            {"messages": [human_msg]},
             config=config,
         )
         elapsed = time.time() - t0

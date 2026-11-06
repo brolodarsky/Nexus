@@ -4,21 +4,30 @@ Bridges the Next.js frontend to the existing LangGraph multi-agent swarm.
 """
 
 import asyncio
+import io
 import json
+import mimetypes
+from pathlib import Path
 import queue
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
+from PIL import Image
+
 # FastAPI primitives:
 # - APIRouter: Modular sub-application for grouping related routes under a common prefix (/api/agents)
 # - HTTPException: Raises structured HTTP error responses (e.g., 400 Bad Request, 500 Internal Server Error)
 # - Request: Represents the raw incoming HTTP request, used to detect client disconnects during streaming
-from fastapi import APIRouter, HTTPException, Request
+# - UploadFile, File: Handles multipart/form-data image attachment uploads from the chat composer
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 # StreamingResponse: Streams chunks of data (SSE) over an open HTTP connection without buffering entire response
-from fastapi.responses import StreamingResponse
+# FileResponse: Streams stored binary assets (uploaded images) back to the browser
+from fastapi.responses import FileResponse, StreamingResponse
 # Pydantic BaseModel: Validates incoming request JSON payloads and serializes outgoing response schemas
 from pydantic import BaseModel
+from nexus.core.constants import PROJECT_ROOT
 # trace_bus: Global pub/sub event bus where LangGraph agents emit live trace events (tools, LLM calls)
 from nexus.core.cost import calculate_token_cost
 from nexus.core.trace import trace_bus
@@ -31,6 +40,15 @@ from nexus.core.chats_db import (
     delete_conversation, update_conversation_title
 )
 
+# Upload storage directory for chat image attachments
+UPLOADS_DIR = PROJECT_ROOT / "logs" / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+# 20MB maximum allowed upload file size
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+# 1600px maximum edge dimension for high-fidelity multimodal vision inference without excessive token inflation
+MAX_IMAGE_DIM = 1600
+
 # APIRouter instance mounted in main.py under prefix="/api/agents"
 router = APIRouter()
 
@@ -41,6 +59,8 @@ class AskRequest(BaseModel):
     query: str                          # Raw user prompt text
     conversation_id: str                # UUID linking to chats.db conversation thread
     model_tier: Optional[str] = None    # Optional per-turn model tier/ID override ("strong", "medium", "low")
+    images: Optional[list[str]] = None  # Optional list of image URLs/paths (e.g. ["/api/agents/uploads/<uuid>.png"])
+
 
 
 # Pydantic schema for synchronous chat responses
@@ -54,6 +74,83 @@ class AskResponse(BaseModel):
     model_name: str | None = None       # Concrete provider model identifier (e.g., "gemini-4-argon", "gemini-3.8-flash")
     cost_usd: float | None = None       # Estimated USD inference cost for this execution turn
     timestamp: str                      # ISO-8601 UTC timestamp
+
+
+# ── Image Upload & Asset Routes ──────────────────────────────
+
+# Accepts uploaded image files from the chat composer, validates and optimizes them
+@router.post("/upload")
+async def upload_image_file(file: UploadFile = File(...)):
+    """
+    Accepts an uploaded image file, validates content type and image integrity,
+    resizes/optimizes oversized dimensions (max 1600px edge), persists the asset
+    to `logs/uploads/`, and returns its accessible relative URL path.
+    """
+    content_type = (file.content_type or "").lower()
+    raw_filename = (file.filename or "").lower()
+    is_image = content_type.startswith("image/") or raw_filename.endswith(
+        (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+    )
+    if not is_image:
+        raise HTTPException(
+            status_code=400,
+            detail="Only image files (PNG, JPEG, WEBP, GIF, BMP) are supported.",
+        )
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="Image size exceeds maximum 20MB limit.")
+
+    try:
+        img = Image.open(io.BytesIO(file_bytes))
+        img.verify()
+        # Re-open after verify() since verify() alters internal stream pointer
+        img = Image.open(io.BytesIO(file_bytes))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Corrupted or invalid image file: {str(exc)}")
+
+    # Determine extension and format mapping
+    original_format = (img.format or "PNG").upper()
+    ext_map = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp", "GIF": ".gif", "BMP": ".bmp"}
+    ext = ext_map.get(original_format, ".png")
+
+    # Resize oversized images preserving aspect ratio
+    if img.width > MAX_IMAGE_DIM or img.height > MAX_IMAGE_DIM:
+        img.thumbnail((MAX_IMAGE_DIM, MAX_IMAGE_DIM), Image.Resampling.LANCZOS)
+
+    unique_filename = f"{uuid.uuid4().hex}{ext}"
+    out_path = UPLOADS_DIR / unique_filename
+
+    # Handle transparent PNG/RGBA conversion when saving to JPEG
+    save_format = original_format if original_format in ext_map else "PNG"
+    if save_format == "JPEG" and img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+
+    img.save(out_path, format=save_format, optimize=True)
+
+    mime, _ = mimetypes.guess_type(str(out_path))
+    return {
+        "url": f"/api/agents/uploads/{unique_filename}",
+        "filename": unique_filename,
+        "mime_type": mime or content_type or "image/png",
+        "width": img.width,
+        "height": img.height,
+    }
+
+
+# Serves stored image attachments to the Next.js Chat UI
+@router.get("/uploads/{filename}")
+async def get_uploaded_image(filename: str):
+    """
+    Serves a locally uploaded image from `logs/uploads/` with path-traversal prevention.
+    """
+    safe_name = Path(filename).name
+    file_path = UPLOADS_DIR / safe_name
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Uploaded image not found.")
+
+    mime, _ = mimetypes.guess_type(str(file_path))
+    return FileResponse(file_path, media_type=mime or "application/octet-stream")
 
 
 # ── Routes ────────────────────────────────────────────────────
@@ -197,15 +294,23 @@ async def ask_brain(request: AskRequest):
     Routes a natural-language query through the Content Router agent or active sticky agent,
     waits for execution to finish, logs to SQLite, and returns the response JSON.
     """
-    # Guard clause against empty queries
-    if not request.query.strip():
-        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+    # Guard clause against empty queries when no images are attached
+    effective_query = request.query.strip()
+    if not effective_query and not request.images:
+        raise HTTPException(status_code=400, detail="Query or image attachment cannot be empty.")
+    if not effective_query:
+        effective_query = "Analyze the attached image(s)."
 
     try:
         t0 = time.time()
         conversation_id = request.conversation_id
         # Phase 1: Persist user message to SQLite chats.db before running agents
-        log_message(role="user", content=request.query, conversation_id=conversation_id)
+        log_message(
+            role="user",
+            content=effective_query,
+            conversation_id=conversation_id,
+            images=request.images,
+        )
         
         # Subscribe to trace_bus so synchronous `/ask` also captures 100% of LLM & Subagent trace steps
         trace_events = []
@@ -214,12 +319,13 @@ async def ask_brain(request: AskRequest):
         unsub_sync = trace_bus.subscribe(_on_sync_trace)
 
         try:
-            # Phase 2: Invoke the unified NexusAgent directly with optional per-turn model override
+            # Phase 2: Invoke the unified NexusAgent directly with optional per-turn model and image overrides
             from nexus.agent.api import run_nexus_agent_with_trace
             result = run_nexus_agent_with_trace(
-                query=request.query,
+                query=effective_query,
                 thread_id=conversation_id,
                 model_tier=request.model_tier,
+                images=request.images,
             )
         finally:
             unsub_sync()
@@ -306,14 +412,21 @@ def _run_pipeline(
     conversation_id: str,
     event_queue: queue.Queue,
     model_tier: Optional[str] = None,
+    images: Optional[list[str]] = None,
 ):
     """
     Runs agent graph execution in a background thread so the async event loop is not blocked.
     Collects trace events via trace_bus subscription and pushes the final 'done' event to event_queue.
     """
     t0 = time.time()
-    # Log user query to database immediately
-    log_message(role="user", content=query, conversation_id=conversation_id)
+    effective_query = query.strip() or "Analyze the attached image(s)."
+    # Log user query and image attachments to database immediately
+    log_message(
+        role="user",
+        content=effective_query,
+        conversation_id=conversation_id,
+        images=images,
+    )
     
     # Subscribe to trace_bus to capture all LLM and tool events emitted during this run
     trace_events = []
@@ -322,12 +435,13 @@ def _run_pipeline(
     unsub = trace_bus.subscribe(_on_trace)
 
     try:
-        # Invoke the unified NexusAgent directly with optional per-turn model override
+        # Invoke the unified NexusAgent directly with optional per-turn model and image overrides
         from nexus.agent.api import run_nexus_agent_with_trace
         result = run_nexus_agent_with_trace(
-            query=query,
+            query=effective_query,
             thread_id=conversation_id,
             model_tier=model_tier,
+            images=images,
         )
 
         routed_domain = result.get("domain")
@@ -418,8 +532,11 @@ async def ask_brain_stream(request: AskRequest, req: Request):
     Spawns a background thread to run the agent, subscribes to trace_bus,
     and yields SSE data packets (data: {...}\n\n) as events occur.
     """
-    if not request.query.strip():
-        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+    effective_query = request.query.strip()
+    if not effective_query and not request.images:
+        raise HTTPException(status_code=400, detail="Query or image attachment cannot be empty.")
+    if not effective_query:
+        effective_query = "Analyze the attached image(s)."
 
     # Thread-safe FIFO queue to transfer events from background thread to async generator
     event_queue = queue.Queue()
@@ -430,7 +547,7 @@ async def ask_brain_stream(request: AskRequest, req: Request):
     # Spawn synchronous agent pipeline in background OS thread (daemon=True allows clean shutdown)
     pipeline_thread = threading.Thread(
         target=_run_pipeline, 
-        args=(request.query, request.conversation_id, event_queue, request.model_tier), 
+        args=(effective_query, request.conversation_id, event_queue, request.model_tier, request.images), 
         daemon=True
     )
     pipeline_thread.start()

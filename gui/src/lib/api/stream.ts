@@ -45,6 +45,7 @@ export interface TraceEvent {
  * @param conversationId The target conversation UUID for sticky state and message persistence.
  * @param callbacks Event listeners for streaming updates, stream completion, and errors.
  * @param modelTier Optional per-turn model tier or model identifier ("strong", "medium", "low").
+ * @param images Optional array of uploaded image URLs or asset paths for multimodal vision execution.
  * @returns An abort function that immediately terminates the active HTTP stream.
  */
 export function askBrainStream(
@@ -55,7 +56,8 @@ export function askBrainStream(
     onDone: (event: TraceEvent) => void;
     onError: (error: string) => void;
   },
-  modelTier?: string
+  modelTier?: string,
+  images?: string[]
 ): () => void {
   // AbortController allows canceling the fetch request if the user navigates away or cancels
   const controller = new AbortController();
@@ -71,6 +73,7 @@ export function askBrainStream(
           query,
           conversation_id: conversationId,
           model_tier: modelTier,
+          images: images && images.length > 0 ? images : undefined,
         }),
         signal: controller.signal, // Connects the abort signal to the fetch request
       });

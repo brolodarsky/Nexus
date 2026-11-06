@@ -16,6 +16,7 @@ import type { ModelOption, TraceEvent } from "@/lib/api";
 // - modelName: concrete LLM identifier (e.g., "gemini-4-argon", "gemini-3.8-flash")
 // - costUsd: estimated USD inference cost for this execution turn
 // - trace: optional array of lossless SSE TraceEvent payloads for ThinkingPanel inspection
+// - images: optional array of attached image asset URLs or paths rendered in user message bubbles
 export interface Message {
   role: "user" | "assistant";
   content: string;
@@ -27,6 +28,7 @@ export interface Message {
   modelName?: string | null;
   costUsd?: number | null;
   trace?: TraceEvent[];
+  images?: string[];
 }
 
 // LocalStorage key for remembering the user's selected model tier across page reloads

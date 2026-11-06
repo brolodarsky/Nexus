@@ -37,9 +37,15 @@ def init_db():
                 confidence REAL,
                 trace TEXT,
                 timestamp TEXT,
+                images TEXT,
                 FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             )
         """)
+        # Schema migration: check if `images` column exists for existing tables and alter if missing
+        cols = [col[1] for col in conn.execute("PRAGMA table_info(messages)").fetchall()]
+        if "images" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN images TEXT")
+
 
 init_db()
 
@@ -75,17 +81,29 @@ def update_conversation_title(conversation_id: str, title: str):
         conn.execute("UPDATE conversations SET title = ? WHERE id = ?", (title, conversation_id))
         conn.commit()
 
-def log_message(role: str, content: str, agent: str = None, domain: str = None, confidence: float = None, trace: list = None, conversation_id: str = None):
+# `images: list[str] | None` accepts an optional array of image file URLs/paths (e.g. `/api/agents/uploads/<uuid>.png`)
+def log_message(
+    role: str,
+    content: str,
+    agent: str = None,
+    domain: str = None,
+    confidence: float = None,
+    trace: list = None,
+    conversation_id: str = None,
+    images: list[str] | None = None,
+):
     if not conversation_id:
         return
     
     with _get_conn() as conn:
         now = datetime.now(timezone.utc).isoformat()
         trace_json = json.dumps(trace) if trace else None
+        # Serialize list of image URLs/paths to a JSON string for lightweight column storage
+        images_json = json.dumps(images) if images else None
         conn.execute("""
-            INSERT INTO messages (conversation_id, role, content, agent, domain, confidence, trace, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (conversation_id, role, content, agent, domain, confidence, trace_json, now))
+            INSERT INTO messages (conversation_id, role, content, agent, domain, confidence, trace, timestamp, images)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (conversation_id, role, content, agent, domain, confidence, trace_json, now, images_json))
         
         conn.execute("UPDATE conversations SET last_updated = ? WHERE id = ?", (now, conversation_id))
         conn.commit()
@@ -93,7 +111,7 @@ def log_message(role: str, content: str, agent: str = None, domain: str = None, 
 def get_chat_history(conversation_id: str, limit: int = 50) -> list[dict]:
     with _get_conn() as conn:
         rows = conn.execute("""
-            SELECT role, content, agent, domain, confidence, trace, timestamp 
+            SELECT role, content, agent, domain, confidence, trace, timestamp, images 
             FROM messages 
             WHERE conversation_id = ? 
             ORDER BY id ASC
@@ -102,6 +120,9 @@ def get_chat_history(conversation_id: str, limit: int = 50) -> list[dict]:
         
         history = []
         for r in rows:
+            # Safely extract and deserialize optional images JSON array
+            raw_images = r["images"] if "images" in r.keys() else None
+            parsed_images = json.loads(raw_images) if raw_images else []
             history.append({
                 "role": r["role"],
                 "content": r["content"],
@@ -109,6 +130,7 @@ def get_chat_history(conversation_id: str, limit: int = 50) -> list[dict]:
                 "domain": r["domain"],
                 "confidence": r["confidence"],
                 "trace": json.loads(r["trace"]) if r["trace"] else [],
-                "timestamp": r["timestamp"]
+                "timestamp": r["timestamp"],
+                "images": parsed_images,
             })
         return history
