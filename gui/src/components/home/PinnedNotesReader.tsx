@@ -7,12 +7,14 @@
  * - Left rail: Navigation menu listing all pinned notes with active indicator, folder badge,
  *   hover-to-reveal unpin action, and a quick "+ Pin Another Note" launcher.
  * - Right pane: Full document reader with document stats, copy-markdown action,
- *   direct link to Vault explorer, and scrollable rendered Markdown content.
+ *   direct link to Vault explorer, auto-collapsed YAML frontmatter metadata,
+ *   and scrollable rendered Markdown content.
  */
 
-import React from "react";
+import React, { useState, useCallback } from "react";
 import Link from "next/link";
 import MarkdownMessage from "@/components/MarkdownMessage";
+import NoteFrontmatter from "@/components/NoteFrontmatter";
 import type { PinnedNotesReaderProps } from "./types";
 
 /**
@@ -39,9 +41,26 @@ export default function PinnedNotesReader({
 }: PinnedNotesReaderProps) {
   const activeNote = activeReaderPath ? noteDataMap[activeReaderPath] : null;
   const isCopied = activeReaderPath ? copiedPath === activeReaderPath : false;
-  const wordCount = activeNote?.content
-    ? activeNote.content.split(/\s+/).filter(Boolean).length
-    : 0;
+
+  // expandedPath: track which note path currently has its frontmatter expanded (default null = all auto-collapsed)
+  // By matching against activeReaderPath, any note switch automatically starts in the collapsed state
+  const [expandedPath, setExpandedPath] = useState<string | null>(null);
+  const isFrontmatterExpanded = activeReaderPath ? expandedPath === activeReaderPath : false;
+  const toggleFrontmatter = useCallback(() => {
+    if (!activeReaderPath) return;
+    setExpandedPath((prev) => (prev === activeReaderPath ? null : activeReaderPath));
+  }, [activeReaderPath]);
+
+  // Strip backend `--- File: <path> ---` tool wrapper header
+  const cleanContent = activeNote?.content
+    ? activeNote.content.replace(/^---\s*File:[^\n]*---\r?\n\r?\n?/i, "")
+    : "";
+
+  // Separate YAML frontmatter block from markdown document body
+  const fmMatch = cleanContent ? cleanContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/) : null;
+  const frontmatterRaw = fmMatch ? fmMatch[1] : null;
+  const markdownBody = fmMatch ? cleanContent.slice(fmMatch[0].length) : cleanContent;
+  const wordCount = markdownBody ? markdownBody.split(/\s+/).filter(Boolean).length : 0;
 
   return (
     <div className="flex-1 flex flex-col lg:flex-row gap-5 min-h-[600px]">
@@ -82,7 +101,7 @@ export default function PinnedNotesReader({
                 <button
                   type="button"
                   onClick={(e) => onUnpinNote(path, e)}
-                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 text-text-muted hover:text-accent-rose rounded transition-opacity"
+                  className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 text-text-muted hover:text-accent-rose rounded transition-opacity cursor-pointer"
                   title="Unpin note"
                 >
                   <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -98,7 +117,7 @@ export default function PinnedNotesReader({
           <button
             type="button"
             onClick={onOpenPinModal}
-            className="w-full py-2 rounded-xl border border-dashed border-border-subtle hover:border-accent-cyan/40 text-text-muted hover:text-accent-cyan text-xs font-medium transition-all flex items-center justify-center gap-1.5"
+            className="w-full py-2 rounded-xl border border-dashed border-border-subtle hover:border-accent-cyan/40 text-text-muted hover:text-accent-cyan text-xs font-medium transition-all flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <span>+</span>
             <span>Pin Another Note</span>
@@ -119,7 +138,7 @@ export default function PinnedNotesReader({
                 <div className="flex items-center flex-wrap gap-2 text-xs text-text-muted font-mono">
                   <span className="break-all">{activeNote.path}</span>
                   <span>•</span>
-                  <span>{wordCount} words</span>
+                  <span>{wordCount.toLocaleString()} words</span>
                 </div>
               </div>
 
@@ -127,8 +146,8 @@ export default function PinnedNotesReader({
                 {/* Copy Markdown */}
                 <button
                   type="button"
-                  onClick={() => onCopyNote(activeReaderPath, activeNote.content || "")}
-                  className="px-2.5 py-1.5 rounded-lg border border-border-subtle bg-bg-surface hover:text-accent-cyan text-xs font-medium transition-all flex items-center gap-1.5"
+                  onClick={() => onCopyNote(activeReaderPath, cleanContent || "")}
+                  className="px-2.5 py-1.5 rounded-lg border border-border-subtle bg-bg-surface hover:text-accent-cyan text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   {isCopied ? (
                     <>
@@ -161,7 +180,7 @@ export default function PinnedNotesReader({
                 <button
                   type="button"
                   onClick={() => onUnpinNote(activeReaderPath)}
-                  className="px-2.5 py-1.5 rounded-lg border border-border-subtle bg-bg-surface hover:text-accent-rose hover:border-accent-rose/30 text-xs font-medium transition-all flex items-center gap-1.5 text-text-muted"
+                  className="px-2.5 py-1.5 rounded-lg border border-border-subtle bg-bg-surface hover:text-accent-rose hover:border-accent-rose/30 text-xs font-medium transition-all flex items-center gap-1.5 text-text-muted cursor-pointer"
                 >
                   <span>Unpin</span>
                 </button>
@@ -173,7 +192,7 @@ export default function PinnedNotesReader({
               {activeNote.loading ? (
                 <div className="py-20 flex flex-col items-center justify-center text-text-muted gap-2">
                   <span className="w-5 h-5 border-2 border-accent-cyan/30 border-t-accent-cyan rounded-full animate-spin"></span>
-                  <span className="text-xs">Reading note from Vault...</span>
+                  <span className="text-xs font-mono">Reading note from Vault...</span>
                 </div>
               ) : activeNote.error ? (
                 <div className="p-4 rounded-xl bg-accent-rose/10 border border-accent-rose/20 text-accent-rose text-xs space-y-2">
@@ -181,9 +200,19 @@ export default function PinnedNotesReader({
                   <p className="text-text-muted">{activeNote.error}</p>
                 </div>
               ) : (
-                <div className="prose prose-invert max-w-4xl mx-auto">
+                <div className="prose prose-invert max-w-4xl mx-auto space-y-5">
+                  {/* Auto-Collapsing Frontmatter Panel */}
+                  {frontmatterRaw && (
+                    <NoteFrontmatter
+                      rawYaml={frontmatterRaw}
+                      isExpanded={isFrontmatterExpanded}
+                      onToggleExpand={toggleFrontmatter}
+                    />
+                  )}
+
+                  {/* Rendered Document Body */}
                   <MarkdownMessage
-                    content={activeNote.content || "_Note is empty._"}
+                    content={markdownBody || "_Note is empty._"}
                   />
                 </div>
               )}
@@ -199,4 +228,3 @@ export default function PinnedNotesReader({
     </div>
   );
 }
-

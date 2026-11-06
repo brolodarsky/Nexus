@@ -8,7 +8,7 @@
  * height controls, unpin action, loading/error states, and rendered markdown content with word metrics.
  */
 
-import React from "react";
+import React, { useMemo } from "react";
 import Link from "next/link";
 import MarkdownMessage from "@/components/MarkdownMessage";
 import type { PinnedNoteCardProps } from "./types";
@@ -44,7 +44,18 @@ export default function PinnedNoteCard({
   // Derive clean title from data or filename fallback
   const displayTitle = data?.title || path.split("/").pop()?.replace(/\.md$/, "");
   const displayFolder = data?.folder || "Vault Root";
-  const wordCount = data?.content ? data.content.split(/\s+/).filter(Boolean).length : 0;
+
+  // Clean raw content by stripping backend tool headers and frontmatter so compact cards reveal note body immediately
+  const rawContent = data?.content;
+  const previewBody = useMemo(() => {
+    if (!rawContent) return "";
+    return rawContent
+      .replace(/^---\s*File:[^\n]*---\r?\n\r?\n?/i, "")
+      .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")
+      .trim();
+  }, [rawContent]);
+
+  const wordCount = previewBody ? previewBody.split(/\s+/).filter(Boolean).length : 0;
 
   return (
     <div className="glass-card flex flex-col border border-border-subtle bg-bg-card hover:border-border-accent/50 transition-all rounded-2xl overflow-hidden shadow-lg group">
@@ -74,7 +85,7 @@ export default function PinnedNoteCard({
             <button
               type="button"
               onClick={onMovePrev}
-              className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors"
+              className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors cursor-pointer"
               title="Move pin left"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -88,7 +99,7 @@ export default function PinnedNoteCard({
             <button
               type="button"
               onClick={onMoveNext}
-              className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors"
+              className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors cursor-pointer"
               title="Move pin right"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -101,7 +112,7 @@ export default function PinnedNoteCard({
           <button
             type="button"
             onClick={onCopy}
-            className="p-1 rounded text-text-muted hover:text-accent-cyan hover:bg-bg-surface transition-colors"
+            className="p-1 rounded text-text-muted hover:text-accent-cyan hover:bg-bg-surface transition-colors cursor-pointer"
             title={isCopied ? "Copied to clipboard!" : "Copy markdown"}
           >
             {isCopied ? (
@@ -129,7 +140,7 @@ export default function PinnedNoteCard({
           <button
             type="button"
             onClick={onToggleExpand}
-            className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors"
+            className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors cursor-pointer"
             title={isExpanded ? "Collapse height" : "Expand full height"}
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -145,7 +156,7 @@ export default function PinnedNoteCard({
           <button
             type="button"
             onClick={onUnpin}
-            className="p-1 rounded text-text-muted hover:text-accent-rose hover:bg-accent-rose/10 transition-colors ml-0.5"
+            className="p-1 rounded text-text-muted hover:text-accent-rose hover:bg-accent-rose/10 transition-colors ml-0.5 cursor-pointer"
             title="Unpin note from home page"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -173,14 +184,14 @@ export default function PinnedNoteCard({
             <button
               type="button"
               onClick={onUnpin}
-              className="text-[0.7rem] text-accent-rose underline hover:opacity-80 pt-1"
+              className="text-[0.7rem] text-accent-rose underline hover:opacity-80 pt-1 cursor-pointer"
             >
               Unpin this missing note
             </button>
           </div>
         ) : (
           <div className="prose prose-invert max-w-none">
-            <MarkdownMessage content={data?.content || "_Note is empty._"} />
+            <MarkdownMessage content={previewBody || "_Note is empty._"} />
           </div>
         )}
       </div>
@@ -191,10 +202,9 @@ export default function PinnedNoteCard({
           {path}
         </span>
         <span>
-          {data?.content ? `${wordCount} words` : ""}
+          {previewBody ? `${wordCount} words` : ""}
         </span>
       </div>
     </div>
   );
 }
-
