@@ -2,7 +2,7 @@
  * stream.ts — Server-Sent Events (SSE) streaming client and telemetry trace types for Nexus Agent execution.
  */
 
-import { API_BASE } from "./client";
+import { getApiBase } from "./client";
 
 // Discriminated union of trace events emitted during live agent graph execution
 export interface TraceEvent {
@@ -63,7 +63,8 @@ export function askBrainStream(
   // Immediately-Invoked Async Function Expression (IIFE) to run async streaming logic
   (async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/agents/ask/stream`, {
+      // getApiBase(): Dynamically targets the host's backend port (e.g. over LAN/Tailscale) without proxy buffering
+      const res = await fetch(`${getApiBase()}/api/agents/ask/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

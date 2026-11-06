@@ -2,8 +2,41 @@
  * client.ts — Base HTTP client, generic fetch wrapper, and custom error types for Nexus API.
  */
 
-// process.env: Node/Next.js environment variables. NEXT_PUBLIC_ prefix exposes the variable to the client-side browser.
-// ?? (Nullish Coalescing): Falls back to default 'http://127.0.0.1:8000' if env variable is null or undefined.
+/**
+ * Resolves the base URL for the Nexus FastAPI backend dynamically at runtime.
+ *
+ * Why this is dynamic instead of a static constant:
+ * - When accessing the Next.js Control Panel from a remote device (e.g., a phone over Tailscale
+ *   at `http://100.x.y.z:3000` or a local network client at `http://192.168.x.y:3000`), hardcoding
+ *   `127.0.0.1:8000` causes browser requests to attempt connecting to the phone's own localhost.
+ * - By dynamically extracting `window.location.hostname` in client environments, browser requests
+ *   automatically route to the host machine's port 8000 without requiring an intermediary reverse proxy
+ *   that could buffer or disrupt Server-Sent Events (SSE) streaming connections.
+ *
+ * Priority:
+ * 1. Explicit `NEXT_PUBLIC_API_URL` override if set in the environment.
+ * 2. Browser runtime: `http://${window.location.hostname}:8000` (LAN IP, Tailscale IP, MagicDNS, or localhost).
+ * 3. Server-Side Rendering (SSR) fallback: `"http://127.0.0.1:8000"`.
+ *
+ * @returns The fully qualified HTTP origin string for API calls.
+ */
+export function getApiBase(): string {
+  // If an explicit API URL is provided via environment variables, prioritize it
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+
+  // typeof window !== "undefined": Guards against execution during Node.js SSR / build-time prerendering
+  if (typeof window !== "undefined" && window.location?.hostname) {
+    return `http://${window.location.hostname}:8000`;
+  }
+
+  // Default fallback for SSR or non-browser environments
+  return "http://127.0.0.1:8000";
+}
+
+// Backward-compatible constant fallback for static contexts or external modules.
+// Callers should invoke getApiBase() to guarantee dynamic runtime host resolution in browser sessions.
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 // Interface describing the health status payload returned by GET /api/health
@@ -30,9 +63,12 @@ export class ApiError extends Error {
 // RequestInit: Built-in TypeScript interface for fetch options (method, headers, body, signal)
 // Promise<T>: Asynchronous handle that resolves with the parsed JSON data of type T
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  // getApiBase(): Evaluates dynamic host at call time (e.g. phone browser on Tailscale/LAN vs localhost)
+  const baseUrl = getApiBase();
+
   // await: Pauses function execution non-blockingly until the HTTP request completes
   // ...init: Object spread operator copying user-provided options into the request configuration
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",

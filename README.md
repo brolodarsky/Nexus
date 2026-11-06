@@ -35,6 +35,7 @@ Nexus/
 │       └── release.md                # Release compilation & changelog bump
 ├── .changeset/                 # Release fragments
 ├── .venv/                      # Python virtual environment (not committed)
+├── gui/                        # Next.js 16 Control Panel (Mobile PWA & Desktop)
 ├── scripts/                    # Maintenance & release utilities
 │   ├── audit_career_drift.py   # Tier-1 career document drift auditor
 │   ├── release.py              # Changeset compiler & release automation
