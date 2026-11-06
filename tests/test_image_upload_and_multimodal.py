@@ -173,3 +173,59 @@ def test_resolve_image_to_data_url():
             resolve_image_to_data_url("/api/agents/uploads/non_existent_file_9999.png")
     finally:
         (UPLOADS_DIR / filename).unlink(missing_ok=True)
+
+
+def test_get_chat_history_preserves_conversations_over_50_messages():
+    """
+    Verifies that conversations with >50 messages (e.g. 55 messages with image attachments at turn 53)
+    are returned in full without being truncated by the default limit, while honoring explicit limit params.
+    """
+    init_db()
+    conv_id = create_conversation("Long History & Image Attachment Test")
+    try:
+        # Insert 52 background turns
+        for i in range(52):
+            log_message(
+                role="user" if i % 2 == 0 else "assistant",
+                content=f"Message {i+1}",
+                conversation_id=conv_id,
+            )
+        
+        # Turn 53: user uploads an image attachment
+        img_url = "/api/agents/uploads/test_long_history_attachment.png"
+        log_message(
+            role="user",
+            content="Analyze this screenshot",
+            conversation_id=conv_id,
+            images=[img_url],
+        )
+
+        # Turn 54: assistant replies to the image
+        log_message(
+            role="assistant",
+            content="Here is the detailed analysis of the screenshot.",
+            conversation_id=conv_id,
+        )
+
+        # 1. Unbounded query (default limit=None) via Python chats_db layer
+        full_history = get_chat_history(conv_id)
+        assert len(full_history) == 54
+        assert full_history[52]["role"] == "user"
+        assert full_history[52]["images"] == [img_url]
+        assert full_history[53]["role"] == "assistant"
+        assert full_history[53]["content"] == "Here is the detailed analysis of the screenshot."
+
+        # 2. HTTP GET endpoint /api/agents/ask/history without limit parameter
+        api_res = client.get(f"/api/agents/ask/history?conversation_id={conv_id}")
+        assert api_res.status_code == 200
+        api_history = api_res.json()
+        assert len(api_history) == 54
+        assert api_history[52]["images"] == [img_url]
+
+        # 3. HTTP GET endpoint with explicit limit parameter (e.g. limit=10)
+        api_limited_res = client.get(f"/api/agents/ask/history?conversation_id={conv_id}&limit=10")
+        assert api_limited_res.status_code == 200
+        assert len(api_limited_res.json()) == 10
+    finally:
+        delete_conversation(conv_id)
+

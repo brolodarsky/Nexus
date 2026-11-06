@@ -108,15 +108,32 @@ def log_message(
         conn.execute("UPDATE conversations SET last_updated = ? WHERE id = ?", (now, conversation_id))
         conn.commit()
 
-def get_chat_history(conversation_id: str, limit: int = 50) -> list[dict]:
+def get_chat_history(conversation_id: str, limit: int | None = None) -> list[dict]:
+    """
+    Retrieves the chronological chat history for a given conversation UUID.
+
+    Parameters:
+    - conversation_id: The UUID of the conversation thread.
+    - limit: Optional maximum number of messages to fetch from the start of the thread.
+             Defaults to None (unbounded), ensuring active conversations with >50 turns
+             never drop recent messages or attachments.
+    """
     with _get_conn() as conn:
-        rows = conn.execute("""
-            SELECT role, content, agent, domain, confidence, trace, timestamp, images 
-            FROM messages 
-            WHERE conversation_id = ? 
-            ORDER BY id ASC
-            LIMIT ?
-        """, (conversation_id, limit)).fetchall()
+        if limit is not None:
+            rows = conn.execute("""
+                SELECT role, content, agent, domain, confidence, trace, timestamp, images 
+                FROM messages 
+                WHERE conversation_id = ? 
+                ORDER BY id ASC
+                LIMIT ?
+            """, (conversation_id, limit)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT role, content, agent, domain, confidence, trace, timestamp, images 
+                FROM messages 
+                WHERE conversation_id = ? 
+                ORDER BY id ASC
+            """, (conversation_id,)).fetchall()
         
         history = []
         for r in rows:

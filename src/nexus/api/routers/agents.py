@@ -282,9 +282,9 @@ async def auto_generate_conversation_title(conversation_id: str):
 
 # Returns message history for a specific conversation
 @router.get("/ask/history")
-async def ask_brain_history(conversation_id: str):
+async def ask_brain_history(conversation_id: str, limit: Optional[int] = None):
     """Returns the ordered chat history for a given conversation UUID."""
-    return get_chat_history(conversation_id=conversation_id)
+    return get_chat_history(conversation_id=conversation_id, limit=limit)
 
 
 # Synchronous (non-streaming) one-shot agent execution
