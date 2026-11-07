@@ -172,19 +172,21 @@ async def upload_image_file(file: UploadFile = File(...)):
         if total_pages == 0:
             raise HTTPException(status_code=400, detail="Uploaded PDF contains 0 pages.")
 
-        # Limit PDF page count to prevent unbounded server processing and token exhaustion
-        MAX_PDF_PAGES = 10
-        if total_pages > MAX_PDF_PAGES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"PDF document contains {total_pages} pages, exceeding the maximum limit of {MAX_PDF_PAGES} pages. Please upload a smaller excerpt.",
-            )
+        batch_id = uuid.uuid4().hex
+
+        # Save the full raw PDF file to disk so it can be accessed, read, or filed to the Vault
+        pdf_filename = f"{batch_id}.pdf"
+        pdf_out_path = UPLOADS_DIR / pdf_filename
+        pdf_out_path.write_bytes(file_bytes)
+
+        # Cap visual thumbnail rendering to first 10 pages to preserve token budgets and server latency
+        MAX_RENDER_PAGES = 10
+        render_page_count = min(total_pages, MAX_RENDER_PAGES)
 
         page_urls: list[str] = []
-        batch_id = uuid.uuid4().hex
         first_dims = (0, 0)
 
-        for page_idx in range(total_pages):
+        for page_idx in range(render_page_count):
             page = doc[page_idx]
             # Supersample at 2.0x (144-150 DPI) to ensure small 8pt typography, decimal points, and borders stay crisp
             zoom_matrix = pymupdf.Matrix(2.0, 2.0)
@@ -207,9 +209,13 @@ async def upload_image_file(file: UploadFile = File(...)):
         return {
             "url": primary_url,
             "page_urls": page_urls,
-            "filename": f"{batch_id}.pdf",
+            "filename": pdf_filename,
+            "original_filename": Path(raw_filename).name or "document.pdf",
             "mime_type": "application/pdf",
             "page_count": total_pages,
+            "rendered_pages": len(page_urls),
+            "pdf_url": f"/api/agents/uploads/{pdf_filename}",
+            "pdf_path": str(pdf_out_path),
             "width": first_dims[0],
             "height": first_dims[1],
         }

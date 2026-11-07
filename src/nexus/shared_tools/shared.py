@@ -275,11 +275,16 @@ def modify_file(
         if resolved_path is not None:
             try:
                 disk_content: Optional[str] = resolved_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                disk_content = f"[Binary file ({resolved_path.stat().st_size} bytes)]"
             except Exception as e:
                 return f"Error reading existing file '{file_path}': {e}"
         else:
             pending_new = get_pending_for_file(file_path)
             disk_content = pending_new.get("original_content") if pending_new else None
+
+        if disk_content and disk_content.startswith("[Binary file:"):
+            return f"Error: Cannot perform text patch on binary file '{file_path}'. Binary files cannot be modified via `modify_file`."
 
         # Check if there is already a pending HITL edit for this file so we stack on top of `proposed_content`
         pending_tx = get_pending_for_file(hitl_target_file)
@@ -491,6 +496,8 @@ def move_file(
             if resolved_src is not None:
                 try:
                     disk_content: Optional[str] = resolved_src.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    disk_content = f"[Binary file ({resolved_src.stat().st_size} bytes)]"
                 except Exception as e:
                     return f"Error reading source file '{source_path}': {e}"
             else:
@@ -581,6 +588,8 @@ def delete_file(
         if resolved_path is not None:
             try:
                 disk_content: Optional[str] = resolved_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                disk_content = f"[Binary file ({resolved_path.stat().st_size} bytes)]"
             except Exception as e:
                 return f"Error reading existing file '{file_path}': {e}"
         else:

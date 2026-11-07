@@ -4,6 +4,7 @@ import json
 import difflib
 # os.replace: Atomic rename on the same volume (POSIX + Windows), so readers never see a half-written note
 import os
+import shutil
 # threading.RLock: Re-entrant process lock allowing the same thread to acquire the lock multiple times
 # (e.g., modify_file holding the lock while calling add_transaction) without causing a self-deadlock.
 # defaultdict: Automatically instantiates a new RLock on first access for any unseen target file path.
@@ -490,11 +491,14 @@ def _resolve_commit_path(target_file: str, root: Path) -> Path:
 
 
 def _read_disk(path: Path) -> Optional[str]:
-    """Reads current note text exactly as stored (`newline=""` preserves CRLF), or `None` if the file is absent."""
+    """Reads current note text exactly as stored (`newline=""` preserves CRLF), or metadata placeholder if binary, or `None` if the file is absent."""
     if not path.exists():
         return None
-    with open(path, "r", encoding="utf-8", newline="") as f:
-        return f.read()
+    try:
+        with open(path, "r", encoding="utf-8", newline="") as f:
+            return f.read()
+    except UnicodeDecodeError:
+        return f"[Binary file ({path.stat().st_size} bytes)]"
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -598,6 +602,15 @@ def commit_transaction(tx_id: int, root: Path, force: bool = False) -> Dict[str,
                 dst_current,
             )
 
+        # Check if source is a binary file (e.g. PDF, images, audio)
+        is_binary = False
+        if src_path.exists():
+            try:
+                with open(src_path, "r", encoding="utf-8", newline="") as f:
+                    f.read(1024)
+            except UnicodeDecodeError:
+                is_binary = True
+
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
@@ -609,9 +622,20 @@ def commit_transaction(tx_id: int, root: Path, force: bool = False) -> Dict[str,
                 (tx_id, tx["target_file"], dest_target, src_current, tx["proposed_content"]),
             )
             revision_id = cursor.lastrowid
-            _atomic_write(dst_path, tx["proposed_content"])
-            if src_path.exists() and src_path.resolve() != dst_path.resolve():
-                src_path.unlink()
+
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            if is_binary:
+                # Atomically copy and replace binary file bytes without UTF-8 string encoding corruption
+                tmp_dst = dst_path.with_name(f".{dst_path.name}.hitl-tmp")
+                shutil.copy2(src_path, tmp_dst)
+                os.replace(tmp_dst, dst_path)
+                if src_path.exists() and src_path.resolve() != dst_path.resolve():
+                    src_path.unlink()
+            else:
+                _atomic_write(dst_path, tx["proposed_content"])
+                if src_path.exists() and src_path.resolve() != dst_path.resolve():
+                    src_path.unlink()
+
             cursor.execute("UPDATE transactions SET status = 'approved' WHERE id = ?", (tx_id,))
             conn.commit()
         except Exception:
@@ -718,9 +742,22 @@ def rollback_transaction(tx_id: int, root: Path, force: bool = False) -> Dict[st
                     current_src,
                 )
 
+            # Detect if destination is a binary file
+            is_binary = False
             if dst_path.exists():
-                dst_path.unlink()
-            _atomic_write(src_path, rev["prior_content"] or "")
+                try:
+                    with open(dst_path, "r", encoding="utf-8", newline="") as f:
+                        f.read(1024)
+                except UnicodeDecodeError:
+                    is_binary = True
+
+            if is_binary and dst_path.exists():
+                src_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(dst_path), str(src_path))
+            else:
+                if dst_path.exists():
+                    dst_path.unlink()
+                _atomic_write(src_path, rev["prior_content"] or "")
 
             cursor.execute(
                 '''

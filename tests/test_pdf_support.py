@@ -18,7 +18,8 @@ import pymupdf
 from nexus.api.main import app
 from nexus.core.constants import PROJECT_ROOT, VAULT_PATH
 from nexus.shared_tools.vault_reader import read_note_content, resolve_vault_note_path, _read_pdf_content
-from nexus.shared_tools.shared import read_file
+from nexus.shared_tools.shared import read_file, move_file, delete_file
+from nexus.core.hitl_queue import commit_transaction, rollback_transaction
 
 client = TestClient(app)
 UPLOADS_DIR = PROJECT_ROOT / "logs" / "uploads"
@@ -161,15 +162,107 @@ def test_upload_valid_multipage_pdf():
         f.unlink(missing_ok=True)
 
 
-def test_upload_oversized_pdf_page_limit():
-    """Validates that PDFs exceeding the maximum 10-page limit are rejected with HTTP 400."""
-    oversized_pdf = create_in_memory_pdf(pages=11, text_per_page="Overflow Page")
+def test_upload_multipage_pdf_thumbnail_capping():
+    """Validates that PDFs exceeding 10 pages (like a 12-page manual) are accepted, saving the raw PDF and capping visual thumbnails to 10."""
+    multipage_pdf = create_in_memory_pdf(pages=12, text_per_page="Manual Page Content")
     response = client.post(
         "/api/agents/upload",
-        files={"file": ("too_long.pdf", oversized_pdf, "application/pdf")},
+        files={"file": ("air_purifier_manual.pdf", multipage_pdf, "application/pdf")},
     )
-    assert response.status_code == 400
-    assert "exceeding the maximum limit of 10 pages" in response.json()["detail"]
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mime_type"] == "application/pdf"
+    assert data["page_count"] == 12
+    assert data["rendered_pages"] == 10
+    assert len(data["page_urls"]) == 10
+    assert "pdf_url" in data
+    assert "pdf_path" in data
+
+    # Verify that the raw PDF exists on disk in logs/uploads/
+    raw_pdf_path = UPLOADS_DIR / data["filename"]
+    assert raw_pdf_path.is_file()
+    assert raw_pdf_path.stat().st_size == len(multipage_pdf)
+
+    # Clean up all created assets
+    raw_pdf_path.unlink(missing_ok=True)
+    for p_url in data["page_urls"]:
+        fname = p_url.split("/")[-1]
+        (UPLOADS_DIR / fname).unlink(missing_ok=True)
+
+
+def test_move_file_binary_pdf():
+    """Validates that move_file handles binary PDF documents without UTF-8 decode errors, commits atomically, and supports rollback."""
+    test_pdf_bytes = create_in_memory_pdf(pages=2, text_per_page="Binary Move Test Content")
+    inbox_dir = VAULT_PATH / "0. Inbox"
+    inbox_dir.mkdir(parents=True, exist_ok=True)
+
+    src_file = inbox_dir / "test_binary_move_src.pdf"
+    dst_file = inbox_dir / "test_binary_move_dst.pdf"
+    src_file.write_bytes(test_pdf_bytes)
+
+    try:
+        # 1. Stage move via tool
+        result = move_file.invoke({
+            "source_path": "0. Inbox/test_binary_move_src.pdf",
+            "destination_path": "0. Inbox/test_binary_move_dst.pdf",
+            "reasoning": "Moving binary manual to target section",
+        })
+        assert "File move staged to HITL queue" in result
+        assert "Transaction #" in result
+
+        # Extract transaction ID
+        import re
+        tx_match = re.search(r"Transaction #(\d+)", result)
+        assert tx_match is not None
+        tx_id = int(tx_match.group(1))
+
+        # 2. Commit transaction via HITL commit
+        commit_res = commit_transaction(tx_id, root=PROJECT_ROOT)
+        assert commit_res["target_file"] == "Vault/0. Inbox/test_binary_move_src.pdf"
+        assert not src_file.exists()
+        assert dst_file.exists()
+        assert dst_file.read_bytes() == test_pdf_bytes
+
+        # 3. Rollback transaction
+        rollback_res = rollback_transaction(tx_id, root=PROJECT_ROOT)
+        assert src_file.exists()
+        assert not dst_file.exists()
+        assert src_file.read_bytes() == test_pdf_bytes
+
+    finally:
+        src_file.unlink(missing_ok=True)
+        dst_file.unlink(missing_ok=True)
+
+
+def test_delete_file_binary_pdf():
+    """Validates that delete_file handles binary PDF documents without UTF-8 decode errors."""
+    test_pdf_bytes = create_in_memory_pdf(pages=1, text_per_page="Binary Deletion Test")
+    inbox_dir = VAULT_PATH / "0. Inbox"
+    inbox_dir.mkdir(parents=True, exist_ok=True)
+
+    del_file = inbox_dir / "test_binary_delete.pdf"
+    del_file.write_bytes(test_pdf_bytes)
+
+    try:
+        # 1. Stage deletion via tool
+        result = delete_file.invoke({
+            "file_path": "0. Inbox/test_binary_delete.pdf",
+            "reasoning": "Cleaning up obsolete binary document",
+        })
+        assert "File deletion staged to HITL queue" in result
+        assert "Transaction #" in result
+
+        import re
+        tx_match = re.search(r"Transaction #(\d+)", result)
+        assert tx_match is not None
+        tx_id = int(tx_match.group(1))
+
+        # 2. Commit deletion
+        commit_transaction(tx_id, root=PROJECT_ROOT)
+        assert not del_file.exists()
+
+    finally:
+        del_file.unlink(missing_ok=True)
 
 
 def test_upload_corrupted_pdf():
