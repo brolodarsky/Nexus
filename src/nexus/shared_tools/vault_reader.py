@@ -183,30 +183,186 @@ def _parse_frontmatter_tags(content: str) -> list:
 
 
 # Optional[int] (int | None) allows callers to optionally slice a specific 1-indexed line range (start_line..end_line) for large files.
+# Optional[int] for start_page/end_page allows document callers to inspect specific page slices of multi-page PDF documents.
+def _read_pdf_content(
+    pdf_path: Path,
+    rel_path: Path,
+    start_page: Optional[int] = None,
+    end_page: Optional[int] = None,
+    start_line: Optional[int] = None,
+    end_line: Optional[int] = None,
+) -> str:
+    """Reads and extracts text, structured tables, and layout-aware content from a PDF document.
+
+    Utilizes PyMuPDF (`pymupdf`) to extract text with columnar block sorting and convert detected
+    tabular regions directly into GitHub Flavored Markdown tables (`tab.to_markdown()`).
+    Flags scanned/image-only pages where text density is near zero so agents recognize image documents.
+
+    Args:
+        pdf_path: Absolute resolved Path to the target PDF file on disk.
+        rel_path: Vault-relative Path for header display.
+        start_page: Optional 1-indexed starting page number (inclusive).
+        end_page: Optional 1-indexed ending page number (inclusive).
+        start_line: Optional 1-indexed starting line number of the assembled text (inclusive).
+        end_line: Optional 1-indexed ending line number of the assembled text (inclusive).
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        return f"Error reading PDF {rel_path}: 'pymupdf' package is not installed."
+
+    try:
+        # Open PDF document handle using PyMuPDF context manager for deterministic resource disposal
+        with pymupdf.open(pdf_path) as doc:
+            total_pages = len(doc)
+            if total_pages == 0:
+                return f"--- File: {rel_path} (Empty PDF document, 0 pages) ---"
+
+            s_page = max(1, start_page) if start_page and start_page > 0 else 1
+            e_page = min(total_pages, end_page) if end_page and end_page > 0 else total_pages
+
+            if s_page > total_pages:
+                return (
+                    f"Error: Requested start_page ({s_page}) exceeds total document pages "
+                    f"({total_pages}) in '{rel_path}'."
+                )
+
+            extracted_sections: List[str] = []
+
+            # Iterate 0-indexed page indices within requested [s_page-1, e_page) bounds
+            for page_idx in range(s_page - 1, e_page):
+                # Assign to persistent local variable to avoid weakref garbage collection during table analysis
+                page = doc[page_idx]
+                page_num = page_idx + 1
+
+                # 1. Detect tabular structures via PyMuPDF native table recognition
+                table_entries: List[Tuple[Tuple[float, float, float, float], str]] = []
+                try:
+                    tabs = page.find_tables()
+                    if tabs and tabs.tables:
+                        for tab in tabs:
+                            try:
+                                md_tab = tab.to_markdown()
+                                if md_tab and md_tab.strip():
+                                    table_entries.append((tab.bbox, md_tab.strip()))
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                # 2. Extract layout-aware text blocks sorted top-to-bottom, column-by-column
+                # Each block tuple: (x0, y0, x1, y1, text, block_no, block_type) where block_type == 0 is text
+                page_items: List[Tuple[float, str]] = []
+                try:
+                    blocks = page.get_text("blocks", sort=True)
+                except Exception:
+                    blocks = []
+
+                for b in blocks:
+                    # Filter for text blocks (block_type 0) with non-whitespace content
+                    is_text_block = b[6] == 0 if len(b) > 6 else True
+                    if len(b) >= 5 and is_text_block:
+                        block_text = b[4].strip()
+                        if not block_text:
+                            continue
+
+                        # Check if this text block intersects any detected table bounding box
+                        block_rect = pymupdf.Rect(b[:4])
+                        intersects_table = any(
+                            block_rect.intersects(pymupdf.Rect(t_bbox))
+                            for t_bbox, _ in table_entries
+                        )
+                        # Exclude duplicate text that is already captured inside a markdown table
+                        if not intersects_table:
+                            # Use vertical coordinate y0 (b[1]) for natural page reading sequence
+                            page_items.append((b[1], block_text))
+
+                # Inject detected markdown tables positioned by their top boundary (bbox y0)
+                for t_bbox, t_markdown in table_entries:
+                    page_items.append((t_bbox[1], t_markdown))
+
+                # Sort combined text blocks and markdown tables in chronological reading order
+                page_items.sort(key=lambda item: item[0])
+                page_text = "\n\n".join(item[1] for item in page_items if item[1])
+
+                # 3. Detect scanned / image-only pages (< 50 chars of extractable text)
+                if len(page_text.strip()) < 50:
+                    try:
+                        images = page.get_images()
+                        img_count = len(images)
+                    except Exception:
+                        img_count = 0
+
+                    if img_count > 0:
+                        page_text = (
+                            f"[Page {page_num}: Scanned or image document ({img_count} embedded image(s), "
+                            f"low text layer density). Use chat upload for multimodal vision inspection.]\n"
+                            + (f"\n{page_text}" if page_text.strip() else "")
+                        )
+
+                extracted_sections.append(
+                    f"--- Page {page_num} of {total_pages} ---\n\n{page_text if page_text.strip() else '[No text on page]'}"
+                )
+
+            full_extracted = "\n\n".join(extracted_sections)
+
+            # Optional line slicing on the final assembled text
+            if start_line is not None or end_line is not None:
+                lines = full_extracted.splitlines()
+                total_lines = len(lines)
+                s_idx = max(0, (start_line - 1) if start_line and start_line > 0 else 0)
+                e_idx = min(total_lines, end_line if end_line is not None else total_lines)
+                sliced_body = "\n".join(lines[s_idx:e_idx])
+                return (
+                    f"--- File: {rel_path} (pages {s_page}-{e_page} of {total_pages}, "
+                    f"lines {s_idx + 1}-{e_idx} of {total_lines}) ---\n\n{sliced_body}"
+                )
+
+            return f"--- File: {rel_path} (pages {s_page}-{e_page} of {total_pages}) ---\n\n{full_extracted}"
+    except Exception as exc:
+        return f"Error reading PDF file {rel_path}: {str(exc)}"
+
+
 def read_note_content(
     note_path: str,
     domain_path: Optional[str] = None,
     start_line: Optional[int] = None,
     end_line: Optional[int] = None,
+    start_page: Optional[int] = None,
+    end_page: Optional[int] = None,
 ) -> str:
-    """Reads the contents of a specific note or file in the Vault.
+    """Reads the contents of a specific note or file in the Vault (supports Markdown, text, and PDF documents).
     
     Args:
         note_path: The file name or relative path.
         domain_path: Optional path relative to Vault to restrict search and resolution.
         start_line: Optional 1-indexed starting line number (inclusive).
         end_line: Optional 1-indexed ending line number (inclusive).
+        start_page: Optional 1-indexed starting page for PDF documents (inclusive).
+        end_page: Optional 1-indexed ending page for PDF documents (inclusive).
     """
     resolved_path, err = resolve_vault_note_path(note_path, domain_path=domain_path)
     if err:
         return err
 
     try:
-        content = resolved_path.read_text(encoding="utf-8")
         try:
             rel_path = resolved_path.relative_to(VAULT_PATH.resolve())
         except ValueError:
             rel_path = resolved_path
+
+        # Check if target is a binary PDF document
+        if resolved_path.suffix.lower() == ".pdf":
+            return _read_pdf_content(
+                resolved_path,
+                rel_path=rel_path,
+                start_page=start_page,
+                end_page=end_page,
+                start_line=start_line,
+                end_line=end_line,
+            )
+
+        content = resolved_path.read_text(encoding="utf-8")
 
         # If line bounds are specified, slice the lines array (converting 1-indexed to 0-indexed Python slices)
         if start_line is not None or end_line is not None:

@@ -107,25 +107,33 @@ const ChatInputBar = memo(function ChatInputBar({
     syncTextareaHeight(inputRef.current);
   }, [input, inputSyncId, inputRef, isCollapsed]);
 
-  // Uploads one or more selected/pasted image files to the FastAPI /api/agents/upload endpoint
+  // Uploads one or more selected/pasted image or PDF files to the FastAPI /api/agents/upload endpoint
   const handleUploadFiles = async (files: FileList | File[]) => {
-    const imageFiles = Array.from(files).filter(
-      (f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)
+    const validFiles = Array.from(files).filter(
+      (f) =>
+        f.type.startsWith("image/") ||
+        f.type === "application/pdf" ||
+        /\.(png|jpe?g|webp|gif|bmp|pdf)$/i.test(f.name)
     );
-    if (imageFiles.length === 0) return;
+    if (validFiles.length === 0) return;
 
     setUploadError(null);
     setIsUploading(true);
     try {
       const uploadedUrls: string[] = [];
-      for (const file of imageFiles) {
+      for (const file of validFiles) {
         const res = await uploadImage(file);
-        uploadedUrls.push(res.url);
+        // If a multi-page PDF was uploaded and rasterized, stage all rendered page URLs
+        if (res.page_urls && res.page_urls.length > 0) {
+          uploadedUrls.push(...res.page_urls);
+        } else {
+          uploadedUrls.push(res.url);
+        }
       }
       onAddImages?.(uploadedUrls);
     } catch (err: unknown) {
-      console.error("Image upload failed:", err);
-      setUploadError(err instanceof Error ? err.message : "Failed to upload image.");
+      console.error("File upload failed:", err);
+      setUploadError(err instanceof Error ? err.message : "Failed to upload file.");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -354,8 +362,8 @@ const ChatInputBar = memo(function ChatInputBar({
             onPaste={handlePaste}
             placeholder={
               pendingImages.length > 0
-                ? "Add an optional prompt or question for the image..."
-                : "Type message, paste screenshot (Ctrl+V), or drag & drop image..."
+                ? "Add an optional prompt or question for the attachments..."
+                : "Type message, paste screenshot (Ctrl+V), or drag & drop image/PDF..."
             }
             disabled={loading}
             rows={1}
@@ -423,7 +431,7 @@ const ChatInputBar = memo(function ChatInputBar({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif,image/bmp"
+              accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,application/pdf,.pdf"
               multiple
               onChange={(e) => {
                 if (e.target.files) handleUploadFiles(e.target.files);
@@ -435,8 +443,8 @@ const ChatInputBar = memo(function ChatInputBar({
               type="button"
               disabled={loading || isUploading}
               onClick={() => fileInputRef.current?.click()}
-              title="Upload image or screenshot (PNG, JPG, WEBP, GIF)"
-              aria-label="Upload image"
+              title="Upload image or PDF document (PNG, JPG, WEBP, GIF, PDF)"
+              aria-label="Upload file"
               className="flex items-center justify-center w-10 h-10 md:w-9 md:h-9 rounded-xl text-text-muted hover:text-accent-cyan hover:bg-accent-cyan/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
             >
               <svg

@@ -128,29 +128,93 @@ _active_runs_lock = threading.Lock()
 
 # ── Image Upload & Asset Routes ──────────────────────────────
 
-# Accepts uploaded image files from the chat composer, validates and optimizes them
+# Accepts uploaded image files and PDF documents from the chat composer, validates and optimizes them
 @router.post("/upload")
 async def upload_image_file(file: UploadFile = File(...)):
     """
-    Accepts an uploaded image file, validates content type and image integrity,
-    resizes/optimizes oversized dimensions (max 1600px edge), persists the asset
-    to `logs/uploads/`, and returns its accessible relative URL path.
+    Accepts an uploaded image file or PDF document, validates content type and integrity,
+    resizes/optimizes oversized images (max 1600px edge), rasterizes multi-page PDFs
+    into crisp 2x supersampled PNG pages (max 10 pages), persists assets to `logs/uploads/`,
+    and returns accessible relative URL paths.
     """
     content_type = (file.content_type or "").lower()
     raw_filename = (file.filename or "").lower()
+    is_pdf = content_type == "application/pdf" or raw_filename.endswith(".pdf")
     is_image = content_type.startswith("image/") or raw_filename.endswith(
         (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
     )
-    if not is_image:
+    if not is_image and not is_pdf:
         raise HTTPException(
             status_code=400,
-            detail="Only image files (PNG, JPEG, WEBP, GIF, BMP) are supported.",
+            detail="Only image files (PNG, JPEG, WEBP, GIF, BMP) and PDF documents are supported.",
         )
 
     file_bytes = await file.read()
     if len(file_bytes) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=400, detail="Image size exceeds maximum 20MB limit.")
+        raise HTTPException(status_code=400, detail="File size exceeds maximum 20MB limit.")
 
+    # ── PDF Document Processing ──────────────────────────────────
+    if is_pdf:
+        try:
+            import pymupdf
+        except ImportError:
+            raise HTTPException(
+                status_code=500,
+                detail="PDF rendering engine ('pymupdf') is not installed on the server.",
+            )
+
+        try:
+            doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Corrupted or invalid PDF document: {str(exc)}")
+
+        total_pages = len(doc)
+        if total_pages == 0:
+            raise HTTPException(status_code=400, detail="Uploaded PDF contains 0 pages.")
+
+        # Limit PDF page count to prevent unbounded server processing and token exhaustion
+        MAX_PDF_PAGES = 10
+        if total_pages > MAX_PDF_PAGES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"PDF document contains {total_pages} pages, exceeding the maximum limit of {MAX_PDF_PAGES} pages. Please upload a smaller excerpt.",
+            )
+
+        page_urls: list[str] = []
+        batch_id = uuid.uuid4().hex
+        first_dims = (0, 0)
+
+        for page_idx in range(total_pages):
+            page = doc[page_idx]
+            # Supersample at 2.0x (144-150 DPI) to ensure small 8pt typography, decimal points, and borders stay crisp
+            zoom_matrix = pymupdf.Matrix(2.0, 2.0)
+            pix = page.get_pixmap(matrix=zoom_matrix, alpha=False)
+            page_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            # Cap oversized dimensions preserving aspect ratio with Lanczos antialiasing
+            if page_img.width > MAX_IMAGE_DIM or page_img.height > MAX_IMAGE_DIM:
+                page_img.thumbnail((MAX_IMAGE_DIM, MAX_IMAGE_DIM), Image.Resampling.LANCZOS)
+
+            if page_idx == 0:
+                first_dims = (page_img.width, page_img.height)
+
+            page_filename = f"{batch_id}_p{page_idx + 1}.png"
+            page_out_path = UPLOADS_DIR / page_filename
+            page_img.save(page_out_path, format="PNG", optimize=True)
+            page_urls.append(f"/api/agents/uploads/{page_filename}")
+
+        primary_url = page_urls[0]
+        return {
+            "url": primary_url,
+            "page_urls": page_urls,
+            "filename": f"{batch_id}.pdf",
+            "mime_type": "application/pdf",
+            "page_count": total_pages,
+            "width": first_dims[0],
+            "height": first_dims[1],
+        }
+
+    # ── Standard Image Processing ────────────────────────────────
     try:
         img = Image.open(io.BytesIO(file_bytes))
         img.verify()

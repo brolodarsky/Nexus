@@ -58,11 +58,14 @@ def get_vault_structure(path: Optional[str] = None) -> str:
 # ── 2. Vault File Reading & Search Tools ─────────────────────────────────────
 
 # Optional[int] parameters let the agent inspect specific line ranges of large logs or TOC files without blowing token budget.
+# Optional[int] start_page / end_page allow inspecting specific page ranges of PDF documents.
 @tool
 def read_file(
     file_path: str,
     start_line: Optional[int] = None,
     end_line: Optional[int] = None,
+    start_page: Optional[int] = None,
+    end_page: Optional[int] = None,
 ) -> str:
     """Read the contents of a note or file in the Vault (automatically reflects any pending staged HITL edits).
 
@@ -73,12 +76,16 @@ def read_file(
 
     You can pass a full Vault-relative path (e.g. "3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md")
     or a unique note title (e.g. "Job Hunt War Room" or "Health Summary.md").
+    Supports Markdown notes, plain-text files, and PDF documents (extracts text, Markdown tables, and layout).
     Optionally pass `start_line` and `end_line` (1-indexed, inclusive) to inspect a slice of a large file.
+    For PDF documents, optionally pass `start_page` and `end_page` (1-indexed, inclusive) to inspect target pages.
 
     Args:
         file_path: Relative path from Vault root or unique note filename.
         start_line: Optional 1-indexed starting line number (inclusive).
         end_line: Optional 1-indexed ending line number (inclusive).
+        start_page: Optional 1-indexed starting page for PDF documents (inclusive).
+        end_page: Optional 1-indexed ending page for PDF documents (inclusive).
     """
     from nexus.core.hitl_queue import get_pending_for_file
     from nexus.shared_tools.vault_reader import read_note_content, resolve_vault_note_path
@@ -142,6 +149,8 @@ def read_file(
         domain_path=None,
         start_line=start_line,
         end_line=end_line,
+        start_page=start_page,
+        end_page=end_page,
     )
 
 

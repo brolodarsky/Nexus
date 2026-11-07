@@ -222,12 +222,15 @@ export async function getAgentRun(runId: string): Promise<RunSnapshot> {
 }
 
 // Interface describing the JSON metadata returned by POST /api/agents/upload
+// Supports single images as well as rasterized multi-page PDF documents
 export interface UploadImageResponse {
-  url: string;         // Relative URL endpoint (e.g. /api/agents/uploads/<uuid>.png)
-  filename: string;    // Unique disk filename in logs/uploads/
-  mime_type: string;   // Image MIME type (e.g. image/png, image/jpeg)
-  width: number;       // Resized/verified pixel width
-  height: number;      // Resized/verified pixel height
+  url: string;           // Relative URL endpoint (e.g. /api/agents/uploads/<uuid>.png)
+  filename: string;      // Unique disk filename in logs/uploads/
+  mime_type: string;     // MIME type (e.g. image/png, application/pdf)
+  width: number;         // Resized/verified pixel width
+  height: number;        // Resized/verified pixel height
+  page_urls?: string[];  // For multi-page PDFs: array of all rendered page image URLs
+  page_count?: number;   // Total page count for PDF documents
 }
 
 // Resolves a relative upload path, absolute URL, or base64 data URI to an absolute URL for <img> tags
