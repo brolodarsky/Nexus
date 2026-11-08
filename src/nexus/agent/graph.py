@@ -70,7 +70,13 @@ from nexus.core.hitl_queue import (
     reset_hitl_execution_context,
     set_hitl_execution_context,
 )
-from nexus.core.trace import RESULT_TRUNCATE_LEN, AgentTracer, _truncate
+from nexus.core.trace import (
+    RESULT_TRUNCATE_LEN,
+    AgentTracer,
+    _truncate,
+    reset_trace_thread_id,
+    set_trace_thread_id,
+)
 from nexus.shared_tools.shared import (
     create_calendar_event,
     create_file,
@@ -114,7 +120,7 @@ def reset_subagent_counter() -> None:
         _active_turn_provider = None
 
 
-def _next_subagent_tracer(tier: str) -> tuple[int, str, AgentTracer]:
+def _next_subagent_tracer(tier: str, thread_id: Optional[str] = None) -> tuple[int, str, AgentTracer]:
     """Allocates a thread-safe sequential serial number and dedicated `AgentTracer` linked to `parent_id="nexus"`."""
     global _subagent_serial_counter
     with _subagent_counter_lock:
@@ -127,6 +133,7 @@ def _next_subagent_tracer(tier: str) -> tuple[int, str, AgentTracer]:
         color=color,
         agent_id=sub_id,
         parent_id="nexus",
+        thread_id=thread_id,
     )
     return serial, sub_id, tracer
 
@@ -389,8 +396,16 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
     sub_tier_arg = f"anthropic:{effective_tier}" if _active_turn_provider == "anthropic" else effective_tier
     sub_resolved = resolve_model_config(sub_tier_arg)
     sub_model_name = sub_resolved["model_name"]
-    serial, sub_id, local_tracer = _next_subagent_tracer(effective_tier)
+
+    # Propagate conversation_id from parent while scoping thread_id, agent_id, and agent_role to this subagent
+    parent_ctx = get_hitl_execution_context()
+    parent_convo = parent_ctx.get("conversation_id") or "nexus_primary"
+    parent_thread = parent_ctx.get("thread_id") or parent_convo
+    serial, sub_id, local_tracer = _next_subagent_tracer(effective_tier, thread_id=parent_convo)
     t0 = time.time()
+
+    # Scope trace context variable so all subagent events and tool calls inherit the conversation UUID
+    trace_token = set_trace_thread_id(parent_convo)
 
     # Emit full, untruncated task_prompt so the Thinking Panel, Graph View, and Run Logs capture 100% of the prompt
     local_tracer.agent_start(
@@ -398,6 +413,7 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
         metadata={
             "serial": serial,
             "subagent_id": sub_id,
+            "thread_id": parent_convo,
             "model_tier": effective_tier,
             "model_name": sub_model_name,
             "task_prompt": task_prompt,
@@ -427,10 +443,6 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
     posted_to_board = False
     turn_idx = 0
 
-    # Propagate conversation_id from parent while scoping thread_id, agent_id, and agent_role to this subagent
-    parent_ctx = get_hitl_execution_context()
-    parent_convo = parent_ctx.get("conversation_id") or "nexus_primary"
-    parent_thread = parent_ctx.get("thread_id") or parent_convo
     sub_thread_id = f"{parent_thread}:{sub_id}" if parent_thread else sub_id
     sub_ctx_token = set_hitl_execution_context(
         conversation_id=parent_convo,
@@ -492,6 +504,7 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
                 sub_messages.append(t_msg)
     finally:
         reset_hitl_execution_context(sub_ctx_token)
+        reset_trace_thread_id(trace_token)
 
 
 # ── Helper: Resilient ToolNode Execution with Synchronous In-Thread Fallback ─

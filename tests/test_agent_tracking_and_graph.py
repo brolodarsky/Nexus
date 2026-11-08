@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 import pytest
 
-from nexus.core.trace import AgentTracer, trace_bus
+from nexus.core.trace import AgentTracer, trace_bus, reset_trace_thread_id, set_trace_thread_id
 from nexus.agent.graph import _next_subagent_tracer, reset_subagent_counter
 from nexus.core.run_logger import log_run, list_runs, get_run, RUNS_DIR
 
@@ -169,3 +169,64 @@ def test_log_run_persists_subagents_and_token_telemetry(tmp_path: Path, monkeypa
     summary = summaries[0]
     assert summary["subagents_count"] == 1
     assert summary["input_query"] == "Research career files"
+
+
+def test_trace_bus_thread_isolation():
+    """Verify trace_bus strictly routes events to thread-scoped subscribers without cross-talk."""
+    events_a = []
+    events_b = []
+    events_global = []
+
+    unsub_a = trace_bus.subscribe(lambda evt: events_a.append(evt), thread_id="thread-alpha")
+    unsub_b = trace_bus.subscribe(lambda evt: events_b.append(evt), thread_id="thread-beta")
+    unsub_global = trace_bus.subscribe(lambda evt: events_global.append(evt))
+
+    try:
+        # 1. Emit an event scoped to thread-alpha
+        tracer_a = AgentTracer("NexusAgent", color="cyan", agent_id="nexus", thread_id="thread-alpha")
+        tracer_a.agent_start("Alpha query")
+
+        # 2. Emit an event scoped to thread-beta
+        tracer_b = AgentTracer("NexusAgent", color="cyan", agent_id="nexus", thread_id="thread-beta")
+        tracer_b.agent_start("Beta query")
+
+        # Verify thread A only saw Alpha
+        assert len(events_a) == 1
+        assert events_a[0]["thread_id"] == "thread-alpha"
+        assert "Alpha" in events_a[0]["message"]
+
+        # Verify thread B only saw Beta
+        assert len(events_b) == 1
+        assert events_b[0]["thread_id"] == "thread-beta"
+        assert "Beta" in events_b[0]["message"]
+
+        # Verify global listener saw both
+        assert len(events_global) == 2
+        assert {e["thread_id"] for e in events_global} == {"thread-alpha", "thread-beta"}
+    finally:
+        unsub_a()
+        unsub_b()
+        unsub_global()
+
+
+def test_agent_tracer_inherits_context_and_explicit_thread_id():
+    """Verify AgentTracer resolves thread_id from contextvar or explicit parameter."""
+    emitted = []
+    unsub = trace_bus.subscribe(lambda evt: emitted.append(evt))
+
+    token = set_trace_thread_id("thread-context-123")
+    try:
+        # Context-inherited tracer
+        tracer_context = AgentTracer("Head Agent", color="cyan", agent_id="nexus")
+        tracer_context.info("Contextual message")
+
+        # Explicitly overridden tracer
+        tracer_explicit = AgentTracer("Subagent #1", color="magenta", agent_id="subagent-1", thread_id="thread-explicit-456")
+        tracer_explicit.info("Explicit message")
+
+        assert len(emitted) == 2
+        assert emitted[0]["thread_id"] == "thread-context-123"
+        assert emitted[1]["thread_id"] == "thread-explicit-456"
+    finally:
+        reset_trace_thread_id(token)
+        unsub()

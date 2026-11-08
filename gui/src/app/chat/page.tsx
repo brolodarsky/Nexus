@@ -419,6 +419,16 @@ export default function ChatPage() {
     (newConvId: string) => {
       if (newConvId === activeConvId) return;
 
+      // Cleanly abort in-flight SSE stream if switching away from an actively generating thread
+      if (abortRef.current) {
+        abortRef.current();
+        abortRef.current = null;
+      }
+      setLoading(false);
+      setLiveTrace([]);
+      liveTraceRef.current = [];
+      activeStreamConvIdRef.current = null;
+
       if (draftPersistTimerRef.current) {
         clearTimeout(draftPersistTimerRef.current);
         draftPersistTimerRef.current = null;
@@ -466,6 +476,16 @@ export default function ChatPage() {
         return;
       }
 
+      // Cleanly abort in-flight SSE stream if opening a new chat while a turn was streaming
+      if (abortRef.current) {
+        abortRef.current();
+        abortRef.current = null;
+      }
+      setLoading(false);
+      setLiveTrace([]);
+      liveTraceRef.current = [];
+      activeStreamConvIdRef.current = null;
+
       if (draftPersistTimerRef.current) {
         clearTimeout(draftPersistTimerRef.current);
         draftPersistTimerRef.current = null;
@@ -505,6 +525,19 @@ export default function ChatPage() {
   const handleDeleteChat = useCallback(
     async (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
+
+      // Cleanly abort in-flight SSE stream if deleting the active streaming thread
+      if (activeStreamConvIdRef.current === id) {
+        if (abortRef.current) {
+          abortRef.current();
+          abortRef.current = null;
+        }
+        setLoading(false);
+        setLiveTrace([]);
+        liveTraceRef.current = [];
+        activeStreamConvIdRef.current = null;
+      }
+
       await deleteConversation(id);
       const updatedConvs = conversations.filter((c) => c.id !== id);
       setConversations(updatedConvs);
@@ -643,7 +676,14 @@ export default function ChatPage() {
         targetConvId,
         {
           onTrace: (event) => {
+            // Guard against stale stream callbacks if the user switched conversations
+            if (activeStreamConvIdRef.current !== targetConvId) return;
+
             setLiveTrace((prev) => {
+              // Deduplicate events by id to protect against re-deliveries or duplicate stream packets
+              if (event.id && prev.some((e) => e.id === event.id)) {
+                return prev;
+              }
               const newTrace = [...prev, event];
               liveTraceRef.current = newTrace;
               return newTrace;
@@ -658,6 +698,9 @@ export default function ChatPage() {
             }
           },
           onDone: (event) => {
+            // Guard against applying final response if user switched away to a different conversation
+            if (activeStreamConvIdRef.current !== targetConvId) return;
+
             // Build the final message with the full trace and executed model metadata attached
             const doneEvt = event as unknown as Record<string, unknown>;
             const { modelTier, modelName } = extractTurnModelInfo(
@@ -709,6 +752,8 @@ export default function ChatPage() {
             refreshBoard();
           },
           onError: async (errorMessage) => {
+            // Guard against applying errors if user switched away to a different conversation
+            if (activeStreamConvIdRef.current !== targetConvId) return;
             // First check if the backend actually finished and logged the assistant response to chats.db
             try {
               const history = await getChatHistory(targetConvId);

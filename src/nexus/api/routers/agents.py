@@ -30,7 +30,7 @@ from pydantic import BaseModel
 from nexus.core.constants import PROJECT_ROOT
 # trace_bus: Global pub/sub event bus where LangGraph agents emit live trace events (tools, LLM calls)
 from nexus.core.cost import calculate_token_cost
-from nexus.core.trace import trace_bus
+from nexus.core.trace import reset_trace_thread_id, set_trace_thread_id, trace_bus
 # run_logger: Persists formatted execution run snapshots to logs/runs/ for observability and evals
 from nexus.core.run_logger import log_run, list_runs, get_run
 # chats_db: SQLite data access layer for conversations and chat history
@@ -432,11 +432,12 @@ async def ask_brain(request: AskRequest):
             images=request.images,
         )
         
-        # Subscribe to trace_bus so synchronous `/ask` also captures 100% of LLM & Subagent trace steps
+        # Subscribe to trace_bus so synchronous `/ask` also captures 100% of LLM & Subagent trace steps scoped to this conversation
         trace_events = []
         def _on_sync_trace(evt):
             trace_events.append(evt)
-        unsub_sync = trace_bus.subscribe(_on_sync_trace)
+        unsub_sync = trace_bus.subscribe(_on_sync_trace, thread_id=conversation_id)
+        trace_token = set_trace_thread_id(conversation_id)
 
         try:
             # Phase 2: Invoke the unified NexusAgent directly with optional per-turn model and image overrides
@@ -449,6 +450,7 @@ async def ask_brain(request: AskRequest):
             )
         finally:
             unsub_sync()
+            reset_trace_thread_id(trace_token)
 
         routed_domain = result.get("domain")
         agent_name = "nexus"
@@ -570,7 +572,8 @@ def _run_pipeline(
     trace_events = []
     def _on_trace(evt):
         trace_events.append(evt)
-    unsub = trace_bus.subscribe(_on_trace)
+    unsub = trace_bus.subscribe(_on_trace, thread_id=conversation_id)
+    trace_token = set_trace_thread_id(conversation_id)
 
     try:
         # Check if already cancelled before invoking graph
@@ -681,6 +684,7 @@ def _run_pipeline(
         })
     finally:
         unsub() # Unsubscribe trace listener to prevent memory leaks
+        reset_trace_thread_id(trace_token)
         unregister_cancel_event(conversation_id)
         with _active_runs_lock:
             if _active_runs.get(conversation_id) is active_run:
@@ -704,8 +708,8 @@ async def ask_brain_stream(request: AskRequest, req: Request):
     # Thread-safe FIFO queue to transfer events from background thread to async generator
     event_queue = queue.Queue()
 
-    # Subscribe to trace_bus: every time an agent prints/emits a trace step, push it to event_queue
-    unsubscribe = trace_bus.subscribe(lambda evt: event_queue.put(evt))
+    # Subscribe to trace_bus: every time an agent prints/emits a trace step for this conversation, push it to event_queue
+    unsubscribe = trace_bus.subscribe(lambda evt: event_queue.put(evt), thread_id=request.conversation_id)
 
     # Spawn synchronous agent pipeline in background OS thread (daemon=True allows clean shutdown)
     pipeline_thread = threading.Thread(

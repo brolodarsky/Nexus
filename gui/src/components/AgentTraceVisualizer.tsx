@@ -894,7 +894,7 @@ export const AgentGraphView = memo(function AgentGraphView({
             <div className="space-y-2">
               {selectedNode.events.map((evt, idx) => (
                 <TraceStepCard
-                  key={evt.id ?? idx}
+                  key={evt.id ? `${evt.id}-${idx}` : `step-${idx}`}
                   evt={evt}
                   index={idx}
                   forceExpanded={expandAllSteps}
@@ -962,7 +962,7 @@ export const AgentGraphView = memo(function AgentGraphView({
           </div>
           {events.map((evt, idx) => (
             <TraceStepCard
-              key={evt.id ?? idx}
+              key={evt.id ? `${evt.id}-${idx}` : `step-${idx}`}
               evt={evt}
               index={idx}
               forceExpanded={expandAllSteps}
@@ -1135,7 +1135,7 @@ export const ThinkingPanel = memo(function ThinkingPanel({
             <div className="space-y-2">
               {events.map((evt, i) => (
                 <TraceStepCard
-                  key={evt.id ?? i}
+                  key={evt.id ? `${evt.id}-${i}` : `step-${i}`}
                   evt={evt}
                   index={i}
                   forceExpanded={expandAllSteps}

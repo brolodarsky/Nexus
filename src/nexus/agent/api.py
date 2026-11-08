@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from nexus.agent.graph import extract_message_text, nexus_graph, nexus_tracer, reset_subagent_counter
 from nexus.core.constants import PROJECT_ROOT, resolve_model_config
 from nexus.core.hitl_queue import reset_hitl_execution_context, set_hitl_execution_context
+from nexus.core.trace import reset_trace_thread_id, set_trace_thread_id
 
 
 # Resolves a relative upload path or URI into a base64 data URL for multimodal LLM consumption
@@ -75,6 +76,9 @@ def run_nexus_agent_with_trace(
     resolved_model = resolve_model_config(model_tier)
     effective_tier = resolved_model["tier"]
     active_model_name = resolved_model["model_name"]
+
+    # Scope trace context variable so all telemetry events emitted on this thread carry its active UUID
+    trace_token = set_trace_thread_id(active_thread)
 
     reset_subagent_counter()
     # Format start banner with optional image attachment count for live Thinking Panel observability
@@ -220,6 +224,7 @@ def run_nexus_agent_with_trace(
         }
     finally:
         reset_hitl_execution_context(ctx_token)
+        reset_trace_thread_id(trace_token)
 
 
 def run_nexus_agent(
@@ -260,6 +265,7 @@ def execute_vault_query(
     Used by `src/nexus/evals/runner.py` to inspect message history, tool calls, and token usage.
     """
     active_thread = thread_id or f"eval_{int(time.time() * 1000)}"
+    trace_token = set_trace_thread_id(active_thread)
     config = {"configurable": {"thread_id": active_thread, "conversation_id": active_thread, "model_tier": model_tier}}
     ctx_token = set_hitl_execution_context(
         conversation_id=active_thread,
@@ -274,6 +280,7 @@ def execute_vault_query(
         )
     finally:
         reset_hitl_execution_context(ctx_token)
+        reset_trace_thread_id(trace_token)
 
 
 if __name__ == "__main__":

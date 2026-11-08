@@ -24,6 +24,7 @@ export interface TraceEvent {
   agent?: string;                   // Originating agent display name (e.g. "NexusAgent", "Subagent #1 (low)")
   agent_id?: string;                // Unique DAG node identifier (e.g. "nexus", "subagent-1")
   parent_id?: string | null;        // Parent DAG node identifier (e.g. "nexus" for spawned subagents, null for root)
+  thread_id?: string | null;        // Target conversation/thread UUID for multi-tab pub/sub isolation
   color?: string;                   // Terminal/UI theme color (e.g. "yellow", "cyan", "magenta")
   message: string;                  // Full, untruncated log text for the Thinking Panel
   timestamp: string;                // ISO-8601 UTC event timestamp

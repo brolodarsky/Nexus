@@ -12,14 +12,16 @@ are independent — disabling one does not affect the other.
 No external dependencies — uses ANSI escape codes directly.
 """
 
+# contextvars: Provides execution-context-local variable storage for thread_id / conversation_id isolation across concurrent agent runs
+import contextvars
 # threading: Used for thread synchronization (Lock) to prevent race conditions during concurrent subscriber registration
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
 # Callable: Type hint for functions passed as arguments (callbacks)
-# Optional, Any: Type hints for nullable values and arbitrary dictionary payloads
-from typing import Any, Callable, Optional
+# Optional, Any, Tuple: Type hints for nullable values, arbitrary dictionary payloads, and subscriber tuples
+from typing import Any, Callable, Optional, Tuple
 
 # ── ANSI Escape Codes ────────────────────────────────────────────────────────
 # ANSI sequences (ESC [ <code > m) instruct terminal emulators to change text color and style
@@ -41,6 +43,29 @@ BOLD   = "\033[1m"  # Increases font weight for agent tags and tool names
 RESULT_TRUNCATE_LEN = 100000 
 
 
+# ── Thread-Scoped Trace Execution Context ─────────────────────────────────────
+
+# Context variable holding the currently active conversation/thread UUID for trace event scoping
+_current_trace_thread_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "_current_trace_thread_id", default=None
+)
+
+
+def set_trace_thread_id(thread_id: Optional[str]) -> contextvars.Token:
+    """Sets the active conversation/thread UUID in the execution context, returning a reset Token."""
+    return _current_trace_thread_id.set(thread_id)
+
+
+def get_trace_thread_id() -> Optional[str]:
+    """Retrieves the active conversation/thread UUID from the execution context, or None."""
+    return _current_trace_thread_id.get()
+
+
+def reset_trace_thread_id(token: contextvars.Token) -> None:
+    """Restores the prior conversation/thread UUID in the execution context using the supplied Token."""
+    _current_trace_thread_id.reset(token)
+
+
 # ── Trace Event Bus (Pub/Sub Pattern) ────────────────────────────────────────
 
 class TraceEventBus:
@@ -48,28 +73,37 @@ class TraceEventBus:
     Thread-safe Publish/Subscribe (Pub/Sub) event broker for agent trace events.
     Decouples agent execution from consumers: agents emit events without knowing
     who is listening (e.g., SSE streaming endpoints, logging daemons, or evaluators).
+    Supports per-thread isolation so concurrent conversation streams receive only
+    their own events.
     """
 
     def __init__(self):
         # Mutex lock ensuring thread-safe access to the subscribers dictionary
         self._lock = threading.Lock()
-        # Maps unique integer subscriber IDs to their corresponding callback functions
-        self._subscribers: dict[int, Callable[[dict], None]] = {}
+        # Maps unique integer subscriber IDs to a tuple of (callback, Optional[thread_id])
+        self._subscribers: dict[int, Tuple[Callable[[dict], None], Optional[str]]] = {}
         # Monotonically increasing ID counter for assigning unique subscriber tokens
         self._next_id = 0
 
-    def subscribe(self, callback: Callable[[dict], None]) -> Callable[[], None]:
+    def subscribe(
+        self,
+        callback: Callable[[dict], None],
+        thread_id: Optional[str] = None,
+    ) -> Callable[[], None]:
         """
-        Registers a callback function to be invoked whenever a trace event is emitted.
+        Registers a callback function to be invoked whenever a matching trace event is emitted.
         
         @param callback: A callable that accepts a single event dict: Callable[[dict], None].
+        @param thread_id: Optional conversation/thread UUID. If specified, the callback will only
+                          be invoked for events originating from this thread_id. If None, the callback
+                          acts as a global subscriber receiving all trace events.
         @returns: A parameterless unsubscribe closure () -> None that cleanly removes the listener.
         """
         # Acquire lock to safely increment ID and insert into subscriber dictionary
         with self._lock:
             sub_id = self._next_id
             self._next_id += 1
-            self._subscribers[sub_id] = callback
+            self._subscribers[sub_id] = (callback, thread_id)
 
         # Return a closure capturing sub_id so callers can easily unsubscribe
         def unsubscribe():
@@ -80,14 +114,22 @@ class TraceEventBus:
 
     def emit(self, event: dict):
         """
-        Fans out an event dictionary to all active subscribers.
-        Takes a snapshot of subscriber callbacks under lock, then executes them outside the lock.
+        Fans out an event dictionary to matching active subscribers.
+        Takes a snapshot of subscriber entries under lock, then executes callbacks outside the lock.
+        Filters by thread_id if the subscriber registered with thread scoping.
         """
         with self._lock:
-            # Create a shallow list copy of callbacks to minimize lock hold time
-            callbacks = list(self._subscribers.values())
+            # Create a shallow list copy of (callback, thread_id) tuples to minimize lock hold time
+            subscribers = list(self._subscribers.values())
             
-        for cb in callbacks:
+        event_thread_id = event.get("thread_id")
+        for cb, sub_thread_id in subscribers:
+            # If subscriber specified a thread_id, enforce strict thread isolation
+            if sub_thread_id is not None:
+                # Discard events destined for a different thread, or untargeted events with no thread_id
+                if event_thread_id != sub_thread_id:
+                    continue
+
             try:
                 cb(event)
             except Exception:
@@ -116,6 +158,7 @@ class AgentTracer:
         color: str = "white",
         agent_id: Optional[str] = None,
         parent_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
     ):
         self.agent_name = agent_name
         self.color = color
@@ -123,6 +166,8 @@ class AgentTracer:
         self.agent_id = agent_id or agent_name.lower().replace(" ", "_")
         # Parent node identifier linking subagent branches back to their spawning orchestrator
         self.parent_id = parent_id
+        # Explicit conversation thread UUID if bound to a specific thread lifecycle
+        self.thread_id = thread_id
         # Resolves color code string; defaults to white if color is not in lookup table
         self.color_code = COLORS.get(color, COLORS["white"])
         # Monotonically increasing step counter within this agent's lifecycle
@@ -144,6 +189,12 @@ class AgentTracer:
     def _emit(self, event_type: str, message: str, data: Optional[dict[str, Any]] = None):
         """Builds a standardized, lossless trace event payload and publishes it to trace_bus."""
         self._step_counter += 1
+        # Resolve effective thread_id from instance property, context variable, or payload data
+        effective_thread_id = (
+            self.thread_id
+            or get_trace_thread_id()
+            or (data.get("thread_id") if isinstance(data, dict) else None)
+        )
         event: dict[str, Any] = {
             "id": str(uuid.uuid4())[:8],
             "step": self._step_counter,
@@ -151,6 +202,7 @@ class AgentTracer:
             "agent": self.agent_name,
             "agent_id": self.agent_id,
             "parent_id": self.parent_id,
+            "thread_id": effective_thread_id,
             "color": self.color,
             "message": message,
             "timestamp": datetime.now(timezone.utc).isoformat(),
