@@ -8,3 +8,5 @@ type: minor
 
 ### Changed
 - **SQLite `chats.db` Lineage Schema (`src/nexus/core/chats_db.py`):** Added idempotent schema migrations (`parent_conversation_id`, `parent_message_id`, `branch_mode`, `merged_at`) to `conversations`, exposed `id` (`messages.id`) in `get_chat_history()`, returned inserted row IDs from `log_message()` (emitted in SSE `done` packets), and promoted child branches to root level on parent deletion.
+- **Session Transcript Exporter (`src/nexus/shared_tools/export_conversation.py`):** Updated `load_conversation_source()` to prefer `transcript_full.jsonl` over `transcript.jsonl` when resolving brain directories and conversation UUIDs so long assistant turns are exported in full without mid-response `<truncated ... bytes>` placeholders.
+

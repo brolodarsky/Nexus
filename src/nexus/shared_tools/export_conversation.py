@@ -647,7 +647,8 @@ def load_conversation_source(source_path_or_id: Optional[str] = None) -> Tuple[s
         if p.is_dir():
             compact = p / ".system_generated" / "logs" / "transcript.jsonl"
             full = p / ".system_generated" / "logs" / "transcript_full.jsonl"
-            target = compact if compact.exists() else (full if full.exists() else None)
+            # Prefer `transcript_full.jsonl` so assistant responses are never truncated mid-sentence
+            target = full if full.exists() else (compact if compact.exists() else None)
             if target:
                 with open(target, "r", encoding="utf-8", errors="ignore") as f:
                     messages = parse_jsonl_stream(f)
@@ -663,7 +664,7 @@ def load_conversation_source(source_path_or_id: Optional[str] = None) -> Tuple[s
                         continue
                     log_compact = entry / ".system_generated" / "logs" / "transcript.jsonl"
                     log_full = entry / ".system_generated" / "logs" / "transcript_full.jsonl"
-                    target_log = log_compact if log_compact.exists() else (log_full if log_full.exists() else None)
+                    target_log = log_full if log_full.exists() else (log_compact if log_compact.exists() else None)
                     if target_log:
                         candidates.append((target_log.stat().st_mtime, entry.name, target_log))
             if candidates:
@@ -680,7 +681,7 @@ def load_conversation_source(source_path_or_id: Optional[str] = None) -> Tuple[s
                 if exact.is_dir():
                     log_compact = exact / ".system_generated" / "logs" / "transcript.jsonl"
                     log_full = exact / ".system_generated" / "logs" / "transcript_full.jsonl"
-                    target_log = log_compact if log_compact.exists() else (log_full if log_full.exists() else None)
+                    target_log = log_full if log_full.exists() else (log_compact if log_compact.exists() else None)
                     if target_log:
                         with open(target_log, "r", encoding="utf-8", errors="ignore") as f:
                             messages = parse_jsonl_stream(f)
@@ -693,7 +694,7 @@ def load_conversation_source(source_path_or_id: Optional[str] = None) -> Tuple[s
                     if entry.is_dir() and entry.name.startswith(source_path_or_id):
                         log_compact = entry / ".system_generated" / "logs" / "transcript.jsonl"
                         log_full = entry / ".system_generated" / "logs" / "transcript_full.jsonl"
-                        target_log = log_compact if log_compact.exists() else (log_full if log_full.exists() else None)
+                        target_log = log_full if log_full.exists() else (log_compact if log_compact.exists() else None)
                         if target_log:
                             matches.append((entry.name, target_log))
             if len(matches) == 1:
