@@ -7,6 +7,7 @@
 export * from "./client";
 export * from "./stream";
 export * from "./agents";
+export * from "./branches";
 export * from "./vault";
 export * from "./hitl";
 export * from "./board";

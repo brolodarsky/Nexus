@@ -23,7 +23,11 @@ def init_db():
                 id TEXT PRIMARY KEY,
                 title TEXT,
                 created_at TEXT,
-                last_updated TEXT
+                last_updated TEXT,
+                parent_conversation_id TEXT,
+                parent_message_id INTEGER,
+                branch_mode TEXT,
+                merged_at TEXT
             )
         """)
         conn.execute("""
@@ -41,10 +45,21 @@ def init_db():
                 FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             )
         """)
-        # Schema migration: check if `images` column exists for existing tables and alter if missing
-        cols = [col[1] for col in conn.execute("PRAGMA table_info(messages)").fetchall()]
-        if "images" not in cols:
+        # Schema migration: check if `images` column exists for existing `messages` tables and alter if missing
+        msg_cols = [col[1] for col in conn.execute("PRAGMA table_info(messages)").fetchall()]
+        if "images" not in msg_cols:
             conn.execute("ALTER TABLE messages ADD COLUMN images TEXT")
+
+        # Schema migration: add Universal Conversation Branching (DAG lineage) columns to existing `conversations` tables
+        conv_cols = [col[1] for col in conn.execute("PRAGMA table_info(conversations)").fetchall()]
+        if "parent_conversation_id" not in conv_cols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN parent_conversation_id TEXT")
+        if "parent_message_id" not in conv_cols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN parent_message_id INTEGER")
+        if "branch_mode" not in conv_cols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN branch_mode TEXT")
+        if "merged_at" not in conv_cols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN merged_at TEXT")
 
 
 init_db()
@@ -60,6 +75,62 @@ def create_conversation(title: str = "New Chat") -> str:
         conn.commit()
     return conv_id
 
+
+def create_branch_conversation(
+    title: str,
+    parent_conversation_id: str,
+    parent_message_id: int | None = None,
+    branch_mode: str = "tangent",
+) -> str:
+    """
+    Creates a new branched child conversation in `chats.db` linked to its parent thread and fork message.
+
+    Parameters:
+      title: Display title for the newly forked child branch.
+      parent_conversation_id: UUID of the parent conversation from which this branch was spawned.
+      parent_message_id: Optional SQLite `messages.id` in the parent conversation where the fork occurred.
+      branch_mode: Either `'tangent'` (context-sliced fresh ALU) or `'fork'` (full history clone up to branch point).
+
+    Returns:
+      The newly generated UUID string for the child conversation.
+    """
+    conv_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO conversations (
+                id, title, created_at, last_updated,
+                parent_conversation_id, parent_message_id, branch_mode, merged_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (conv_id, title, now, now, parent_conversation_id, parent_message_id, branch_mode),
+        )
+        conn.commit()
+    return conv_id
+
+
+def mark_branch_merged(conversation_id: str) -> str:
+    """
+    Marks a child branch conversation as distilled and merged back into its parent thread.
+
+    Parameters:
+      conversation_id: UUID of the child branch conversation.
+
+    Returns:
+      The ISO-8601 UTC timestamp recorded in `merged_at`.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE conversations SET merged_at = ?, last_updated = ? WHERE id = ?",
+            (now, now, conversation_id),
+        )
+        conn.commit()
+    return now
+
+
 def get_conversations() -> list[dict]:
     with _get_conn() as conn:
         rows = conn.execute("SELECT * FROM conversations ORDER BY last_updated DESC").fetchall()
@@ -72,6 +143,11 @@ def get_conversation(conversation_id: str) -> dict | None:
 
 def delete_conversation(conversation_id: str):
     with _get_conn() as conn:
+        # Promote any child branches to root level so deleting a parent never orphans child threads
+        conn.execute(
+            "UPDATE conversations SET parent_conversation_id = NULL WHERE parent_conversation_id = ?",
+            (conversation_id,),
+        )
         conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
         conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
         conn.commit()
@@ -91,22 +167,23 @@ def log_message(
     trace: list = None,
     conversation_id: str = None,
     images: list[str] | None = None,
-):
+) -> int | None:
     if not conversation_id:
-        return
+        return None
     
     with _get_conn() as conn:
         now = datetime.now(timezone.utc).isoformat()
         trace_json = json.dumps(trace) if trace else None
         # Serialize list of image URLs/paths to a JSON string for lightweight column storage
         images_json = json.dumps(images) if images else None
-        conn.execute("""
+        cursor = conn.execute("""
             INSERT INTO messages (conversation_id, role, content, agent, domain, confidence, trace, timestamp, images)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (conversation_id, role, content, agent, domain, confidence, trace_json, now, images_json))
         
         conn.execute("UPDATE conversations SET last_updated = ? WHERE id = ?", (now, conversation_id))
         conn.commit()
+        return int(cursor.lastrowid) if cursor.lastrowid is not None else None
 
 def get_chat_history(conversation_id: str, limit: int | None = None) -> list[dict]:
     """
@@ -121,7 +198,7 @@ def get_chat_history(conversation_id: str, limit: int | None = None) -> list[dic
     with _get_conn() as conn:
         if limit is not None:
             rows = conn.execute("""
-                SELECT role, content, agent, domain, confidence, trace, timestamp, images 
+                SELECT id, role, content, agent, domain, confidence, trace, timestamp, images 
                 FROM messages 
                 WHERE conversation_id = ? 
                 ORDER BY id ASC
@@ -129,7 +206,7 @@ def get_chat_history(conversation_id: str, limit: int | None = None) -> list[dic
             """, (conversation_id, limit)).fetchall()
         else:
             rows = conn.execute("""
-                SELECT role, content, agent, domain, confidence, trace, timestamp, images 
+                SELECT id, role, content, agent, domain, confidence, trace, timestamp, images 
                 FROM messages 
                 WHERE conversation_id = ? 
                 ORDER BY id ASC
@@ -141,6 +218,7 @@ def get_chat_history(conversation_id: str, limit: int | None = None) -> list[dic
             raw_images = r["images"] if "images" in r.keys() else None
             parsed_images = json.loads(raw_images) if raw_images else []
             history.append({
+                "id": r["id"],
                 "role": r["role"],
                 "content": r["content"],
                 "agent": r["agent"],

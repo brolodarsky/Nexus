@@ -7,7 +7,7 @@
  */
 
 // memo: Isolates the conversation history sidebar from re-rendering during keystroke updates in the composer
-import { useState, useRef, useEffect, memo } from "react";
+import { useState, useRef, useEffect, useMemo, memo } from "react";
 import type { Conversation, ModelOption } from "@/lib/api";
 import {
   CHAT_SIDEBAR_WIDTH_KEY,
@@ -71,8 +71,50 @@ const ChatSidebar = memo(function ChatSidebar({
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   // editTitle: holds the draft title string being actively typed in the rename input
   const [editTitle, setEditTitle] = useState<string>("");
+  // collapsedParentIds: tracks which parent conversation UUIDs have their child branch trees collapsed in the sidebar
+  const [collapsedParentIds, setCollapsedParentIds] = useState<Record<string, boolean>>({});
   // editInputRef: HTMLInputElement reference used to auto-focus and auto-select existing title text on mount
   const editInputRef = useRef<HTMLInputElement>(null);
+
+  // Flattens `conversations` into a depth-annotated tree list so child branches render nested beneath their parent
+  const treeRows = useMemo(() => {
+    const idSet = new Set(conversations.map((c) => c.id));
+    const childrenMap = new Map<string, Conversation[]>();
+    const roots: Conversation[] = [];
+
+    for (const c of conversations) {
+      if (c.parent_conversation_id && idSet.has(c.parent_conversation_id)) {
+        const list = childrenMap.get(c.parent_conversation_id) ?? [];
+        list.push(c);
+        childrenMap.set(c.parent_conversation_id, list);
+      } else {
+        roots.push(c);
+      }
+    }
+
+    const result: Array<{ conv: Conversation; depth: number; childCount: number; isBranchCollapsed: boolean }> = [];
+    const visit = (node: Conversation, depth: number) => {
+      const kids = childrenMap.get(node.id) ?? [];
+      const isBranchCollapsed = Boolean(collapsedParentIds[node.id]);
+      result.push({ conv: node, depth, childCount: kids.length, isBranchCollapsed });
+      if (!isBranchCollapsed) {
+        // Render child branches in chronological/recent order beneath the parent
+        for (const child of kids) {
+          visit(child, depth + 1);
+        }
+      }
+    };
+
+    for (const root of roots) {
+      visit(root, 0);
+    }
+    return result;
+  }, [conversations, collapsedParentIds]);
+
+  const toggleParentBranches = (parentId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCollapsedParentIds((prev) => ({ ...prev, [parentId]: !prev[parentId] }));
+  };
 
   // sidebarWidth: custom width in pixels for the expanded conversation sidebar drawer
   const [sidebarWidth, setSidebarWidth] = useState<number>(DEFAULT_CHAT_SIDEBAR_WIDTH);
@@ -260,13 +302,14 @@ const ChatSidebar = memo(function ChatSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {conversations.map((conv) => {
+        {treeRows.map(({ conv, depth, childCount, isBranchCollapsed }) => {
           const isEditing = editingId === conv.id;
           if (isEditing) {
             // Inline Rename Input Form: Allows editing the conversation title with Enter to commit, Escape to cancel
             return (
               <div
                 key={conv.id}
+                style={depth > 0 ? { marginLeft: `${Math.min(depth * 14, 42)}px` } : undefined}
                 className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-bg-tertiary border border-accent-cyan/40 shadow-sm"
                 onClick={(e) => e.stopPropagation()}
               >
@@ -314,6 +357,7 @@ const ChatSidebar = memo(function ChatSidebar({
           return (
             <div
               key={conv.id}
+              style={depth > 0 ? { marginLeft: `${Math.min(depth * 14, 42)}px` } : undefined}
               onClick={() => {
                 onSelectConversation(conv.id);
                 if (isMobileDrawer) onCloseMobile?.();
@@ -322,17 +366,37 @@ const ChatSidebar = memo(function ChatSidebar({
                 e.stopPropagation();
                 handleStartEdit(conv);
               }}
-              className={`group relative flex items-center px-3 py-2.5 rounded-lg cursor-pointer text-sm transition-colors overflow-hidden ${
+              className={`group relative flex items-center px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors overflow-hidden ${
+                depth > 0 ? "border-l-2 border-emerald-500/30 pl-2.5 text-xs " : ""
+              }${
                 activeConvId === conv.id
                   ? "bg-bg-tertiary text-text-primary"
                   : "text-text-secondary hover:bg-bg-tertiary/50"
               }`}
-              title={`${conv.title}${hasDraft ? " (Draft saved)" : ""} (double-click or hover pencil to rename)`}
+              title={`${conv.title}${conv.merged_at ? " (Merged to parent)" : ""}${hasDraft ? " (Draft saved)" : ""} (double-click or hover pencil to rename)`}
             >
               {/* Conversation title: takes full available row width without reserved sibling space; truncates with ellipsis */}
               <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center">
                 <div className="flex items-center gap-1.5 min-w-0">
+                  {childCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={(e) => toggleParentBranches(conv.id, e)}
+                      title={isBranchCollapsed ? `Expand ${childCount} branch(es)` : `Collapse ${childCount} branch(es)`}
+                      className="shrink-0 text-[0.65rem] text-emerald-400 hover:text-emerald-300 font-mono px-0.5 rounded hover:bg-bg-primary/60"
+                    >
+                      {isBranchCollapsed ? `▸${childCount}` : "▾"}
+                    </button>
+                  )}
                   <span className="truncate font-medium">{conv.title}</span>
+                  {conv.merged_at && (
+                    <span
+                      className="shrink-0 text-[0.6rem] px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-300 font-mono border border-emerald-500/30"
+                      title="Distilled & merged into parent conversation"
+                    >
+                      ✓
+                    </span>
+                  )}
                   {hasDraft && (
                     <span
                       className="shrink-0 text-[0.62rem] px-1.5 py-0.5 rounded bg-accent-cyan/15 text-accent-cyan font-mono border border-accent-cyan/30 uppercase tracking-wider font-semibold"

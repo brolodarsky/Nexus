@@ -11,25 +11,41 @@
 import { memo, useMemo } from "react";
 // MarkdownMessage: Shared GFM + Obsidian [[Wiki-Link]] renderer (also used by the HITL Pre-Commit Preview)
 import MarkdownMessage from "@/components/MarkdownMessage";
-import { resolveImageUrl } from "@/lib/api";
+import { resolveImageUrl, type BranchMode, type Conversation } from "@/lib/api";
 // ThinkingPanel: Lossless agent execution trace viewer with Graph View, full step payloads, and raw JSON
 import { ThinkingPanel } from "@/components/AgentTraceVisualizer";
+import MessageBranchTrigger from "./MessageBranchTrigger";
 import { extractTurnCost, type Message } from "./types";
 
 // ChatMessageItemProps: props for rendering a single conversation turn bubble
 // - message: Message object containing role, markdown content, agent/model metadata, and optional trace events
+// - messageIndex: 0-based index of this message within the conversation thread
 // - isLastTurn: optional boolean indicating whether this message is the latest in the conversation thread
+// - spawnedBranches: optional array of child Conversation records forked from this message turn
+// - isBranching: optional boolean indicating whether a fork operation is currently running on this message
 // - onRevertTurn: optional callback to revert this turn and restore its prompt back to the composer
+// - onBranchMessage: optional callback to fork a child branch from this message turn
+// - onSelectConversation: optional callback to navigate directly to a child branch conversation
 export interface ChatMessageItemProps {
   message: Message;
+  messageIndex?: number;
   isLastTurn?: boolean;
+  spawnedBranches?: Conversation[];
+  isBranching?: boolean;
   onRevertTurn?: () => void;
+  onBranchMessage?: (messageIndex: number, messageId: number | undefined, mode: BranchMode) => Promise<void> | void;
+  onSelectConversation?: (conversationId: string) => void;
 }
 
 const ChatMessageItem = memo(function ChatMessageItem({
   message,
+  messageIndex = 0,
   isLastTurn = false,
+  spawnedBranches,
+  isBranching = false,
   onRevertTurn,
+  onBranchMessage,
+  onSelectConversation,
 }: ChatMessageItemProps) {
   const isUser = message.role === "user";
   const hasTrace = Boolean(message.trace && message.trace.length > 0);
@@ -54,17 +70,37 @@ const ChatMessageItem = memo(function ChatMessageItem({
         {/* Assistant routing & model execution metadata pills */}
         {!isUser && message.agent && (
           <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.65rem] font-mono font-medium bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan">
-              <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan" />
-              {message.agent === "nexus" || message.agent === "NexusAgent" ? "Head Agent" : (message.agent || "Head Agent")}
+            <span
+              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.65rem] font-mono font-medium border ${
+                message.agent === "branch_context" || message.agent === "branch_merge"
+                  ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-300"
+                  : "bg-accent-cyan/10 border-accent-cyan/20 text-accent-cyan"
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  message.agent === "branch_context" || message.agent === "branch_merge"
+                    ? "bg-emerald-400"
+                    : "bg-accent-cyan"
+                }`}
+              />
+              {message.agent === "branch_context"
+                ? "🌿 Parent Context Brief"
+                : message.agent === "branch_merge"
+                  ? "🌿 Distilled Branch Merge"
+                  : message.agent === "nexus" || message.agent === "NexusAgent"
+                    ? "Head Agent"
+                    : message.agent || "Head Agent"}
               {message.domain && (
                 <span className="text-text-muted font-sans">• {message.domain}</span>
               )}
-              {message.confidence != null && (
-                <span className="text-text-muted font-sans">
-                  • {Math.round(message.confidence * 100)}%
-                </span>
-              )}
+              {message.confidence != null &&
+                message.agent !== "branch_context" &&
+                message.agent !== "branch_merge" && (
+                  <span className="text-text-muted font-sans">
+                    • {Math.round(message.confidence * 100)}%
+                  </span>
+                )}
             </span>
 
             {(message.modelName || message.modelTier) && (
@@ -161,12 +197,23 @@ const ChatMessageItem = memo(function ChatMessageItem({
           />
         )}
 
-        <span className="block mt-2 text-[0.65rem] text-text-muted">
-          {message.timestamp.toLocaleTimeString(undefined, {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
+        <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-[0.65rem] text-text-muted">
+            {message.timestamp.toLocaleTimeString(undefined, {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+
+          <MessageBranchTrigger
+            messageIndex={messageIndex}
+            messageId={message.id}
+            spawnedBranches={spawnedBranches}
+            isBranching={isBranching}
+            onBranch={onBranchMessage}
+            onSelectConversation={onSelectConversation}
+          />
+        </div>
       </div>
     </div>
   );

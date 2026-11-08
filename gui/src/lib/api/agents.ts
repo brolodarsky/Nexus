@@ -40,6 +40,7 @@ export interface ModelsCatalogResponse {
 
 // Interface for individual chat messages loaded from SQLite chats.db
 export interface ChatHistoryEntry {
+  id?: number;                // SQLite primary key (`messages.id`) used as deterministic branch anchor
   role: "user" | "assistant"; // Sender identifier determining bubble alignment & styling
   content: string;            // Raw markdown text of the message
   agent?: string;             // Optional agent name if sent by an AI assistant
@@ -50,13 +51,17 @@ export interface ChatHistoryEntry {
   images?: string[];          // Optional array of attached image URLs or relative asset paths
 }
 
-// Interface representing a persistent conversation thread in the sidebar
+// Interface representing a persistent conversation thread in the sidebar (with DAG branching lineage)
 export interface Conversation {
-  id: string;                 // UUID primary key linking to chats.db
-  title: string;              // User-visible thread title (e.g. "Career Outreach")
-  active_agent?: string | null;// Legacy sticky session agent (retained as optional for backward compatibility)
-  created_at: string;         // ISO-8601 creation timestamp
-  last_updated: string;       // ISO-8601 timestamp of last user/assistant message
+  id: string;                            // UUID primary key linking to chats.db
+  title: string;                         // User-visible thread title (e.g. "Career Outreach")
+  active_agent?: string | null;          // Legacy sticky session agent (retained as optional for backward compatibility)
+  created_at: string;                    // ISO-8601 creation timestamp
+  last_updated: string;                  // ISO-8601 timestamp of last user/assistant message
+  parent_conversation_id?: string | null;// Optional parent conversation UUID if spawned as a branch
+  parent_message_id?: number | null;     // Optional SQLite `messages.id` in the parent where the fork occurred
+  branch_mode?: "tangent" | "fork" | string | null; // Branching mode ('tangent' fresh ALU vs 'fork' full clone)
+  merged_at?: string | null;             // ISO-8601 timestamp when distilled and merged back to parent
 }
 
 // Interface representing an isolated subagent lifecycle within a structured run snapshot

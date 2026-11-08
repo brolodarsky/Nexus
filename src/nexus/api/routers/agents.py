@@ -560,8 +560,8 @@ def _run_pipeline(
     with _active_runs_lock:
         _active_runs[conversation_id] = active_run
 
-    # Log user query and image attachments to database immediately
-    log_message(
+    # Log user query and image attachments to database immediately, capturing its SQLite primary key
+    user_msg_id = log_message(
         role="user",
         content=effective_query,
         conversation_id=conversation_id,
@@ -603,8 +603,8 @@ def _run_pipeline(
         # Generate ISO-8601 UTC timestamp for terminal SSE 'done' packet
         now = datetime.now(timezone.utc).isoformat()
                 
-        # Persist assistant message along with full trace array to chats.db
-        log_message(
+        # Persist assistant message along with full trace array to chats.db, capturing its SQLite primary key
+        assistant_msg_id = log_message(
             role="assistant",
             content=response_text,
             agent=agent_name,
@@ -661,6 +661,8 @@ def _run_pipeline(
             "model_name": used_model,
             "cost_usd": turn_cost_formatted,
             "timestamp": now,
+            "user_message_id": user_msg_id,
+            "assistant_message_id": assistant_msg_id,
         })
     except InterruptedError:
         # Interrupted cleanly by user via Stop & Revert: push clean terminal event without recording partial error

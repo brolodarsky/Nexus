@@ -10,7 +10,7 @@ Rather than a static archive or a generic note template, Nexus acts as a cogniti
 *   **Agentic File System (AFS):** Deterministic Python filesystem utilities (`vault_reader.py`) navigate the local Vault to locate, read, and cross-reference documents without requiring pre-indexing or external vector databases.
 *   **Plain-English Instructions Hierarchy (`Master Instructions.md` $\to$ `Section Instructions.md` $\to$ YAML `instructions:`):** Universal Vault integrity gates, domain SOPs, and note-level maintenance contracts live natively inside the Vault in plain Markdown/YAML.
 *   **Deterministic Automation Layer (`src/nexus/shared_tools/`):** Python and Node.js integrations for Gmail work, Google Calendar work, webpage text extraction, YouTube transcripts, HL7 medical XML parsing, ADB phone chat scraping, edge-TTS audio podcast generation, PDF/DOCX resume rendering, etc.
-*   **Next.js 16 Control Panel & Multimodal Vision (`gui/`, `src/nexus/api/`):** Full-stack web studio featuring real-time SSE execution telemetry ("Thinking Panel"), Shared Subagent Blackboard, HITL diff review queue with two-phase commit, mobile PWA support over Tailscale/LAN, and multimodal vision analysis with image and PDF document uploads, clipboard screenshot paste (`Ctrl+V`), and drag-and-drop.
+*   **Next.js 16 Control Panel, Conversation Branching DAG & Multimodal Vision (`gui/`, `src/nexus/api/`):** Full-stack web studio featuring real-time SSE execution telemetry ("Thinking Panel"), Universal Conversation Branching (`chats.db` DAG with proportional `Parent Context Brief` tangent slicing, full history forking, and `Distill & Merge` subroutine returns), Shared Subagent Blackboard, HITL diff review queue with two-phase commit, mobile PWA support over Tailscale/LAN, and multimodal vision analysis with image and PDF document uploads, clipboard screenshot paste (`Ctrl+V`), and drag-and-drop.
 
 ## Production Case Study: Radical Transparency
 
@@ -50,6 +50,8 @@ Nexus/
 │   │   └── graph.py             # LangGraph StateGraph (inject_root_instructions, core tools, spawn_subagent, <=5 circuit breaker)
 │   ├── api/                     # FastAPI backend application & routers
 │   ├── core/                    # Shared engine configuration
+│   │   ├── chat_branching.py    # Universal Conversation Branching & Subroutine Merge Engine
+│   │   ├── chats_db.py          # Unified UI chat & DAG lineage persistence (chats.db)
 │   │   ├── constants.py         # Global constants
 │   │   ├── engine_constitution.py # Loader for Vault/Master Instructions.md (inject_root_instructions())
 │   │   ├── google_auth.py       # Reusable OAuth2 manager

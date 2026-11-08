@@ -3,7 +3,7 @@
  * and trace inspection helpers for the Nexus Chat interface (`/chat`).
  */
 
-import type { ModelOption, TraceEvent } from "@/lib/api";
+import type { ChatHistoryEntry, ModelOption, TraceEvent } from "@/lib/api";
 
 // Message: represents a single user prompt or assistant response rendered in the chat thread
 // - role: union literal type restricting sender identity to "user" or "assistant"
@@ -18,6 +18,7 @@ import type { ModelOption, TraceEvent } from "@/lib/api";
 // - trace: optional array of lossless SSE TraceEvent payloads for ThinkingPanel inspection
 // - images: optional array of attached image asset URLs or paths rendered in user message bubbles
 export interface Message {
+  id?: number;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
@@ -272,5 +273,31 @@ export function extractTurnCost(
 
   return null;
 }
+
+/**
+ * Converts an array of raw `ChatHistoryEntry` records from `GET /api/agents/ask/history`
+ * into enriched `Message` UI objects (preserving SQLite `id`, extracted model tier/name, and USD cost).
+ */
+export function mapHistoryEntriesToMessages(history: ChatHistoryEntry[]): Message[] {
+  return history.map((entry) => {
+    const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
+    const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
+    return {
+      id: entry.id,
+      role: entry.role,
+      content: entry.content,
+      images: entry.images || [],
+      agent: entry.agent,
+      domain: entry.domain,
+      confidence: entry.confidence,
+      modelTier,
+      modelName,
+      costUsd,
+      trace: entry.trace,
+      timestamp: new Date(entry.timestamp),
+    };
+  });
+}
+
 
 

@@ -9,7 +9,7 @@
 // memo: Isolates the scrollable message feed from sibling/parent state updates (e.g., input typing or sidebar toggles)
 import { useRef, useEffect, memo } from "react";
 import { ThinkingPanel } from "@/components/AgentTraceVisualizer";
-import type { TraceEvent } from "@/lib/api";
+import type { BranchMode, Conversation, TraceEvent } from "@/lib/api";
 import type { Message } from "./types";
 import ChatMessageItem from "./ChatMessageItem";
 
@@ -25,17 +25,25 @@ const PROMPT_SUGGESTIONS: string[] = [
 // - loading: boolean indicating whether an SSE agent response stream is currently in-flight
 // - liveTrace: array of real-time TraceEvent payloads emitted during the active streaming turn
 // - activeModelLabel: human-readable label of the selected model tier shown in the live status indicator
+// - childBranchesByMessageId: optional lookup dictionary mapping `messages.id` -> child branch conversations
+// - branchingMessageIndex: optional 0-based index of the message currently being forked
 // - onSelectPromptSuggestion: callback to populate the chat input when a user clicks an example prompt
 // - onStopAndRevert: optional callback to immediately abort execution and revert the active turn
 // - onRevertLastTurn: optional callback to revert the most recent completed turn
+// - onBranchMessage: optional callback to fork a child branch from any message turn
+// - onSelectConversation: optional callback to switch to a child branch conversation
 export interface ChatMessageThreadProps {
   messages: Message[];
   loading: boolean;
   liveTrace: TraceEvent[];
   activeModelLabel: string;
+  childBranchesByMessageId?: Record<number, Conversation[]>;
+  branchingMessageIndex?: number | null;
   onSelectPromptSuggestion: (suggestion: string) => void;
   onStopAndRevert?: () => void;
   onRevertLastTurn?: () => void;
+  onBranchMessage?: (messageIndex: number, messageId: number | undefined, mode: BranchMode) => Promise<void> | void;
+  onSelectConversation?: (conversationId: string) => void;
 }
 
 const ChatMessageThread = memo(function ChatMessageThread({
@@ -43,9 +51,13 @@ const ChatMessageThread = memo(function ChatMessageThread({
   loading,
   liveTrace,
   activeModelLabel,
+  childBranchesByMessageId,
+  branchingMessageIndex = null,
   onSelectPromptSuggestion,
   onStopAndRevert,
   onRevertLastTurn,
+  onBranchMessage,
+  onSelectConversation,
 }: ChatMessageThreadProps) {
   // scrollRef: DOM reference to the scrollable thread container for automatic bottom-pinning
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -86,10 +98,15 @@ const ChatMessageThread = memo(function ChatMessageThread({
       {/* Historical & current session message bubbles */}
       {messages.map((msg, i) => (
         <ChatMessageItem
-          key={i}
+          key={msg.id ?? i}
           message={msg}
+          messageIndex={i}
           isLastTurn={i === messages.length - 1}
+          spawnedBranches={msg.id != null ? childBranchesByMessageId?.[msg.id] : undefined}
+          isBranching={branchingMessageIndex === i}
           onRevertTurn={onRevertLastTurn}
+          onBranchMessage={onBranchMessage}
+          onSelectConversation={onSelectConversation}
         />
       ))}
 

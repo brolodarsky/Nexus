@@ -36,6 +36,8 @@ export interface TraceEvent {
   reasoning?: string | null;        // Router rationale
   model_tier?: string | null;       // Effective model tier used on this turn ("strong", "medium", "low")
   model_name?: string | null;       // Concrete model identifier used on this turn (e.g. "gemini-4-argon")
+  user_message_id?: number | null;  // SQLite `messages.id` assigned to the persisted user message
+  assistant_message_id?: number | null; // SQLite `messages.id` assigned to the persisted assistant message
 }
 
 /**

@@ -29,9 +29,11 @@ import {
 import {
   ChatSidebar,
   ChatHeader,
+  BranchLineageBar,
   ChatMessageThread,
   ChatInputBar,
   BlackboardDrawer,
+  useChatBranching,
   FALLBACK_MODELS,
   MODEL_STORAGE_KEY,
   ACTIVE_CONV_STORAGE_KEY,
@@ -43,6 +45,7 @@ import {
   persistDrafts,
   extractTurnModelInfo,
   extractTurnCost,
+  mapHistoryEntriesToMessages,
   type Message,
   type ChatDraftMap,
 } from "@/components/chat";
@@ -281,25 +284,7 @@ export default function ChatPage() {
     getChatHistory(activeConvId)
       .then((history) => {
         if (cancelled) return;
-        setMessages(
-          history.map((entry) => {
-            const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
-            const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
-            return {
-              role: entry.role,
-              content: entry.content,
-              images: entry.images || [],
-              agent: entry.agent,
-              domain: entry.domain,
-              confidence: entry.confidence,
-              modelTier,
-              modelName,
-              costUsd,
-              trace: entry.trace,
-              timestamp: new Date(entry.timestamp),
-            };
-          })
-        );
+        setMessages(mapHistoryEntriesToMessages(history));
       })
       .catch((err) => console.error("Failed to load chat history:", err))
       .finally(() => {
@@ -343,25 +328,7 @@ export default function ChatPage() {
       ) {
         getChatHistory(activeConvId)
           .then((history) => {
-            setMessages(
-              history.map((entry) => {
-                const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
-                const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
-                return {
-                  role: entry.role,
-                  content: entry.content,
-                  images: entry.images || [],
-                  agent: entry.agent,
-                  domain: entry.domain,
-                  confidence: entry.confidence,
-                  modelTier,
-                  modelName,
-                  costUsd,
-                  trace: entry.trace,
-                  timestamp: new Date(entry.timestamp),
-                };
-              })
-            );
+            setMessages(mapHistoryEntriesToMessages(history));
           })
           .catch((err) => console.error("Failed to sync chat history on tab focus:", err));
       }
@@ -711,7 +678,10 @@ export default function ChatPage() {
             const costUsd =
               (typeof doneEvt.cost_usd === "number" ? doneEvt.cost_usd : null) ??
               extractTurnCost(liveTraceRef.current, null, modelName, modelTier);
+            const userMsgId = typeof doneEvt.user_message_id === "number" ? doneEvt.user_message_id : undefined;
+            const assistantMsgId = typeof doneEvt.assistant_message_id === "number" ? doneEvt.assistant_message_id : undefined;
             const assistantMsg: Message = {
+              id: assistantMsgId,
               role: "assistant",
               content: event.response ?? "",
               timestamp: new Date(event.timestamp),
@@ -723,7 +693,14 @@ export default function ChatPage() {
               costUsd,
               trace: liveTraceRef.current,
             };
-            setMessages((msgs) => [...msgs, assistantMsg]);
+            setMessages((msgs) => {
+              const updated = [...msgs];
+              // Attach the SQLite `user_message_id` to the user prompt that initiated this turn
+              if (userMsgId !== undefined && updated.length > 0 && updated[updated.length - 1].role === "user") {
+                updated[updated.length - 1] = { ...updated[updated.length - 1], id: userMsgId };
+              }
+              return [...updated, assistantMsg];
+            });
             setLiveTrace([]);
             liveTraceRef.current = [];
             setLoading(false);
@@ -760,25 +737,7 @@ export default function ChatPage() {
               const lastEntry = history[history.length - 1];
               if (lastEntry && lastEntry.role === "assistant") {
                 // Ground truth: backend succeeded and logged to chats.db; reconcile state seamlessly
-                setMessages(
-                  history.map((entry) => {
-                    const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
-                    const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
-                    return {
-                      role: entry.role,
-                      content: entry.content,
-                      images: entry.images || [],
-                      agent: entry.agent,
-                      domain: entry.domain,
-                      confidence: entry.confidence,
-                      modelTier,
-                      modelName,
-                      costUsd,
-                      trace: entry.trace,
-                      timestamp: new Date(entry.timestamp),
-                    };
-                  })
-                );
+                setMessages(mapHistoryEntriesToMessages(history));
                 setLiveTrace([]);
                 liveTraceRef.current = [];
                 setLoading(false);
@@ -801,25 +760,7 @@ export default function ChatPage() {
                 const polled = await getChatHistory(targetConvId);
                 const lastPolled = polled[polled.length - 1];
                 if (lastPolled && lastPolled.role === "assistant") {
-                  setMessages(
-                    polled.map((entry) => {
-                      const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
-                      const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
-                      return {
-                        role: entry.role,
-                        content: entry.content,
-                        images: entry.images || [],
-                        agent: entry.agent,
-                        domain: entry.domain,
-                        confidence: entry.confidence,
-                        modelTier,
-                        modelName,
-                        costUsd,
-                        trace: entry.trace,
-                        timestamp: new Date(entry.timestamp),
-                      };
-                    })
-                  );
+                  setMessages(mapHistoryEntriesToMessages(polled));
                   setLiveTrace([]);
                   liveTraceRef.current = [];
                   setLoading(false);
@@ -894,25 +835,7 @@ export default function ChatPage() {
 
       // 4. Fetch updated ground-truth message history from database
       const history = await getChatHistory(activeConvId);
-      setMessages(
-        history.map((entry) => {
-          const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
-          const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
-          return {
-            role: entry.role,
-            content: entry.content,
-            images: entry.images || [],
-            agent: entry.agent,
-            domain: entry.domain,
-            confidence: entry.confidence,
-            modelTier,
-            modelName,
-            costUsd,
-            trace: entry.trace,
-            timestamp: new Date(entry.timestamp),
-          };
-        })
-      );
+      setMessages(mapHistoryEntriesToMessages(history));
 
       // 5. Refresh blackboard bulletins and conversations list
       refreshBoard();
@@ -1052,7 +975,29 @@ export default function ChatPage() {
     }
   }, []);
 
-  const activeConv = conversations.find((c) => c.id === activeConvId);
+  const handleRefreshConversations = useCallback(async () => {
+    const list = await getConversations();
+    setConversations(list);
+    return list;
+  }, []);
+
+  const {
+    activeConversation: activeConv,
+    parentConversation,
+    childBranchesForActive,
+    childBranchesByMessageId,
+    branchingMessageIndex,
+    isMergingBranch,
+    handleBranchFromMessage,
+    handleMergeBranchToParent,
+  } = useChatBranching({
+    conversations,
+    activeConvId,
+    selectedModelTier,
+    onRefreshConversations: handleRefreshConversations,
+    onSelectConversation: handleSelectConversation,
+  });
+
   const activeModelOption =
     modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
   const activeModelLabel = activeModelOption?.label ?? selectedModelTier;
@@ -1090,14 +1035,27 @@ export default function ChatPage() {
           onAutoGenerateTitle={handleAutoGenerateTitle}
         />
 
+        <BranchLineageBar
+          activeConversation={activeConv}
+          parentConversation={parentConversation}
+          childBranches={childBranchesForActive}
+          isMerging={isMergingBranch}
+          onSelectConversation={handleSelectConversation}
+          onMergeToParent={handleMergeBranchToParent}
+        />
+
         <ChatMessageThread
           messages={messages}
           loading={loading}
           liveTrace={liveTrace}
           activeModelLabel={activeModelLabel}
+          childBranchesByMessageId={childBranchesByMessageId}
+          branchingMessageIndex={branchingMessageIndex}
           onSelectPromptSuggestion={handleSelectPromptSuggestion}
           onStopAndRevert={handleStopAndRevert}
           onRevertLastTurn={handleStopAndRevert}
+          onBranchMessage={handleBranchFromMessage}
+          onSelectConversation={handleSelectConversation}
         />
 
         <ChatInputBar
