@@ -176,3 +176,4 @@ const BranchLineageBar = memo(function BranchLineageBar({
 });
 
 export default BranchLineageBar;
+

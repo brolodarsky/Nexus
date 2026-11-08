@@ -89,3 +89,4 @@ async def merge_conversation_branch(
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to distill and merge branch: {exc}")
+
