@@ -263,19 +263,19 @@ export function preprocessObsidianMarkdown(raw: string): string {
             }
           );
 
-          // B. Convert backtick-wrapped Markdown note titles (e.g. `1.1. Section Instructions.md`, `Plan.md`, `Tasks.md`)
-          //    into #wikilink: links so all note titles share the unified VaultNotePill representation instead of splitting
-          //    between inline code boxes and Vault pills. Excludes paths with slashes (`Vault/Tasks.md`), CLI commands,
-          //    and wildcard/placeholder patterns (`Project - *.md`, `<Name>.md`).
+          // B. Convert backtick-wrapped Markdown note titles (e.g. `1.1. Section Instructions.md`, `Plan.md`, `Tasks.md`, `Toilet/Kohler.md`)
+          //    into #wikilink: links so all note titles and paths share the unified VaultNotePill representation instead of splitting
+          //    between inline code boxes and Vault pills. Excludes CLI commands and wildcard/placeholder patterns (`Project - *.md`, `<Name>.md`).
           prose = prose.replace(
-            /`([^`\n*?<>"{}$/\\]+\.md)`/g,
+            /`([^`\n*?<>"{}$]+\.md)`/g,
             (match, noteFile: string) => {
               const trimmed = noteFile.trim();
               if (/^(python|uv|git|npm|node|npx|pip|pytest|ruff)\b/i.test(trimmed) || trimmed.startsWith("-")) {
                 return match;
               }
-              const display = formatNoteDisplay(trimmed);
-              const encodedTarget = encodeURIComponent(trimmed);
+              const cleanTarget = trimmed.replace(/^(\/?Vault\/|\.\/)/i, "");
+              const display = formatNoteDisplay(cleanTarget.split("/").pop() || cleanTarget);
+              const encodedTarget = encodeURIComponent(cleanTarget);
               return `[${display}](#wikilink:${encodedTarget})`;
             }
           );
