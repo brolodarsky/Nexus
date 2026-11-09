@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect, memo } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import type { TraceEvent } from "@/lib/api";
 import MarkdownMessage from "@/components/MarkdownMessage";
 
@@ -1000,15 +1000,23 @@ export const ThinkingPanel = memo(function ThinkingPanel({
   const [expandVersion, setExpandVersion] = useState(0);
   const [fullHeight, setFullHeight] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // isAtBottomRef: guards compact auto-scroll so inspecting earlier steps while live does not pull view
+  const isAtBottomRef = useRef(true);
+
+  const handleScroll = useCallback(() => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    isAtBottomRef.current = scrollHeight - scrollTop - clientHeight <= 40;
+  }, []);
 
   const { subagentNodes } = useMemo(
     () => buildAgentExecutionGraph(events),
     [events]
   );
 
-  // Auto-scroll while live if bounded height mode is active
+  // Auto-scroll while live if bounded height mode is active and user is near the bottom
   useEffect(() => {
-    if (expanded && isLive && !fullHeight && scrollRef.current) {
+    if (expanded && isLive && !fullHeight && scrollRef.current && isAtBottomRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [events, expanded, isLive, fullHeight]);
@@ -1124,6 +1132,7 @@ export const ThinkingPanel = memo(function ThinkingPanel({
       {expanded && (
         <div
           ref={scrollRef}
+          onScroll={handleScroll}
           className={`p-3.5 ${fullHeight ? "" : "max-h-[32rem] overflow-y-auto"
             }`}
         >

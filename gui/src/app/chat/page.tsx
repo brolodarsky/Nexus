@@ -1045,6 +1045,7 @@ export default function ChatPage() {
         />
 
         <ChatMessageThread
+          activeConvId={activeConvId}
           messages={messages}
           loading={loading}
           liveTrace={liveTrace}
