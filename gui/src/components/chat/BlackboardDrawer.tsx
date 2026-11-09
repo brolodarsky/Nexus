@@ -144,7 +144,8 @@ const BlackboardDrawer = memo(function BlackboardDrawer({
                 </div>
                 {isExpanded && (
                   <div className="pt-1.5 border-t border-border-subtle/60 text-xs max-h-64 overflow-y-auto">
-                    <MarkdownMessage content={b.content} />
+                    {/* Render bulletin markdown; note links open into new tabs to preserve chat and blackboard context */}
+                    <MarkdownMessage content={b.content} openInNewTab={true} />
                   </div>
                 )}
               </div>

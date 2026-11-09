@@ -93,10 +93,13 @@ export default function BrainExplorerPage() {
         const params = new URLSearchParams(window.location.search);
         const targetNote = params.get("note");
         if (targetNote) {
-          const name = targetNote.split("/").pop() || targetNote;
+          // Strip heading anchors (e.g. "Table of Contents#6. Engineering" -> "Table of Contents")
+          const baseTarget = targetNote.split("#")[0].trim();
+          const entryName = baseTarget.split("/").pop() || baseTarget;
+          const cleanName = entryName.endsWith(".md") ? entryName : `${entryName}.md`;
           const entry: VaultEntry = {
-            name,
-            path: targetNote,
+            name: cleanName,
+            path: baseTarget,
             type: "file",
             has_audio: false,
           };

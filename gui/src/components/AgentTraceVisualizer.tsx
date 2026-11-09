@@ -561,7 +561,8 @@ function TraceStepCard({
                 LLM Output ({fullLlmResponse.length.toLocaleString()} chars):
               </div>
               <div className="p-3 rounded-lg bg-bg-secondary/90 border border-border-subtle text-text-primary">
-                <MarkdownMessage content={fullLlmResponse} />
+                {/* Render LLM trace output; note links click into new tabs to prevent interrupting active inspection */}
+                <MarkdownMessage content={fullLlmResponse} openInNewTab={true} />
               </div>
             </div>
           )}
@@ -933,7 +934,8 @@ export const AgentGraphView = memo(function AgentGraphView({
               </div>
               {responseExpanded && (
                 <div className="mt-2 p-3.5 rounded-lg bg-bg-secondary/90 border border-emerald-500/30 text-text-primary text-xs">
-                  <MarkdownMessage content={selectedNode.finalResponse} />
+                  {/* Render final response; note links click into new tabs */}
+                  <MarkdownMessage content={selectedNode.finalResponse} openInNewTab={true} />
                 </div>
               )}
             </div>

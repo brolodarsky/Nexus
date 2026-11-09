@@ -147,9 +147,9 @@ const ChatMessageItem = memo(function ChatMessageItem({
           </div>
         )}
 
-        {/* Message body: full GFM + Wiki-Link Markdown for assistant, pre-wrapped text for user */}
+        {/* Message body: full GFM + Wiki-Link Markdown for assistant; note links open into new tabs so the active chat thread is never interrupted */}
         {!isUser ? (
-          <MarkdownMessage content={message.content} />
+          <MarkdownMessage content={message.content} openInNewTab={true} />
         ) : (
           <div className="space-y-2">
             {/* Attached images preview grid */}
@@ -181,9 +181,13 @@ const ChatMessageItem = memo(function ChatMessageItem({
                 })}
               </div>
             )}
-            {/* User prompt text (rendered with 100% full visibility alongside attached images) */}
+            {/* User prompt text: rendered with full GFM + Wiki-Link Markdown support so note links typed by the user also click into new tabs */}
             {message.content && (
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              <MarkdownMessage
+                content={message.content}
+                openInNewTab={true}
+                className="whitespace-pre-wrap"
+              />
             )}
           </div>
         )}

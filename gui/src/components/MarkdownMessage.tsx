@@ -20,10 +20,19 @@ import type { PluggableList } from "unified";
 
 // ── Obsidian Wiki-Link Context ───────────────────────────────────────────────
 
-// WikiLinkContext: Supplies an optional in-place selection callback to Vault note pills.
-// If provided (e.g. inside /vault), clicking a pill switches the active note in-place.
-// If omitted (e.g. in /chat or /hitl), clicking navigates to `/vault?note=${target}`.
-export const WikiLinkContext = createContext<((target: string) => void) | undefined>(undefined);
+// WikiLinkConfig: Configuration options and callbacks provided to nested VaultNotePill components
+// - onWikiLinkClick: optional in-place selection callback (e.g. inside /vault to switch notes in-place)
+// - openInNewTab: boolean indicating whether note pills navigating via Next.js <Link> should open in a new browser tab (target="_blank")
+export interface WikiLinkConfig {
+  onWikiLinkClick?: (target: string) => void;
+  openInNewTab?: boolean;
+}
+
+// WikiLinkContext: Supplies optional in-place selection callback or navigation options to Vault note pills.
+// Supports both a raw callback function `(target: string) => void` (legacy pattern) and a structured `WikiLinkConfig` object.
+// If an in-place callback is provided (e.g. inside /vault), clicking a pill switches the active note in-place.
+// If omitted (e.g. in /chat, /hitl, or blackboard feeds), clicking navigates to `/vault?note=${target}` in a new tab.
+export const WikiLinkContext = createContext<WikiLinkConfig | ((target: string) => void) | undefined>(undefined);
 
 // ── Obsidian Wiki-Link & LaTeX Preprocessor & Rich Markdown Renderer ─
 
@@ -90,17 +99,33 @@ function formatNoteDisplay(rawDisplay: string): string {
 }
 
 // VaultNotePill: Renders an Obsidian [[Wiki-Link]] or Markdown note title as an unbroken glowing cyan badge.
-// Interacts with WikiLinkContext to either perform an in-place note switch or open via Next.js <Link>.
+// Interacts with WikiLinkContext to either perform an in-place note switch or open via Next.js <Link> in a new tab.
 function VaultNotePill({ target, children }: { target: string; children: React.ReactNode }) {
-  const onWikiLinkClick = useContext(WikiLinkContext);
+  const context = useContext(WikiLinkContext);
+  // Support both legacy functional context and structured WikiLinkConfig object
+  const onWikiLinkClick = typeof context === "function" ? context : context?.onWikiLinkClick;
+  // Default openInNewTab to true when onWikiLinkClick is omitted so external/chat contexts don't blow away active threads
+  const openInNewTab = typeof context === "object" && context !== null && "openInNewTab" in context
+    ? Boolean(context.openInNewTab)
+    : true;
+
+  // Strip heading anchors (e.g. "Table of Contents#6. Engineering" -> "Table of Contents") so the URL query param targets the file cleanly
+  const baseTarget = target.split("#")[0].trim();
+
+  const isExternalTab = !onWikiLinkClick && openInNewTab;
 
   const badge = (
     <span
-      title={`Vault Note: ${target}`}
+      title={onWikiLinkClick ? `Vault Note: ${target}` : `Vault Note: ${target} (Click to open in new tab)`}
       className="inline-flex items-center gap-1.5 px-2 py-0.5 mx-0.5 my-0.5 rounded-lg text-xs font-medium bg-accent-cyan/10 border border-accent-cyan/25 text-accent-cyan hover:bg-accent-cyan/20 hover:border-accent-cyan/40 hover:shadow-[0_0_12px_rgba(56,189,248,0.18)] transition-all cursor-pointer align-baseline select-none group"
     >
       <span className="opacity-70 group-hover:opacity-100 text-[0.7rem] shrink-0 transition-opacity">📄</span>
       <span className="group-hover:underline underline-offset-2">{children}</span>
+      {isExternalTab && (
+        <span className="opacity-40 group-hover:opacity-80 text-[0.65rem] shrink-0 transition-opacity -ml-0.5" aria-hidden="true">
+          ↗
+        </span>
+      )}
     </span>
   );
 
@@ -122,7 +147,9 @@ function VaultNotePill({ target, children }: { target: string; children: React.R
 
   return (
     <Link
-      href={`/vault?note=${encodeURIComponent(target)}`}
+      href={`/vault?note=${encodeURIComponent(baseTarget)}`}
+      target={openInNewTab ? "_blank" : undefined}
+      rel={openInNewTab ? "noopener noreferrer" : undefined}
       className="inline align-baseline no-underline"
     >
       {badge}
@@ -317,11 +344,37 @@ const MARKDOWN_COMPONENTS: Components = {
   hr: () => <hr className="my-4 border-border-subtle" />,
   blockquote: ({ children }) => <ObsidianCallout>{children}</ObsidianCallout>,
   a: ({ href, children }) => {
-    // Render Obsidian `[[Wiki-Links]]` as styled Vault note pills
+    // 1. Render Obsidian `[[Wiki-Links]]` preprocessed into `#wikilink:` as styled Vault note pills
     if (href?.startsWith("#wikilink:")) {
       const target = decodeURIComponent(href.replace("#wikilink:", ""));
       return <VaultNotePill target={target}>{children}</VaultNotePill>;
     }
+
+    // 2. Intercept deep-links to `/vault?note=...` so they share unified VaultNotePill presentation and tab handling
+    if (href?.startsWith("/vault?note=") || href?.startsWith("vault?note=")) {
+      const match = href.match(/[?&]note=([^&#]+)/);
+      if (match) {
+        const target = decodeURIComponent(match[1]);
+        return <VaultNotePill target={target}>{children}</VaultNotePill>;
+      }
+    }
+
+    // 3. Intercept relative Markdown links to Vault notes (e.g. `[Log](Vault/6. Engineering/Log.md)` or `[Plan](Plan.md)`)
+    //    that would otherwise resolve to broken `/chat/*.md` 404 paths in the browser
+    if (
+      href &&
+      !href.startsWith("http://") &&
+      !href.startsWith("https://") &&
+      !href.startsWith("mailto:") &&
+      !href.startsWith("#") &&
+      /\.md(?:#[^#]*)?$/i.test(href)
+    ) {
+      // Strip leading "Vault/", "/Vault/", or "./" prefixes to extract the clean relative vault path
+      const cleanPath = href.replace(/^(\/?Vault\/|\.\/)/i, "");
+      return <VaultNotePill target={cleanPath}>{children}</VaultNotePill>;
+    }
+
+    // 4. Standard external links render with target="_blank" and rel="noopener noreferrer" for isolated tab security
     return (
       <a
         href={href}
@@ -405,10 +458,15 @@ const MARKDOWN_COMPONENTS: Components = {
 };
 
 // MarkdownMessageProps: Input parameters for the Markdown renderer
+// - content: raw or preprocessed markdown document string
+// - onWikiLinkClick: optional callback for in-place Vault note switching
+// - className: optional container styling overrides
+// - openInNewTab: optional boolean specifying whether note links open in a new browser tab (defaults to true when onWikiLinkClick is omitted)
 export interface MarkdownMessageProps {
   content: string;                            // Raw or preprocessed markdown document string
   onWikiLinkClick?: (target: string) => void; // Optional callback for in-place Vault note switching
   className?: string;                         // Optional container styling overrides
+  openInNewTab?: boolean;                     // Optional override: whether note links open in a new browser tab
 }
 
 // MarkdownMessage: Memoized component that preprocesses Obsidian syntax and renders GFM Markdown.
@@ -417,12 +475,19 @@ const MarkdownMessage = memo(function MarkdownMessage({
   content,
   onWikiLinkClick,
   className = "",
+  openInNewTab = true,
 }: MarkdownMessageProps) {
   // Memoize regex preprocessing so string splitting and replacements only run when `content` actually mutates
   const formatted = useMemo(() => preprocessObsidianMarkdown(content), [content]);
 
+  // Memoize context configuration so child pills avoid re-rendering unless the navigation handler or tab policy changes
+  const wikiLinkConfig = useMemo<WikiLinkConfig>(
+    () => ({ onWikiLinkClick, openInNewTab }),
+    [onWikiLinkClick, openInNewTab]
+  );
+
   return (
-    <WikiLinkContext.Provider value={onWikiLinkClick}>
+    <WikiLinkContext.Provider value={wikiLinkConfig}>
       <div className={`space-y-3 text-sm leading-relaxed text-text-primary break-words ${className}`}>
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
