@@ -11,7 +11,12 @@ DB_PATH = Path(__file__).parent.parent.parent.parent / "logs" / "chats.db"
 
 def _get_conn():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # timeout=30.0: Waits up to 30s for any transient lock to release before raising OperationalError
+    # PRAGMA journal_mode=WAL: Enables Write-Ahead Logging so concurrent readers never block active writers
+    # PRAGMA busy_timeout=30000: Configures SQLite engine-level busy handler timeout in milliseconds
+    conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
     conn.row_factory = sqlite3.Row
     return conn
 

@@ -124,7 +124,15 @@ def _normalize_target_file(target_file: str) -> str:
 
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
+    """Opens a SQLite connection to `hitl.db` with dictionary row access and WAL concurrency mode.
+
+    Write-Ahead Logging (WAL) ensures concurrent agent tool calls staging proposals do not block
+    human review queries in the Control Panel or background approval checks.
+    """
+    # timeout=30.0: Waits up to 30 seconds for pending transactions or snapshot rollbacks to settle
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
     conn.row_factory = sqlite3.Row
     return conn
 

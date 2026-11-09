@@ -80,7 +80,8 @@ def run_nexus_agent_with_trace(
     # Scope trace context variable so all telemetry events emitted on this thread carry its active UUID
     trace_token = set_trace_thread_id(active_thread)
 
-    reset_subagent_counter()
+    # Reset subagent serial counter strictly scoped to active_thread so concurrent turns in other conversations are untouched
+    reset_subagent_counter(active_thread)
     # Format start banner with optional image attachment count for live Thinking Panel observability
     start_label = f"Query ({effective_tier} · {active_model_name})"
     if images:

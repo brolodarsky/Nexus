@@ -105,27 +105,119 @@ nexus_tracer = AgentTracer("Head Agent", color="cyan", agent_id="nexus", parent_
 subagent_tracer = AgentTracer("Subagent", color="magenta", agent_id="subagent", parent_id="nexus")
 
 # Thread-safe serial counter and color palette so concurrent `spawn_subagent` worker threads get distinct IDs (`subagent-1`, `subagent-2`, ...)
+# _subagent_counter_lock: Re-entrant or mutual exclusion lock protecting per-thread counter allocations and provider lookups
 _subagent_counter_lock = threading.Lock()
+# _thread_subagent_counters: Maps conversation/thread UUID string -> int serial counter, isolating concurrent swarms
+_thread_subagent_counters: dict[str, int] = {}
+# _thread_active_providers: Maps conversation/thread UUID string -> str ("gemini", "anthropic", "openai") for provider consistency
+_thread_active_providers: dict[str, str] = {}
+# Global fallback counter and provider for single-turn CLI runs or unit tests invoked without explicit thread IDs
 _subagent_serial_counter = 0
+_default_active_provider: Optional[str] = None
 # Tracks the active parent turn's LLM provider (`"gemini"`, `"anthropic"`, `"openai"`) so spawned subagents match the turn's provider family
 _active_turn_provider: Optional[str] = None
 _SUBAGENT_COLORS = ["magenta", "yellow", "green", "blue"]
 
 
-def reset_subagent_counter() -> None:
-    """Resets the subagent serial number counter at the start of a new parent agent run so subagents start cleanly at #1."""
-    global _subagent_serial_counter, _active_turn_provider
+def set_active_turn_provider(provider: str, thread_id: Optional[str] = None) -> None:
+    """Sets the active LLM provider for the specified thread_id and updates process fallback state.
+
+    Args:
+        provider: Provider identifier string (e.g. "anthropic", "gemini", "openai").
+        thread_id: Optional conversation/thread UUID. When provided, isolates this turn's provider family
+                   from other conversations executing concurrently in background worker threads.
+    """
+    global _active_turn_provider, _default_active_provider
     with _subagent_counter_lock:
+        _active_turn_provider = provider
+        _default_active_provider = provider
+        if thread_id:
+            _thread_active_providers[thread_id] = provider
+
+
+def get_active_turn_provider(thread_id: Optional[str] = None) -> Optional[str]:
+    """Retrieves the active LLM provider for the specified thread_id, falling back to ambient context or global default.
+
+    Args:
+        thread_id: Optional conversation/thread UUID. If omitted, attempts lookup via ambient HITL execution context.
+
+    Returns:
+        Provider identifier string (e.g. "anthropic", "gemini", "openai") or None if unconfigured.
+    """
+    effective_thread = thread_id
+    if not effective_thread:
+        try:
+            from nexus.core.hitl_queue import get_hitl_execution_context
+            ctx = get_hitl_execution_context()
+            effective_thread = ctx.get("conversation_id") or ctx.get("thread_id")
+        except Exception:
+            pass
+
+    with _subagent_counter_lock:
+        if effective_thread and effective_thread in _thread_active_providers:
+            return _thread_active_providers[effective_thread]
+        return _active_turn_provider or _default_active_provider
+
+
+def reset_subagent_counter(thread_id: Optional[str] = None) -> None:
+    """Resets the subagent serial number counter and active provider.
+
+    Args:
+        thread_id: Optional conversation/thread UUID. If provided (or resolved from ambient HITL context),
+                   resets ONLY that thread's subagent counter and provider state, leaving concurrent swarms
+                   in other conversations unaffected. If omitted and no context exists, resets global defaults.
+    """
+    global _subagent_serial_counter, _active_turn_provider, _default_active_provider
+    effective_thread = thread_id
+    if not effective_thread:
+        try:
+            from nexus.core.hitl_queue import get_hitl_execution_context
+            ctx = get_hitl_execution_context()
+            effective_thread = ctx.get("conversation_id") or ctx.get("thread_id")
+        except Exception:
+            pass
+
+    with _subagent_counter_lock:
+        if effective_thread:
+            _thread_subagent_counters[effective_thread] = 0
+            _thread_active_providers.pop(effective_thread, None)
+        else:
+            _thread_subagent_counters.clear()
+            _thread_active_providers.clear()
+            _default_active_provider = None
         _subagent_serial_counter = 0
         _active_turn_provider = None
 
 
 def _next_subagent_tracer(tier: str, thread_id: Optional[str] = None) -> tuple[int, str, AgentTracer]:
-    """Allocates a thread-safe sequential serial number and dedicated `AgentTracer` linked to `parent_id="nexus"`."""
+    """Allocates a thread-safe sequential serial number and dedicated `AgentTracer` linked to `parent_id="nexus"`.
+
+    Args:
+        tier: Capability tier string (e.g. "low", "medium", "strong") for the tracer badge label.
+        thread_id: Optional conversation UUID. Scopes the sequential counter strictly to this conversation thread.
+
+    Returns:
+        tuple[int, str, AgentTracer]: (serial_number, subagent_id, AgentTracer_instance).
+    """
     global _subagent_serial_counter
+    effective_thread = thread_id
+    if not effective_thread:
+        try:
+            from nexus.core.hitl_queue import get_hitl_execution_context
+            ctx = get_hitl_execution_context()
+            effective_thread = ctx.get("conversation_id") or ctx.get("thread_id")
+        except Exception:
+            pass
+
     with _subagent_counter_lock:
-        _subagent_serial_counter += 1
-        serial = _subagent_serial_counter
+        if effective_thread:
+            current = _thread_subagent_counters.get(effective_thread, 0) + 1
+            _thread_subagent_counters[effective_thread] = current
+            serial = current
+        else:
+            _subagent_serial_counter += 1
+            serial = _subagent_serial_counter
+
     sub_id = f"subagent-{serial}"
     color = _SUBAGENT_COLORS[(serial - 1) % len(_SUBAGENT_COLORS)]
     tracer = AgentTracer(
@@ -178,7 +270,9 @@ def get_latest_checkpoint_id(thread_id: str) -> Optional[str]:
     if not thread_id or not MEMORY_DB_PATH.exists():
         return None
     try:
-        with sqlite3.connect(MEMORY_DB_PATH) as check_conn:
+        with sqlite3.connect(MEMORY_DB_PATH, timeout=30.0) as check_conn:
+            check_conn.execute("PRAGMA journal_mode=WAL;")
+            check_conn.execute("PRAGMA busy_timeout=30000;")
             cursor = check_conn.cursor()
             cursor.execute(
                 "SELECT checkpoint_id FROM checkpoints WHERE thread_id = ? ORDER BY checkpoint_id DESC LIMIT 1",
@@ -206,7 +300,9 @@ def rollback_checkpoints_for_thread(thread_id: str, pre_turn_checkpoint_id: Opti
         return 0
 
     deleted_checkpoints = 0
-    with sqlite3.connect(MEMORY_DB_PATH) as rollback_conn:
+    with sqlite3.connect(MEMORY_DB_PATH, timeout=30.0) as rollback_conn:
+        rollback_conn.execute("PRAGMA journal_mode=WAL;")
+        rollback_conn.execute("PRAGMA busy_timeout=30000;")
         cursor = rollback_conn.cursor()
 
         target_checkpoint_id = pre_turn_checkpoint_id
@@ -392,15 +488,18 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
                     cost-efficient execution; pass `"medium"` or `"strong"` only for complex synthesis subtasks.
     """
     effective_tier: ModelTier = model_tier if model_tier in ("low", "medium", "strong") else "low"
-    # Match the parent turn's provider when chatting on Anthropic (e.g. `"anthropic:low"` -> `claude-sonnet-4-5`)
-    sub_tier_arg = f"anthropic:{effective_tier}" if _active_turn_provider == "anthropic" else effective_tier
-    sub_resolved = resolve_model_config(sub_tier_arg)
-    sub_model_name = sub_resolved["model_name"]
-
     # Propagate conversation_id from parent while scoping thread_id, agent_id, and agent_role to this subagent
     parent_ctx = get_hitl_execution_context()
     parent_convo = parent_ctx.get("conversation_id") or "nexus_primary"
     parent_thread = parent_ctx.get("thread_id") or parent_convo
+
+    # Match the parent turn's provider when chatting on Anthropic (e.g. `"anthropic:low"` -> `claude-sonnet-4-5`)
+    # Scoped strictly to parent_convo so parallel swarms on different provider families never cross-contaminate
+    parent_provider = get_active_turn_provider(parent_convo)
+    sub_tier_arg = f"anthropic:{effective_tier}" if parent_provider == "anthropic" else effective_tier
+    sub_resolved = resolve_model_config(sub_tier_arg)
+    sub_model_name = sub_resolved["model_name"]
+
     serial, sub_id, local_tracer = _next_subagent_tracer(effective_tier, thread_id=parent_convo)
     t0 = time.time()
 
@@ -668,6 +767,8 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     active_model_name = resolved_model["model_name"]
     active_provider = resolved_model["provider"]
 
+    # Record active provider scoped to active_convo_id so parallel subagents match their exact turn's provider family
+    set_active_turn_provider(active_provider, thread_id=active_convo_id)
     global _active_turn_provider
     _active_turn_provider = active_provider
 
@@ -782,8 +883,11 @@ workflow.add_edge("tools", "agent")
 
 # 3. Persistent Checkpointer: Co-located SQLite database for multi-turn conversation state
 # `check_same_thread=False` allows FastAPI background worker threads to share the SQLite connection safely
+# `timeout=30.0` and Write-Ahead Logging (WAL) enable concurrent readers without blocking checkpoint writes
 db_path = MEMORY_DB_PATH
-conn = sqlite3.connect(db_path, check_same_thread=False)
+conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
+conn.execute("PRAGMA journal_mode=WAL;")
+conn.execute("PRAGMA busy_timeout=30000;")
 memory = SqliteSaver(conn)
 
 # 4. Compile into executable stateful LangGraph runnable

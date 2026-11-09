@@ -13,7 +13,12 @@ from pathlib import Path
 import pytest
 
 from nexus.core.trace import AgentTracer, trace_bus, reset_trace_thread_id, set_trace_thread_id
-from nexus.agent.graph import _next_subagent_tracer, reset_subagent_counter
+from nexus.agent.graph import (
+    _next_subagent_tracer,
+    get_active_turn_provider,
+    reset_subagent_counter,
+    set_active_turn_provider,
+)
 from nexus.core.run_logger import log_run, list_runs, get_run, RUNS_DIR
 
 
@@ -74,6 +79,48 @@ def test_subagent_serial_allocation_and_reset():
     s3, id3, _ = _next_subagent_tracer("low")
     assert s3 == 1
     assert id3 == "subagent-1"
+
+
+def test_concurrent_thread_subagent_counter_and_provider_isolation():
+    """Verify that parallel conversation threads maintain completely isolated subagent counters and providers."""
+    thread_a = "conv_thread_alpha"
+    thread_b = "conv_thread_beta"
+
+    # Reset both threads independently
+    reset_subagent_counter(thread_a)
+    reset_subagent_counter(thread_b)
+
+    # Set distinct providers per thread
+    set_active_turn_provider("anthropic", thread_id=thread_a)
+    set_active_turn_provider("gemini", thread_id=thread_b)
+
+    assert get_active_turn_provider(thread_a) == "anthropic"
+    assert get_active_turn_provider(thread_b) == "gemini"
+
+    # Subagents allocated on Thread A
+    s_a1, id_a1, t_a1 = _next_subagent_tracer("low", thread_id=thread_a)
+    s_a2, id_a2, t_a2 = _next_subagent_tracer("medium", thread_id=thread_a)
+
+    assert s_a1 == 1
+    assert id_a1 == "subagent-1"
+    assert s_a2 == 2
+    assert id_a2 == "subagent-2"
+
+    # Subagents allocated on Thread B start at #1 and do not clash with Thread A
+    s_b1, id_b1, t_b1 = _next_subagent_tracer("low", thread_id=thread_b)
+    assert s_b1 == 1
+    assert id_b1 == "subagent-1"
+
+    # Resetting Thread A resets only Thread A; Thread B continues sequentially
+    reset_subagent_counter(thread_a)
+    s_b2, id_b2, t_b2 = _next_subagent_tracer("strong", thread_id=thread_b)
+    assert s_b2 == 2
+    assert id_b2 == "subagent-2"
+
+    # Thread A starts cleanly back at #1
+    s_a3, id_a3, t_a3 = _next_subagent_tracer("low", thread_id=thread_a)
+    assert s_a3 == 1
+    assert id_a3 == "subagent-1"
 
 
 def test_log_run_persists_subagents_and_token_telemetry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

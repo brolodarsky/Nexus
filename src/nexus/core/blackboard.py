@@ -29,8 +29,14 @@ def get_board_connection() -> sqlite3.Connection:
     
     `sqlite3.Row` provides key-based column lookups (e.g. `row["author"]`) alongside tuple indexing,
     making database query results drop-in compatible with standard Python dictionaries.
+    Configured with Write-Ahead Logging (WAL) and 30-second busy timeout for high-concurrency multi-agent swarms.
     """
-    conn = sqlite3.connect(BOARD_DB_PATH, timeout=10.0)
+    # timeout=30.0: Waits up to 30s for concurrent subagent bulletin transactions to commit
+    # PRAGMA journal_mode=WAL: Allows concurrent readers without blocking background subagent writes
+    # PRAGMA busy_timeout=30000: Synchronizes busy handler timeout in SQLite engine internals
+    conn = sqlite3.connect(BOARD_DB_PATH, timeout=30.0)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
     conn.row_factory = sqlite3.Row
     return conn
 
