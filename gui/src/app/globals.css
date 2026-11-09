@@ -182,3 +182,14 @@ body {
   color: var(--color-accent-cyan);
   border: 1px solid rgba(56, 189, 248, 0.15);
 }
+
+/* ── KaTeX Mathematical Typesetting ─────────────────────── */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+}
+.katex {
+  font-size: 1.05em;
+  color: inherit;
+}

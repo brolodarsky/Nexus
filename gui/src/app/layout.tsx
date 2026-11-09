@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { Geist_Mono } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 
 const inter = Inter({

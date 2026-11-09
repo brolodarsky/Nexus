@@ -11,6 +11,12 @@ import Link from "next/link";
 import ReactMarkdown, { type Components } from "react-markdown";
 // remarkGfm: Remark plugin enabling GitHub-Flavored Markdown (tables, task checkboxes `- [ ]`, strikethrough, autolinks)
 import remarkGfm from "remark-gfm";
+// remarkMath: Remark plugin recognizing $inline$ and $$block$$ mathematical formulas
+import remarkMath from "remark-math";
+// rehypeKatex: Rehype plugin typesetting LaTeX math AST nodes via KaTeX
+import rehypeKatex from "rehype-katex";
+// PluggableList: Unified type definition for Remark/Rehype plugin tuples and configurations
+import type { PluggableList } from "unified";
 
 // ── Obsidian Wiki-Link Context ───────────────────────────────────────────────
 
@@ -21,9 +27,10 @@ export const WikiLinkContext = createContext<((target: string) => void) | undefi
 
 // ── Obsidian Wiki-Link & LaTeX Preprocessor & Rich Markdown Renderer ─
 
-// LATEX_SYMBOLS: Lookup map converting LaTeX math arrow/operator commands into clean Unicode characters
-// so LLM-emitted syntax like `$\leftrightarrow$` or `\rightarrow` renders natively without MathJax/KaTeX overhead.
-const LATEX_SYMBOLS: Record<string, string> = {
+// PROSE_LATEX_SYMBOLS: Lookup map converting bare LaTeX arrow/operator commands in plain prose
+// (when emitted without `$` math delimiters, e.g. `Step 1 \rightarrow Step 2`) into clean Unicode characters.
+// Formal math equations inside `$...$` or `$$...$$` are preserved intact and rendered by KaTeX.
+const PROSE_LATEX_SYMBOLS: Record<string, string> = {
   "\\longleftrightarrow": "↔",
   "\\Longleftrightarrow": "⇔",
   "\\leftrightarrow": "↔",
@@ -46,65 +53,35 @@ const LATEX_SYMBOLS: Record<string, string> = {
   "\\iff": "⇔",
   "\\to": "→",
   "\\gets": "←",
-  "\\leq": "≤",
-  "\\geq": "≥",
-  "\\neq": "≠",
-  "\\le": "≤",
-  "\\ge": "≥",
-  "\\ne": "≠",
   "\\approx": "≈",
   "\\equiv": "≡",
-  "\\sim": "∼",
-  "\\times": "×",
-  "\\div": "÷",
-  "\\pm": "±",
-  "\\cdot": "·",
-  "\\bullet": "•",
-  "\\infty": "∞",
-  "\\notin": "∉",
-  "\\in": "∈",
-  "\\subseteq": "⊆",
-  "\\subset": "⊂",
-  "\\cup": "∪",
-  "\\cap": "∩",
-  "\\forall": "∀",
-  "\\exists": "∃",
-  "\\emptyset": "∅",
-  "\\varnothing": "∅",
-  "\\Delta": "Δ",
-  "\\nabla": "∇",
-  "\\alpha": "α",
-  "\\beta": "β",
-  "\\gamma": "γ",
-  "\\delta": "δ",
-  "\\lambda": "λ",
-  "\\mu": "μ",
-  "\\pi": "π",
-  "\\sigma": "σ",
-  "\\tau": "τ",
-  "\\omega": "ω",
-  "\\Omega": "Ω",
+  "\\neq": "≠",
+  "\\leq": "≤",
+  "\\geq": "≥",
 };
 
-// BARE_LATEX_PATTERN: Matches unambiguous multi-character LaTeX arrow/operator commands even when the LLM
-// omits surrounding `$` delimiters (e.g., `\rightarrow`, `\leftarrow`, `\leftrightarrow`).
-const BARE_LATEX_PATTERN =
-  /\\(longleftrightarrow|Longleftrightarrow|leftrightarrow|Leftrightarrow|longrightarrow|Longrightarrow|longleftarrow|Longleftarrow|rightarrow|Rightarrow|leftarrow|Leftarrow|updownarrow|uparrow|downarrow|mapsto|implies|iff|leq|geq|neq|approx|equiv|times|infty)\b/g;
-
-// MATH_INNER_LATEX_PATTERN: Matches all known LaTeX commands (sorted longest-first) inside `$...$` or `\(...\)` spans
-const MATH_INNER_LATEX_PATTERN = new RegExp(
-  Object.keys(LATEX_SYMBOLS)
+// BARE_PROSE_LATEX_PATTERN: Matches bare LaTeX arrow/operator commands (longest-first) outside of math blocks.
+const BARE_PROSE_LATEX_PATTERN = new RegExp(
+  Object.keys(PROSE_LATEX_SYMBOLS)
     .sort((a, b) => b.length - a.length)
     .map((k) => k.replace(/\\/g, "\\\\") + "\\b")
     .join("|"),
   "g"
 );
 
-// Replaces LaTeX command tokens inside a math expression string with their Unicode equivalents
-function replaceLatexInMath(expr: string): string {
-  return expr
-    .replace(MATH_INNER_LATEX_PATTERN, (match) => LATEX_SYMBOLS[match] ?? match)
-    .trim();
+// escapeProseCurrency: Escapes standalone currency expressions (e.g. `$41.20`, `$150k`, `$50–$100`)
+// into `\$...` so remark-math does not mistakenly pair conversational currency figures across prose.
+// If the number is immediately followed by a closing `$` (e.g. `$0.4$` or `$100$`), it is recognized
+// as an intentional single-number math literal and preserved without escaping.
+function escapeProseCurrency(text: string): string {
+  return text.replace(/(?<![\w$\\])\$(\d+(?:\.\d+)?(?:[kKmMbB])?)/g, (match, _num, offset, str) => {
+    const nextChar = str[offset + match.length];
+    if (nextChar === "$") {
+      // Followed immediately by closing $ -> math literal (e.g. `$0.4$`), do not escape
+      return match;
+    }
+    return `\\${match}`;
+  });
 }
 
 // Strips trailing `.md` from note display labels so `[[Plan.md]]`, `` `Plan.md` ``, and `[[Plan]]` render identically
@@ -212,8 +189,7 @@ function ObsidianCallout({ children }: { children: React.ReactNode }) {
 }
 
 // Converts Obsidian `[[Target|Alias]]` / `[[Target]]` syntax, backticked `.md` note titles (`Plan.md`),
-// and inline LaTeX arrow/operator syntax (`$\leftrightarrow$`) outside of fenced code blocks into
-// clean Markdown links and Unicode characters.
+// escapes conversational currency figures, and normalizes LaTeX math delimiters outside of fenced code blocks.
 export function preprocessObsidianMarkdown(raw: string): string {
   if (!raw) return "";
   // Split on fenced code blocks (```...```) so raw Markdown drafts inside code fences stay untouched
@@ -223,62 +199,83 @@ export function preprocessObsidianMarkdown(raw: string): string {
       // Odd indices are fenced code blocks captured by the regex group
       if (index % 2 === 1) return segment;
 
-      // 1. Match backtick-wrapped wikilinks (`[[target|alias]]` or ``[[target]]``) OR bare wikilinks ([[target|alias]] or [[target]])
-      let processed = segment.replace(
-        /`{1,2}\s*\[\[([^\]|]+)(?:\|([^\]]+))?\]\]\s*`{1,2}|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
-        (_match, t1?: string, a1?: string, t2?: string, a2?: string) => {
-          const target = (t1 || t2 || "").trim();
-          const alias = (a1 || a2 || "").trim();
-          const rawDisplay = alias || target.split("/").pop() || target;
-          const display = formatNoteDisplay(rawDisplay);
-          const encodedTarget = encodeURIComponent(target);
-          return `[${display}](#wikilink:${encodedTarget})`;
-        }
-      );
+      // 1. Escape conversational currency amounts ($150k, $41.20, $50–$100) before math delimiter evaluation
+      let processed = escapeProseCurrency(segment);
 
-      // 2. Convert backtick-wrapped Markdown note titles (e.g. `1.1. Section Instructions.md`, `Plan.md`, `Tasks.md`)
-      //    into #wikilink: links so all note titles share the unified VaultNotePill representation instead of splitting
-      //    between inline code boxes and Vault pills. Excludes paths with slashes (`Vault/Tasks.md`), CLI commands,
-      //    and wildcard/placeholder patterns (`Project - *.md`, `<Name>.md`).
-      processed = processed.replace(
-        /`([^`\n*?<>"{}$/\\]+\.md)`/g,
-        (match, noteFile: string) => {
-          const trimmed = noteFile.trim();
-          if (/^(python|uv|git|npm|node|npx|pip|pytest|ruff)\b/i.test(trimmed) || trimmed.startsWith("-")) {
-            return match;
+      // 2. Normalize LaTeX delimiter variants \(...\) -> $...$ and \[...\] -> $$...$$
+      processed = processed
+        .replace(/\\\(([\s\S]*?)\\\)/g, (_m, inner) => `$${inner}$`)
+        .replace(/\\\[([\s\S]*?)\\\]/g, (_m, inner) => `\n$$\n${inner.trim()}\n$$\n`);
+
+      // 3. Auto-escape unescaped underscores inside \text{...} in math so snake_case identifiers don't fail in KaTeX
+      processed = processed.replace(/\\text\{([^}]+)\}/g, (_m, inner) => {
+        return `\\text{${inner.replace(/(?<!\\)_/g, "\\_")}}`;
+      });
+
+      // 4. Split by display math ($$...$$) and inline math ($...$) so prose-specific link and arrow replacements
+      //    only execute on plain conversational text and never mutate KaTeX math expressions
+      const mathSegments = processed.split(/(\$\$[\s\S]*?\$\$|(?<!\\)\$(?!\s)[^$\n]+?(?<!\s)\$)/g);
+
+      return mathSegments
+        .map((subSegment, mathIndex) => {
+          // Odd indices are math blocks ($$...$$ or $...$)
+          if (mathIndex % 2 === 1) {
+            return subSegment;
           }
-          const display = formatNoteDisplay(trimmed);
-          const encodedTarget = encodeURIComponent(trimmed);
-          return `[${display}](#wikilink:${encodedTarget})`;
-        }
-      );
 
-      // 3. Unwrap inline LaTeX math spans (`$...$` or `\(...\)`) containing backslash commands into clean Unicode.
-      //    Closing `$` is guarded by `(?![a-zA-Z0-9\\])` so currency ranges like `$150k–$200k` never pair across prose.
-      processed = processed.replace(
-        /(?:^|(?<![a-zA-Z0-9]))\$(?!\s)(?=[^$\n]*\\[a-zA-Z])([^$\n]+?)(?<!\s)\$(?![a-zA-Z0-9\\])/g,
-        (_match, inner: string) => replaceLatexInMath(inner)
-      );
-      processed = processed.replace(
-        /\\\(([\s\S]*?)\\\)/g,
-        (_match, inner: string) => replaceLatexInMath(inner)
-      );
+          // A. Match backtick-wrapped wikilinks (`[[target|alias]]` or ``[[target]]``) OR bare wikilinks ([[target|alias]] or [[target]])
+          let prose = subSegment.replace(
+            /`{1,2}\s*\[\[([^\]|]+)(?:\|([^\]]+))?\]\]\s*`{1,2}|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+            (_match, t1?: string, a1?: string, t2?: string, a2?: string) => {
+              const target = (t1 || t2 || "").trim();
+              const alias = (a1 || a2 || "").trim();
+              const rawDisplay = alias || target.split("/").pop() || target;
+              const display = formatNoteDisplay(rawDisplay);
+              const encodedTarget = encodeURIComponent(target);
+              return `[${display}](#wikilink:${encodedTarget})`;
+            }
+          );
 
-      // 4. Convert any remaining bare unambiguous LaTeX arrow/operator commands (e.g. `\rightarrow`, `\leftrightarrow`)
-      processed = processed.replace(
-        BARE_LATEX_PATTERN,
-        (match) => LATEX_SYMBOLS[match] ?? match
-      );
+          // B. Convert backtick-wrapped Markdown note titles (e.g. `1.1. Section Instructions.md`, `Plan.md`, `Tasks.md`)
+          //    into #wikilink: links so all note titles share the unified VaultNotePill representation instead of splitting
+          //    between inline code boxes and Vault pills. Excludes paths with slashes (`Vault/Tasks.md`), CLI commands,
+          //    and wildcard/placeholder patterns (`Project - *.md`, `<Name>.md`).
+          prose = prose.replace(
+            /`([^`\n*?<>"{}$/\\]+\.md)`/g,
+            (match, noteFile: string) => {
+              const trimmed = noteFile.trim();
+              if (/^(python|uv|git|npm|node|npx|pip|pytest|ruff)\b/i.test(trimmed) || trimmed.startsWith("-")) {
+                return match;
+              }
+              const display = formatNoteDisplay(trimmed);
+              const encodedTarget = encodeURIComponent(trimmed);
+              return `[${display}](#wikilink:${encodedTarget})`;
+            }
+          );
 
-      return processed;
+          // C. Convert bare LaTeX arrow/operator commands in prose (e.g. `Step 1 \rightarrow Step 2`)
+          prose = prose.replace(
+            BARE_PROSE_LATEX_PATTERN,
+            (match) => PROSE_LATEX_SYMBOLS[match] ?? match
+          );
+
+          return prose;
+        })
+        .join("");
     })
     .join("");
 }
 
-// REMARK_PLUGINS: Module-level static plugin array passed to ReactMarkdown.
-// Hoisting this outside the component prevents allocating a new array reference (`[remarkGfm]`) on every render,
+// REMARK_PLUGINS: Module-level static Remark plugin array passed to ReactMarkdown.
+// Hoisting this outside the component prevents allocating a new array reference on every render,
 // preserving ReactMarkdown's internal unified/remark processor cache across re-renders.
-const REMARK_PLUGINS = [remarkGfm];
+// Combines remarkGfm (tables, checklists, strikethrough) and remarkMath ($inline$, $$block$$ math).
+const REMARK_PLUGINS: PluggableList = [remarkGfm, remarkMath];
+
+// REHYPE_PLUGINS: Module-level static Rehype plugin array for KaTeX mathematical typesetting.
+// Configured with `strict: false` and `throwOnError: false` so malformed or non-standard LaTeX
+// degrades gracefully without crashing the UI thread.
+const REHYPE_PLUGINS: PluggableList = [[rehypeKatex, { strict: false, throwOnError: false }]];
 
 // MARKDOWN_COMPONENTS: Module-level static custom element renderer map for ReactMarkdown.
 // Keeping this object reference stable avoids tearing down and remounting DOM subtrees when parent components re-render.
@@ -429,6 +426,7 @@ const MarkdownMessage = memo(function MarkdownMessage({
       <div className={`space-y-3 text-sm leading-relaxed text-text-primary break-words ${className}`}>
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={REHYPE_PLUGINS}
           components={MARKDOWN_COMPONENTS}
         >
           {formatted}
