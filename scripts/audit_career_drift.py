@@ -35,10 +35,12 @@ TELEMETRY_FILE = PORTFOLIO_REPO / "src" / "data" / "nexusTelemetry.ts"
 DOCS = {
     "my_skills": CAREER_DIR / "My Skills.md",
     "resume_master": RESUMES_DIR / "Resume - Master.md",
+    "resume_active": RESUMES_DIR / "Resume - Master (Active Operations).md",
     "resume_extended": RESUMES_DIR / "Resume - Master (Extended).md",
+    "resume_sales": RESUMES_DIR / "Resume - Technical Sales & Solutions Engineering.md",
+    "resume_federal": RESUMES_DIR / "Resume - US Tech Force (Federal GS-14).md",
     "platform_profiles": EVIDENCE_DIR / "Platform Profiles.md",
     "portfolio_hub": EVIDENCE_DIR / "Portfolio Hub.md",
-    "war_room": CAREER_DIR / "Job Hunt War Room.md",
     "employer_skills": CAREER_DIR / "Employer Skill Requirements.md",
     "telemetry": TELEMETRY_FILE,
 }
@@ -82,14 +84,13 @@ PROFILE_CONSTRAINTS = {
 # Core Keywords to verify across downstream documents
 CORE_SKILLS = [
     "LangGraph",
-    "Deterministic Pre-flight Hydration",
-    "Domain Ontology",
     "LLM-as-a-Judge",
     "HITL",
     "FastAPI",
     "Next.js 16",
     "TypeScript",
     "Python",
+    "pytest",
     "SiliSlick",
     "HIPAA",
 ]
@@ -187,10 +188,11 @@ def run_audit():
     print("-" * 70)
     check_targets = {
         "Master Resume": contents.get("resume_master", ""),
+        "Active Ops Resume": contents.get("resume_active", ""),
         "Extended Resume": contents.get("resume_extended", ""),
+        "Federal Resume": contents.get("resume_federal", ""),
         "Platform Profiles": contents.get("platform_profiles", ""),
         "Portfolio Hub": contents.get("portfolio_hub", ""),
-        "Job Hunt War Room": contents.get("war_room", ""),
     }
 
     for skill in CORE_SKILLS:

@@ -48,8 +48,8 @@ const ChatMessageItem = memo(function ChatMessageItem({
   onSelectConversation,
 }: ChatMessageItemProps) {
   const isUser = message.role === "user";
-  const hasTrace = Boolean(message.trace && message.trace.length > 0);
-  // Memoize turn cost calculation so trace event scanning only runs once per message
+  const hasTrace = Boolean(message.hasTrace || (message.trace && message.trace.length > 0));
+  // Memoize turn cost calculation; use explicit cost_usd column if present, falling back to trace scan
   const effectiveCost = useMemo(
     () =>
       message.costUsd ??
@@ -192,10 +192,11 @@ const ChatMessageItem = memo(function ChatMessageItem({
           </div>
         )}
 
-        {/* Persisted trace log (collapsed by default for past messages) */}
-        {!isUser && message.trace && message.trace.length > 0 && (
+        {/* Persisted trace log (collapsed by default for past messages; lazy-loaded on demand if traces exist) */}
+        {!isUser && hasTrace && (
           <ThinkingPanel
             events={message.trace}
+            messageId={message.id}
             isLive={false}
             defaultExpanded={false}
           />

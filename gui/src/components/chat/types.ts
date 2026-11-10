@@ -16,6 +16,7 @@ import type { ChatHistoryEntry, ModelOption, TraceEvent } from "@/lib/api";
 // - modelName: concrete LLM identifier (e.g., "gemini-4-argon", "gemini-3.8-flash")
 // - costUsd: estimated USD inference cost for this execution turn
 // - trace: optional array of lossless SSE TraceEvent payloads for ThinkingPanel inspection
+// - hasTrace: whether this message has execution traces stored in message_traces (enables lazy on-demand load)
 // - images: optional array of attached image asset URLs or paths rendered in user message bubbles
 export interface Message {
   id?: number;
@@ -29,6 +30,7 @@ export interface Message {
   modelName?: string | null;
   costUsd?: number | null;
   trace?: TraceEvent[];
+  hasTrace?: boolean;
   images?: string[];
 }
 
@@ -280,8 +282,16 @@ export function extractTurnCost(
  */
 export function mapHistoryEntriesToMessages(history: ChatHistoryEntry[]): Message[] {
   return history.map((entry) => {
-    const { modelTier, modelName } = extractTurnModelInfo(entry.trace);
-    const costUsd = extractTurnCost(entry.trace, null, modelName, modelTier);
+    // Prefer explicit column values populated directly from SQLite messages row;
+    // fall back to scanning entry.trace if working with legacy unmigrated payloads
+    const extractedModel = extractTurnModelInfo(entry.trace);
+    const modelTier = entry.model_tier ?? extractedModel.modelTier;
+    const modelName = entry.model_name ?? extractedModel.modelName;
+    const costUsd =
+      (typeof entry.cost_usd === "number" ? entry.cost_usd : null) ??
+      extractTurnCost(entry.trace, null, modelName, modelTier);
+    const hasTrace = Boolean(entry.has_trace || (entry.trace && entry.trace.length > 0));
+
     return {
       id: entry.id,
       role: entry.role,
@@ -294,6 +304,7 @@ export function mapHistoryEntriesToMessages(history: ChatHistoryEntry[]): Messag
       modelName,
       costUsd,
       trace: entry.trace,
+      hasTrace,
       timestamp: new Date(entry.timestamp),
     };
   });

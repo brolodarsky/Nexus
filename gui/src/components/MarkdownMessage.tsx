@@ -215,19 +215,229 @@ function ObsidianCallout({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── Markdown Code Fence Sanitizer & Splitter ─────────────────────────────────
+
+// FenceStackFrame: Tracks an open code fence boundary within the line-by-line fence parser.
+// - lineIndex: 0-based array index of the line where this code fence was declared
+// - indent: Leading whitespace indentation (e.g. "  " or "\t") preceding the fence characters
+// - char: The fence delimiter character, either "`" (backtick) or "~" (tilde)
+// - count: Quantity of consecutive fence characters (e.g. 3 for "```", 4 for "````")
+// - rawInfo: Full text following the fence characters on that line (e.g. "markdown", " json", "typescript")
+// - hasNested: Flag indicating whether an inner code block was opened while this block was active
+// - maxInnerFenceCount: Maximum delimiter length observed among all nested inner fences
+interface FenceStackFrame {
+  lineIndex: number;
+  indent: string;
+  char: string;
+  count: number;
+  rawInfo: string;
+  hasNested: boolean;
+  maxInnerFenceCount: number;
+}
+
+// CodeBlockSegment: Represents a contiguous slice of Markdown text categorized as either code or plain prose.
+// Used by splitFencedCodeBlocks to safeguard multi-backtick blocks during Obsidian and KaTeX pre-processing.
+export interface CodeBlockSegment {
+  isCode: boolean;
+  text: string;
+}
+
+/**
+ * sanitizeMarkdownFences: Deterministic healing pass for malformed or nested LLM code fences.
+ *
+ * Why this exists:
+ * LLMs frequently generate prompts, README templates, or tutorials that contain example code blocks.
+ * Almost universally, LLMs emit standard triple backticks (```) for BOTH the outer container and the
+ * inner example snippet. Under the CommonMark specification (§4.5):
+ * 1. Code blocks do NOT nest.
+ * 2. Any line with at least 3 backticks and NO info string closes the active code block immediately.
+ *
+ * Consequently, when the inner example snippet closes, CommonMark terminates the outer block prematurely.
+ * Subsequent lines leak into plain prose (re-starting numbered lists at "1."), and the outer block's
+ * intended closing fence is misinterpreted as OPENING a brand new code block—swallowing subsequent
+ * headings, answers, and note links into an inverted, monospaced code container.
+ *
+ * How this heals it:
+ * 1. Scans fences line-by-line using a fence stack.
+ * 2. When an open code block encounters another fence with an info string (e.g. ```` ```markdown ```` or ```` ```json ````)
+ *    or relative sub-indentation, it recognizes that an inner block was spawned.
+ * 3. Upon reaching the matching closing fence, it automatically promotes the outer block's opening and
+ *    closing fences to `N = Math.max(outerCount, maxInnerCount + 1, 4)` backticks (e.g. ```` ```` ````).
+ *    Under CommonMark, an outer fence of length 4+ treats all inner 3-backtick lines as literal code text!
+ * 4. Automatically detects unclosed trailing fences (common in streaming or token-truncated LLM outputs)
+ *    and appends the matching closing fence to prevent downstream layout corruption.
+ */
+export function sanitizeMarkdownFences(raw: string): string {
+  if (!raw) return "";
+
+  const lines = raw.split("\n");
+  // Matches a code fence line: optional leading indent, 3+ backticks or tildes, followed by raw info string
+  const fenceRegex = /^([ \t]*)(`{3,}|~{3,})([^\n`~]*)$/;
+
+  const stack: FenceStackFrame[] = [];
+  // Map of lineIndex -> replacement string for modified opening and closing fence lines
+  const modifications = new Map<number, string>();
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const match = line.match(fenceRegex);
+    if (!match) continue;
+
+    const indent = match[1];
+    const fenceChars = match[2];
+    const char = fenceChars[0];
+    const count = fenceChars.length;
+    const rawInfo = match[3];
+    const info = rawInfo.trim();
+
+    if (stack.length === 0) {
+      // Starting a top-level code block
+      stack.push({
+        lineIndex: i,
+        indent,
+        char,
+        count,
+        rawInfo,
+        hasNested: false,
+        maxInnerFenceCount: 0,
+      });
+    } else {
+      const currentBlock = stack[stack.length - 1];
+
+      if (stack.length === 1) {
+        // In CommonMark, a closing fence CANNOT have an info string.
+        // Therefore, any fence line with a non-empty info string (e.g. ```markdown or ```json),
+        // or one that is indented deeper than the outer block, is unambiguously opening a nested block.
+        const isInnerOpen = info !== "" || indent.length > currentBlock.indent.length;
+
+        if (isInnerOpen) {
+          stack.push({
+            lineIndex: i,
+            indent,
+            char,
+            count,
+            rawInfo,
+            hasNested: false,
+            maxInnerFenceCount: 0,
+          });
+          currentBlock.hasNested = true;
+          currentBlock.maxInnerFenceCount = Math.max(currentBlock.maxInnerFenceCount, count);
+        } else if (char === currentBlock.char && count >= currentBlock.count && info === "") {
+          // Cleanly closing the top-level block
+          const top = stack.pop()!;
+          if (top.hasNested) {
+            // Promote outer opening and closing fences so CommonMark encapsulates all inner fences
+            const newCount = Math.max(top.count, top.maxInnerFenceCount + 1, 4);
+            modifications.set(top.lineIndex, `${top.indent}${top.char.repeat(newCount)}${top.rawInfo}`);
+            modifications.set(i, `${indent}${char.repeat(newCount)}`);
+          }
+        }
+      } else {
+        // stack.length > 1: currently traversing inside a nested code block
+        const isDeeperOpen = info !== "" || indent.length > currentBlock.indent.length;
+
+        if (isDeeperOpen) {
+          // Deeper nested code block (e.g. triple nesting)
+          stack.push({
+            lineIndex: i,
+            indent,
+            char,
+            count,
+            rawInfo,
+            hasNested: false,
+            maxInnerFenceCount: 0,
+          });
+          const parent = stack[0];
+          parent.hasNested = true;
+          parent.maxInnerFenceCount = Math.max(parent.maxInnerFenceCount, count);
+        } else if (char === currentBlock.char && count >= currentBlock.count && info === "") {
+          // Closing the inner nested block
+          const closed = stack.pop()!;
+          const parent = stack[0];
+          parent.hasNested = true;
+          parent.maxInnerFenceCount = Math.max(parent.maxInnerFenceCount, closed.count, count);
+        }
+      }
+    }
+  }
+
+  // Handle any unclosed blocks (e.g. streaming LLM responses or token truncation)
+  let trailingCloses = "";
+  while (stack.length > 0) {
+    const unclosed = stack.pop()!;
+    if (stack.length === 0) {
+      // Top-level block reached the end of the text without a closing fence
+      if (unclosed.hasNested) {
+        const newCount = Math.max(unclosed.count, unclosed.maxInnerFenceCount + 1, 4);
+        modifications.set(unclosed.lineIndex, `${unclosed.indent}${unclosed.char.repeat(newCount)}${unclosed.rawInfo}`);
+        trailingCloses += `\n${unclosed.indent}${unclosed.char.repeat(newCount)}`;
+      } else {
+        trailingCloses += `\n${unclosed.indent}${unclosed.char.repeat(unclosed.count)}`;
+      }
+    }
+  }
+
+  // Reassemble lines with modifications applied
+  let result = lines.map((line, idx) => (modifications.has(idx) ? modifications.get(idx)! : line)).join("\n");
+  if (trailingCloses) {
+    result += trailingCloses;
+  }
+
+  return result;
+}
+
+/**
+ * splitFencedCodeBlocks: Slices a Markdown document into alternating prose and code block segments.
+ *
+ * Accommodates fenced code blocks of arbitrary length (3, 4, 5+ backticks or tildes).
+ * Guarantees that joining all segment texts matches the input string exactly, ensuring
+ * zero character loss or text drift during subsequent Obsidian wiki-link or LaTeX transformations.
+ */
+export function splitFencedCodeBlocks(raw: string): CodeBlockSegment[] {
+  // Regex matching any fenced code block (3+ backticks or tildes) with matching closing fence
+  const FENCED_BLOCK_PATTERN = /(?:^|\n)([ \t]*(`{3,}|~{3,})[^\n`~]*\n[\s\S]*?\n[ \t]*\2[ \t]*(?:\n|$))/g;
+  const segments: CodeBlockSegment[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = FENCED_BLOCK_PATTERN.exec(raw)) !== null) {
+    // If the matched string started with a newline separator, exclude it from the code slice
+    const matchStart = match.index + (match[0].startsWith("\n") ? 1 : 0);
+    const codeBlock = match[1];
+
+    if (matchStart > lastIndex) {
+      segments.push({ isCode: false, text: raw.slice(lastIndex, matchStart) });
+    }
+    segments.push({ isCode: true, text: codeBlock });
+    lastIndex = matchStart + codeBlock.length;
+    FENCED_BLOCK_PATTERN.lastIndex = lastIndex;
+  }
+
+  if (lastIndex < raw.length) {
+    segments.push({ isCode: false, text: raw.slice(lastIndex) });
+  }
+
+  return segments;
+}
+
 // Converts Obsidian `[[Target|Alias]]` / `[[Target]]` syntax, backticked `.md` note titles (`Plan.md`),
-// escapes conversational currency figures, and normalizes LaTeX math delimiters outside of fenced code blocks.
+// escapes conversational currency figures, heals malformed/nested code fences, and normalizes LaTeX math delimiters outside of fenced code blocks.
 export function preprocessObsidianMarkdown(raw: string): string {
   if (!raw) return "";
-  // Split on fenced code blocks (```...```) so raw Markdown drafts inside code fences stay untouched
-  const segments = raw.split(/(```[\s\S]*?```)/g);
+
+  // 1. Sanitize code fences: promote nested outer fences to 4+ backticks and auto-close unclosed streaming blocks
+  const sanitized = sanitizeMarkdownFences(raw);
+
+  // 2. Split on fenced code blocks (handling 3, 4, 5+ backticks/tildes) so raw drafts inside code fences stay untouched
+  const segments = splitFencedCodeBlocks(sanitized);
+
   return segments
-    .map((segment, index) => {
-      // Odd indices are fenced code blocks captured by the regex group
-      if (index % 2 === 1) return segment;
+    .map((segment) => {
+      // Code blocks remain completely untouched by prose transforms
+      if (segment.isCode) return segment.text;
 
       // 1. Escape conversational currency amounts ($150k, $41.20, $50–$100) before math delimiter evaluation
-      let processed = escapeProseCurrency(segment);
+      let processed = escapeProseCurrency(segment.text);
 
       // 2. Normalize LaTeX delimiter variants \(...\) -> $...$ and \[...\] -> $$...$$
       processed = processed

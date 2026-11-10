@@ -35,7 +35,7 @@ from nexus.core.trace import reset_trace_thread_id, set_trace_thread_id, trace_b
 from nexus.core.run_logger import log_run, list_runs, get_run
 # chats_db: SQLite data access layer for conversations and chat history
 from nexus.core.chats_db import (
-    log_message, get_chat_history,
+    log_message, get_chat_history, get_message_trace,
     create_conversation, get_conversations, get_conversation,
     delete_conversation, update_conversation_title,
     revert_last_turn,
@@ -402,9 +402,26 @@ async def auto_generate_conversation_title(conversation_id: str):
 
 # Returns message history for a specific conversation
 @router.get("/ask/history")
-async def ask_brain_history(conversation_id: str, limit: Optional[int] = None):
-    """Returns the ordered chat history for a given conversation UUID."""
-    return get_chat_history(conversation_id=conversation_id, limit=limit)
+async def ask_brain_history(
+    conversation_id: str,
+    limit: Optional[int] = None,
+    include_trace: bool = False,
+):
+    """
+    Returns the ordered chat history for a given conversation UUID.
+    By default, excludes heavy execution telemetry traces to keep payload fast (~1KB/turn).
+    """
+    return get_chat_history(conversation_id=conversation_id, limit=limit, include_trace=include_trace)
+
+
+@router.get("/messages/{message_id}/trace")
+async def get_message_trace_endpoint(message_id: int):
+    """
+    Retrieves the full, untruncated trace events array for a specific message on demand.
+    Enables lazy-loading ThinkingPanel visualizer drawers without bloating standard chat history payloads.
+    """
+    trace = get_message_trace(message_id)
+    return {"message_id": message_id, "trace": trace}
 
 
 # Synchronous (non-streaming) one-shot agent execution
@@ -459,32 +476,6 @@ async def ask_brain(request: AskRequest):
         used_tier = result.get("model_tier")
         used_model = result.get("model_name")
 
-        # Phase 4: Persist assistant response + full trace events to SQLite chats.db
-        log_message(
-            role="assistant",
-            content=response_text,
-            agent=agent_name,
-            domain=routed_domain,
-            confidence=result.get("confidence"),
-            trace=trace_events,
-            conversation_id=conversation_id
-        )
-
-        # Phase 5: Persist structured JSON run snapshot to logs/runs/
-        log_run(
-            agent_name=agent_name,
-            query=request.query,
-            response=response_text,
-            thread_id=conversation_id,
-            domain=routed_domain,
-            confidence=result.get("confidence"),
-            reasoning=result.get("reasoning"),
-            tool_calls=result.get("tool_calls"),
-            trace_events=trace_events,
-            latency_seconds=elapsed_sec,
-            metadata={"model_tier": used_tier, "model_name": used_model},
-        )
-
         # Compute turn cost from trace events
         turn_cost_usd = sum(
             float(e.get("data", {}).get("cost_usd", 0.0) or 0.0)
@@ -504,6 +495,35 @@ async def ask_brain(request: AskRequest):
                     tier=used_tier,
                 )
         turn_cost_formatted = round(turn_cost_usd, 4) if turn_cost_usd else None
+
+        # Phase 4: Persist assistant response + full trace events to SQLite chats.db
+        log_message(
+            role="assistant",
+            content=response_text,
+            agent=agent_name,
+            domain=routed_domain,
+            confidence=result.get("confidence"),
+            trace=trace_events,
+            conversation_id=conversation_id,
+            model_tier=used_tier,
+            model_name=used_model,
+            cost_usd=turn_cost_formatted,
+        )
+
+        # Phase 5: Persist structured JSON run snapshot to logs/runs/
+        log_run(
+            agent_name=agent_name,
+            query=request.query,
+            response=response_text,
+            thread_id=conversation_id,
+            domain=routed_domain,
+            confidence=result.get("confidence"),
+            reasoning=result.get("reasoning"),
+            tool_calls=result.get("tool_calls"),
+            trace_events=trace_events,
+            latency_seconds=elapsed_sec,
+            metadata={"model_tier": used_tier, "model_name": used_model},
+        )
 
         # Generate ISO-8601 UTC timestamp for chat response serialization
         now = datetime.now(timezone.utc).isoformat()
@@ -602,32 +622,6 @@ def _run_pipeline(
 
         # Generate ISO-8601 UTC timestamp for terminal SSE 'done' packet
         now = datetime.now(timezone.utc).isoformat()
-                
-        # Persist assistant message along with full trace array to chats.db, capturing its SQLite primary key
-        assistant_msg_id = log_message(
-            role="assistant",
-            content=response_text,
-            agent=agent_name,
-            domain=routed_domain,
-            confidence=result.get("confidence"),
-            trace=trace_events,
-            conversation_id=conversation_id
-        )
-
-        # Persist structured JSON run snapshot to logs/runs/
-        log_run(
-            agent_name=agent_name,
-            query=query,
-            response=response_text,
-            thread_id=conversation_id,
-            domain=routed_domain,
-            confidence=result.get("confidence"),
-            reasoning=result.get("reasoning"),
-            tool_calls=result.get("tool_calls"),
-            trace_events=trace_events,
-            latency_seconds=elapsed_sec,
-            metadata={"model_tier": used_tier, "model_name": used_model},
-        )
 
         # Compute turn cost from trace events
         turn_cost_usd = sum(
@@ -648,6 +642,35 @@ def _run_pipeline(
                     tier=used_tier,
                 )
         turn_cost_formatted = round(turn_cost_usd, 4) if turn_cost_usd else None
+                
+        # Persist assistant message along with full trace array to chats.db, capturing its SQLite primary key
+        assistant_msg_id = log_message(
+            role="assistant",
+            content=response_text,
+            agent=agent_name,
+            domain=routed_domain,
+            confidence=result.get("confidence"),
+            trace=trace_events,
+            conversation_id=conversation_id,
+            model_tier=used_tier,
+            model_name=used_model,
+            cost_usd=turn_cost_formatted,
+        )
+
+        # Persist structured JSON run snapshot to logs/runs/
+        log_run(
+            agent_name=agent_name,
+            query=query,
+            response=response_text,
+            thread_id=conversation_id,
+            domain=routed_domain,
+            confidence=result.get("confidence"),
+            reasoning=result.get("reasoning"),
+            tool_calls=result.get("tool_calls"),
+            trace_events=trace_events,
+            latency_seconds=elapsed_sec,
+            metadata={"model_tier": used_tier, "model_name": used_model},
+        )
 
         # Push terminal 'done' event to thread queue to complete the SSE stream
         event_queue.put({

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Launches the Nexus Engine Control Panel (backend + frontend).
 .DESCRIPTION
@@ -21,6 +21,28 @@ Write-Host ""
 
 # ── Start FastAPI backend ────────────────────────────────────
 Write-Host "  [1/2] Starting FastAPI backend on port 8000..." -ForegroundColor Yellow
+
+# Free port 8000 if an orphaned Uvicorn worker from a prior session is still bound to it
+$staleConn = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($staleConn -and $staleConn.OwningProcess) {
+    Write-Host "  [!] Port 8000 is occupied by stale PID $($staleConn.OwningProcess). Terminating..." -ForegroundColor DarkYellow
+    taskkill /T /F /PID $staleConn.OwningProcess 2>$null | Out-Null
+    Start-Sleep -Seconds 1
+}
+
+# Ensure logs directory exists for background Uvicorn stdout/stderr capture
+$LOGS_DIR = Join-Path $PROJECT_ROOT "logs"
+if (-not (Test-Path $LOGS_DIR)) {
+    New-Item -ItemType Directory -Path $LOGS_DIR -Force | Out-Null
+}
+$uvicornLog = Join-Path $LOGS_DIR "uvicorn.log"
+$uvicornErr = Join-Path $LOGS_DIR "uvicorn_err.log"
+
+# ArgumentList escaping directive:
+# We pass -ArgumentList as a single escaped string with literal quotes (`\"*.db*\"` and `\"*.sqlite*\"`).
+# In Windows, passing wildcards as unquoted arguments to Python causes the C runtime (MSVCRT setargv)
+# to automatically expand wildcards against matching files in the working directory (e.g. chats.db, hitl.db),
+# producing unexpected positional arguments that crash Uvicorn/Click on startup. Quoting suppresses expansion.
 # --host 0.0.0.0: Binds the HTTP listener to all IPv4 network interfaces (loopback, local Wi-Fi/Ethernet, and Tailscale VPN),
 # allowing remote clients (e.g. mobile phones on LAN or Tailscale) to connect directly to the backend.
 # --port 8000: Default HTTP port for the FastAPI engine.
@@ -28,20 +50,44 @@ Write-Host "  [1/2] Starting FastAPI backend on port 8000..." -ForegroundColor Y
 # --reload-dir: Scopes file watching strictly to `src/nexus` (ignoring tests/, scripts/, gui/, and Vault/).
 # --reload-exclude: Prevents standalone CLI scripts (e.g. export_conversation.py) and SQLite WAL/DB files from killing in-flight chat turns.
 # --timeout-graceful-shutdown: Gives active SSE streams up to 30s to finish before terminating the worker.
+# -RedirectStandardOutput / -RedirectStandardError: Captures Uvicorn startup traces and error stacks to disk for inspection.
+$backendArgs = '-m uvicorn nexus.api.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir src/nexus --reload-exclude \"*.db*\" --reload-exclude \"*.sqlite*\" --reload-exclude export_conversation.py --timeout-graceful-shutdown 30'
 $backend = Start-Process -FilePath $VENV_PYTHON `
-    -ArgumentList "-m", "uvicorn", "nexus.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "src/nexus", "--reload-exclude", "export_conversation.py", "--reload-exclude", "*.db*", "--reload-exclude", "*.sqlite*", "--timeout-graceful-shutdown", "30" `
+    -ArgumentList $backendArgs `
     -WorkingDirectory $PROJECT_ROOT `
     -WindowStyle Hidden `
+    -RedirectStandardOutput $uvicornLog `
+    -RedirectStandardError $uvicornErr `
     -PassThru
 
-Start-Sleep -Seconds 2
+# Polling health check with process exit detection
+# Python and Uvicorn import heavy packages (FastAPI, LangGraph, Pydantic, Chroma) during startup,
+# which typically takes 3-6 seconds. We poll /api/health every second up to 15 seconds.
+$backendReady = $false
+$maxRetries = 15
+for ($i = 1; $i -le $maxRetries; $i++) {
+    if ($backend.HasExited) {
+        Write-Host "  [✗] Backend process exited unexpectedly with code $($backend.ExitCode)!" -ForegroundColor Red
+        if (Test-Path $uvicornErr) {
+            Write-Host "  ─── Backend Error Output (tail) ───" -ForegroundColor Red
+            Get-Content $uvicornErr -Tail 15 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkRed }
+            Write-Host "  ───────────────────────────────────" -ForegroundColor Red
+        }
+        break
+    }
+    try {
+        # -TimeoutSec 1: Fast probe; fails immediately if port 8000 is not yet accepting connections
+        $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/health" -TimeoutSec 1 -ErrorAction Stop
+        Write-Host "  [✓] Backend online: $($health.engine) v$($health.version) (ready in ${i}s)" -ForegroundColor Green
+        $backendReady = $true
+        break
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
 
-# Quick health check
-try {
-    $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/health" -TimeoutSec 5
-    Write-Host "  [✓] Backend online: $($health.engine) v$($health.version)" -ForegroundColor Green
-} catch {
-    Write-Host "  [!] Backend may still be starting..." -ForegroundColor DarkYellow
+if (-not $backendReady -and -not $backend.HasExited) {
+    Write-Host "  [!] Backend did not respond within ${maxRetries}s (may still be initializing)..." -ForegroundColor DarkYellow
 }
 
 # ── Network IP Discovery (LAN & Tailscale) ─────────────────────

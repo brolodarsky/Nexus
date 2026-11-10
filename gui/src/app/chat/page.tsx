@@ -217,33 +217,39 @@ export default function ChatPage() {
       })
       .catch((err) => console.error("Failed to load available models:", err));
 
-    getConversations().then((convos) => {
-      setConversations(convos);
-      if (convos.length > 0) {
-        // By default, select the most recent conversation (convos[0] sorted by last_updated DESC in SQLite)
-        let targetId = convos[0].id;
-        try {
-          const savedActiveConv = localStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
-          // If a specific conversation ID was saved and exists in the database, restore it
-          if (savedActiveConv && savedActiveConv !== "__new__" && convos.some((c) => c.id === savedActiveConv)) {
-            targetId = savedActiveConv;
+    getConversations()
+      .then((convos) => {
+        setConversations(convos);
+        if (convos.length > 0) {
+          // By default, select the most recent conversation (convos[0] sorted by last_updated DESC in SQLite)
+          let targetId = convos[0].id;
+          try {
+            const savedActiveConv = localStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
+            // If a specific conversation ID was saved and exists in the database, restore it
+            if (savedActiveConv && savedActiveConv !== "__new__" && convos.some((c) => c.id === savedActiveConv)) {
+              targetId = savedActiveConv;
+            }
+          } catch {
+            // Gracefully fallback to the most recent conversation
           }
-        } catch {
-          // Gracefully fallback to the most recent conversation
+          setActiveConvId(targetId);
+          setProgrammaticInput(draftsRef.current[targetId] ?? "");
+          try {
+            localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, targetId);
+          } catch {
+            // Ignore storage quota errors
+          }
+        } else {
+          setActiveConvId(null);
+          setProgrammaticInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
         }
-        setActiveConvId(targetId);
-        setProgrammaticInput(draftsRef.current[targetId] ?? "");
-        try {
-          localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, targetId);
-        } catch {
-          // Ignore storage quota errors
-        }
-      } else {
-        setActiveConvId(null);
-        setProgrammaticInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
-      }
-      isInitialLoadDoneRef.current = true;
-    });
+        isInitialLoadDoneRef.current = true;
+      })
+      .catch((err) => {
+        // Prevent unhandled promise rejection and ensure initial load flag clears if backend is unreachable
+        console.error("Failed to load conversations:", err);
+        isInitialLoadDoneRef.current = true;
+      });
   }, [setProgrammaticInput]);
 
   // Persist user's per-turn model selection preference and keep input focused for immediate typing

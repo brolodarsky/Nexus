@@ -49,6 +49,10 @@ export interface ChatHistoryEntry {
   trace?: TraceEvent[];       // Optional array of execution steps for post-run inspection
   timestamp: string;          // ISO-8601 timestamp of message creation
   images?: string[];          // Optional array of attached image URLs or relative asset paths
+  model_tier?: string | null; // Optional model tier executed during this turn
+  model_name?: string | null; // Optional concrete model name executed during this turn
+  cost_usd?: number | null;   // Optional calculated turn inference cost in USD
+  has_trace?: boolean;        // Whether this message has full diagnostic trace events in SQLite message_traces
 }
 
 // Interface representing a persistent conversation thread in the sidebar (with DAG branching lineage)
@@ -161,6 +165,13 @@ export async function askBrain(
 // encodeURIComponent: Sanitizes query params to prevent URL syntax breakage
 export async function getChatHistory(conversationId: string): Promise<ChatHistoryEntry[]> {
   return apiFetch<ChatHistoryEntry[]>(`/api/agents/ask/history?conversation_id=${encodeURIComponent(conversationId)}`);
+}
+
+// Fetches full untruncated trace events array on demand for a single message
+// Used to lazy-load historical ThinkingPanel drawers without transferring multi-megabyte payloads in chat history
+export async function getMessageTrace(messageId: number): Promise<TraceEvent[]> {
+  const res = await apiFetch<{ message_id: number; trace: TraceEvent[] }>(`/api/agents/messages/${messageId}/trace`);
+  return res.trace || [];
 }
 
 // Lists all active conversation threads for the UI sidebar

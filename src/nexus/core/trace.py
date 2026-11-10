@@ -251,13 +251,21 @@ class AgentTracer:
     # ── Tool Telemetry ───────────────────────────────────────────────────────
 
     def tool_call(self, tool_name: str, args: Optional[dict[str, Any]] = None, call_id: Optional[str] = None):
-        """Traces tool invocation and preserves 100% untruncated arguments in both message and structured data."""
+        """
+        Traces tool invocation and preserves 100% untruncated arguments in structured data payload.
+        Formats a bounded preview in terminal output and `message` to prevent duplicating multi-megabyte
+        argument strings (e.g., file writes or note replacements) twice within the same event record.
+        """
         args_dict = args or {}
-        args_str = ""
-        if args_dict:
-            # Format arguments as key=value pairs without cutting off strings
-            pairs = [f"{k}={v}" for k, v in args_dict.items()]
-            args_str = f"({', '.join(pairs)})"
+        pairs = []
+        for k, v in args_dict.items():
+            val_str = str(v)
+            # Bound key-value previews in the string summary while preserving full data in payload['args']
+            if len(val_str) > 150:
+                pairs.append(f"{k}={val_str[:150]}… ({len(val_str):,} chars)")
+            else:
+                pairs.append(f"{k}={val_str}")
+        args_str = f"({', '.join(pairs)})" if pairs else ""
         self._print("🔧", f"Calling tool: {BOLD}{tool_name}{RESET}{args_str}")
         payload: dict[str, Any] = {"tool": tool_name, "args": args_dict}
         if call_id:
@@ -265,12 +273,20 @@ class AgentTracer:
         self._emit("tool_call", f"Calling tool: {tool_name}{args_str}", payload)
 
     def tool_result(self, tool_name: str, result: str = "", call_id: Optional[str] = None):
-        """Traces the full, untruncated return value from a completed tool execution."""
-        self._print("✅", f"{tool_name} → {DIM}{result}{RESET}")
+        """
+        Traces the return value from a completed tool execution.
+        Preserves the 100% untruncated structured payload in `data["result"]` for the DAG/Graph viewer,
+        while formatting a bounded summary string in `message` and terminal output to prevent multi-megabyte string duplication.
+        """
+        # Bounded terminal output prevents multi-hundred-kilobyte file dumps from choking stdout / console buffers
+        terminal_preview = result if len(result) <= 300 else f"{result[:300]}… ({len(result):,} chars)"
+        self._print("✅", f"{tool_name} → {DIM}{terminal_preview}{RESET}")
         payload: dict[str, Any] = {"tool": tool_name, "result": result}
         if call_id:
             payload["call_id"] = call_id
-        self._emit("tool_result", f"{tool_name} → {result}", payload)
+        # Bounded summary message: prevents storing the exact same multi-hundred KB payload twice in the same JSON event
+        summary_msg = f"{tool_name} → ({len(result):,} chars output)" if len(result) > 200 else f"{tool_name} → {result}"
+        self._emit("tool_result", summary_msg, payload)
 
     def tool_error(self, tool_name: str, error: str, call_id: Optional[str] = None):
         """Traces a tool exception or failure."""

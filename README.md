@@ -51,7 +51,7 @@ Nexus/
 │   ├── api/                     # FastAPI backend application & routers
 │   ├── core/                    # Shared engine configuration
 │   │   ├── chat_branching.py    # Universal Conversation Branching & Subroutine Merge Engine
-│   │   ├── chats_db.py          # Unified UI chat & DAG lineage persistence (chats.db)
+│   │   ├── chats_db.py          # Unified UI chat, DAG lineage & decoupled telemetry persistence (chats.db & message_traces)
 │   │   ├── constants.py         # Global constants
 │   │   ├── engine_constitution.py # Loader for Vault/Master Instructions.md (inject_root_instructions())
 │   │   ├── google_auth.py       # Reusable OAuth2 manager
@@ -154,7 +154,7 @@ This repository distinguishes between capabilities and constraints that define h
 | `src/nexus/core/engine_constitution.py` | Hydrates `Vault/Master Instructions.md` via `inject_root_instructions()` (`{current_time}`, `{user_name}`, `{vault_structure}`, `{shared_tools}`). IDE Resident agents and `NexusAgent` inject its output at boot. | `python -m nexus.core.engine_constitution` |
 | `src/nexus/core/tool_catalog.py` | Static (`ast`, no imports) catalog of `src/nexus/shared_tools/` modules for the `{shared_tools}` placeholder. | `python -m nexus.core.tool_catalog` |
 | `src/nexus/core/hitl_queue.py` | SQLite-backed HITL transaction queue (`transactions`) and pre-commit snapshot ledger (`revisions`) with cumulative overlay stacking, stale-base conflict detection, 3-way line-level rebase, and atomic rollback. | N/A (library module) |
-| `src/nexus/core/chats_db.py` | SQLite-backed persistent UI chat history, conversation thread titles, and message log. | N/A (library module) |
+| `src/nexus/core/chats_db.py` | SQLite-backed persistent UI chat history, conversation thread titles, and decoupled diagnostic telemetry (`message_traces`) with on-demand lazy loading. | N/A (library module) |
 | `src/nexus/core/trace.py` | Lossless event bus (`TraceEventBus`) and dual console/SSE telemetry tracer (`AgentTracer`) with hierarchical `agent_id` and `parent_id` tracking for DAG graph reconstruction. | N/A (library module) |
 | `src/nexus/core/run_logger.py` | Structured JSON run snapshot logger persisting lossless execution traces, subagent fleet breakdowns, token usage metrics, and tool calls to `logs/runs/`. | N/A (library module) |
 | `src/nexus/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve with stale-base guard (`?force=true` override), reject, 3-way rebase (`/{id}/rebase`), rollback (`/{id}/rollback`), and recent revisions (`/revisions/recent`). | Via GUI or API |

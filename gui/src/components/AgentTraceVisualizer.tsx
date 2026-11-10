@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import type { TraceEvent } from "@/lib/api";
+import { getMessageTrace } from "@/lib/api/agents";
 import MarkdownMessage from "@/components/MarkdownMessage";
 
 // ── Icon & Color Maps ────────────────────────────────────────────────────────
@@ -984,18 +985,34 @@ export const AgentGraphView = memo(function AgentGraphView({
 // - events: TraceEvent[] — Lossless chronological array of trace events (tool calls, LLM responses, agent boundaries).
 // - isLive: boolean — Distinguishes between active SSE streaming execution and completed historical runs.
 // - defaultExpanded: boolean — Initial disclosure state; defaults to false so live runs and message history start collapsed.
+// - messageId: optional SQLite messages.id; enables lazy on-demand trace fetching from message_traces when expanded.
 export const ThinkingPanel = memo(function ThinkingPanel({
-  events,
+  events: initialEvents,
   isLive,
   defaultExpanded = false,
+  messageId,
 }: {
-  events: TraceEvent[];
+  events?: TraceEvent[];
   isLive: boolean;
   defaultExpanded?: boolean;
+  messageId?: number;
 }) {
   // expanded: controls visibility of the inner graph/step visualization; initialized via defaultExpanded (default: false)
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [viewMode, setViewMode] = useState<"graph" | "steps" | "raw">("graph");
+  const [internalEvents, setInternalEvents] = useState<TraceEvent[]>(initialEvents || []);
+  const [isLoadingTrace, setIsLoadingTrace] = useState(false);
+  const [traceLoadError, setTraceLoadError] = useState<string | null>(null);
+
+  // Sync internalEvents if incoming initialEvents change (e.g. live SSE streaming ticks)
+  useEffect(() => {
+    if (initialEvents && initialEvents.length > 0) {
+      setInternalEvents(initialEvents);
+    }
+  }, [initialEvents]);
+
+  const activeEvents = internalEvents.length > 0 ? internalEvents : (initialEvents || []);
+
   // expandAllSteps: toggles global expand/collapse of all steps in chronological list; defaults to false (collapsed by default)
   const [expandAllSteps, setExpandAllSteps] = useState(false);
   // expandVersion: ensures explicit expand/collapse triggers cascade to child cards
@@ -1012,8 +1029,8 @@ export const ThinkingPanel = memo(function ThinkingPanel({
   }, []);
 
   const { subagentNodes } = useMemo(
-    () => buildAgentExecutionGraph(events),
-    [events]
+    () => buildAgentExecutionGraph(activeEvents),
+    [activeEvents]
   );
 
   // Auto-scroll while live if bounded height mode is active and user is near the bottom
@@ -1021,9 +1038,32 @@ export const ThinkingPanel = memo(function ThinkingPanel({
     if (expanded && isLive && !fullHeight && scrollRef.current && isAtBottomRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [events, expanded, isLive, fullHeight]);
+  }, [activeEvents, expanded, isLive, fullHeight]);
 
-  if (events.length === 0) return null;
+  const handleToggleExpand = useCallback(async () => {
+    if (!expanded) {
+      setExpanded(true);
+      // If expanding a historical turn where traces were not pre-loaded, fetch on demand
+      if (activeEvents.length === 0 && messageId !== undefined && !isLoadingTrace) {
+        setIsLoadingTrace(true);
+        setTraceLoadError(null);
+        try {
+          const fetched = await getMessageTrace(messageId);
+          setInternalEvents(fetched);
+        } catch (err) {
+          console.error("Failed to load message trace:", err);
+          setTraceLoadError("Failed to load execution trace.");
+        } finally {
+          setIsLoadingTrace(false);
+        }
+      }
+    } else {
+      setExpanded(false);
+    }
+  }, [expanded, activeEvents.length, messageId, isLoadingTrace]);
+
+  // Do not render anything if no events exist and this is not a lazy-fetchable historical message
+  if (activeEvents.length === 0 && messageId === undefined) return null;
 
   return (
     <div className="mt-3 rounded-xl border border-border-subtle/80 bg-bg-secondary/50 overflow-hidden">
@@ -1034,7 +1074,7 @@ export const ThinkingPanel = memo(function ThinkingPanel({
       >
         <button
           type="button"
-          onClick={() => setExpanded((prev) => !prev)}
+          onClick={handleToggleExpand}
           className="flex items-center gap-2 text-xs font-semibold text-text-primary hover:text-accent-cyan transition-colors"
         >
           <svg
@@ -1049,7 +1089,7 @@ export const ThinkingPanel = memo(function ThinkingPanel({
           {isLive ? (
             <span className="inline-flex items-center gap-1.5 text-accent-cyan">
               <span className="w-2 h-2 rounded-full bg-accent-cyan animate-pulse" />
-              Live Agent Execution ({events.length} steps
+              Live Agent Execution ({activeEvents.length} steps
               {subagentNodes.length > 0
                 ? ` • ${subagentNodes.length} subagents`
                 : ""}
@@ -1057,11 +1097,14 @@ export const ThinkingPanel = memo(function ThinkingPanel({
             </span>
           ) : (
             <span>
-              Agent Execution Trace ({events.length} steps
-              {subagentNodes.length > 0
-                ? ` • ${subagentNodes.length} subagent${subagentNodes.length === 1 ? "" : "s"}`
-                : ""}
-              )
+              Agent Execution Trace
+              {activeEvents.length > 0 ? (
+                ` (${activeEvents.length} step${activeEvents.length === 1 ? "" : "s"}${subagentNodes.length > 0
+                  ? ` • ${subagentNodes.length} subagent${subagentNodes.length === 1 ? "" : "s"}`
+                  : ""})`
+              ) : (
+                " (Click to expand)"
+              )}
             </span>
           )}
         </button>
@@ -1088,7 +1131,7 @@ export const ThinkingPanel = memo(function ThinkingPanel({
                     : "text-text-muted hover:text-text-primary"
                   }`}
               >
-                📜 All Steps ({events.length})
+                📜 All Steps ({activeEvents.length})
               </button>
               <button
                 type="button"
@@ -1138,28 +1181,57 @@ export const ThinkingPanel = memo(function ThinkingPanel({
           className={`p-3.5 ${fullHeight ? "" : "max-h-[32rem] overflow-y-auto"
             }`}
         >
-          {viewMode === "graph" && (
-            <AgentGraphView events={events} isLive={isLive} />
-          )}
-
-          {viewMode === "steps" && (
-            <div className="space-y-2">
-              {events.map((evt, i) => (
-                <TraceStepCard
-                  key={evt.id ? `${evt.id}-${i}` : `step-${i}`}
-                  evt={evt}
-                  index={i}
-                  forceExpanded={expandAllSteps}
-                  expandVersion={expandVersion}
-                />
-              ))}
+          {isLoadingTrace ? (
+            <div className="py-8 flex flex-col items-center justify-center gap-2 text-xs text-text-muted font-mono">
+              <div className="w-4 h-4 border-2 border-accent-cyan border-t-transparent rounded-full animate-spin" />
+              <span>Loading execution trace telemetry...</span>
             </div>
-          )}
+          ) : traceLoadError ? (
+            <div className="py-6 text-center text-xs text-red-400 font-mono">
+              <p>{traceLoadError}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (messageId !== undefined) {
+                    setIsLoadingTrace(true);
+                    setTraceLoadError(null);
+                    getMessageTrace(messageId)
+                      .then(setInternalEvents)
+                      .catch(() => setTraceLoadError("Failed to load trace events."))
+                      .finally(() => setIsLoadingTrace(false));
+                  }
+                }}
+                className="mt-2 inline-block px-3 py-1 rounded bg-red-500/10 border border-red-500/20 text-red-300 hover:bg-red-500/20 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <>
+              {viewMode === "graph" && (
+                <AgentGraphView events={activeEvents} isLive={isLive} />
+              )}
 
-          {viewMode === "raw" && (
-            <pre className="p-3 rounded-lg bg-bg-primary/90 border border-border-subtle text-text-primary font-mono text-[0.7rem] leading-relaxed whitespace-pre-wrap break-words overflow-x-auto">
-              {JSON.stringify(events, null, 2)}
-            </pre>
+              {viewMode === "steps" && (
+                <div className="space-y-2">
+                  {activeEvents.map((evt, i) => (
+                    <TraceStepCard
+                      key={evt.id ? `${evt.id}-${i}` : `step-${i}`}
+                      evt={evt}
+                      index={i}
+                      forceExpanded={expandAllSteps}
+                      expandVersion={expandVersion}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {viewMode === "raw" && (
+                <pre className="p-3 rounded-lg bg-bg-primary/90 border border-border-subtle text-text-primary font-mono text-[0.7rem] leading-relaxed whitespace-pre-wrap break-words overflow-x-auto">
+                  {JSON.stringify(activeEvents, null, 2)}
+                </pre>
+              )}
+            </>
           )}
         </div>
       )}
