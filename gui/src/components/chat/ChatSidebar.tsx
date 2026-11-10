@@ -3,7 +3,7 @@
 /**
  * ChatSidebar.tsx — Collapsible conversation history menu for the Nexus Chat interface.
  * Renders either a compact 14-unit icon rail or a full 64-unit drawer with quick model preset buttons
- * and inline conversation title renaming.
+ * and nested branch tree views. (Conversation actions are folded into the header three-dots menu).
  */
 
 // memo: Isolates the conversation history sidebar from re-rendering during keystroke updates in the composer
@@ -29,9 +29,6 @@ import {
 // - onCloseMobile: optional callback invoked to close the mobile slide-over drawer
 // - onSelectConversation: callback invoked when the user clicks a conversation row
 // - onNewChat: callback to start a blank conversation, optionally pre-selecting a model tier
-// - onDeleteChat: callback to delete a conversation thread without triggering row selection
-// - onUpdateTitle: optional callback invoked when the user saves an edited conversation title
-// - onAutoGenerateTitle: optional async callback to auto-generate a smart AI title for a conversation
 export interface ChatSidebarProps {
   conversations: Conversation[];
   activeConvId: string | null;
@@ -44,9 +41,6 @@ export interface ChatSidebarProps {
   onCloseMobile?: () => void;
   onSelectConversation: (id: string) => void;
   onNewChat: (initialTier?: string) => void;
-  onDeleteChat: (id: string, e: React.MouseEvent) => void;
-  onUpdateTitle?: (id: string, newTitle: string) => void;
-  onAutoGenerateTitle?: (id: string) => Promise<void> | void;
 }
 
 const ChatSidebar = memo(function ChatSidebar({
@@ -61,20 +55,9 @@ const ChatSidebar = memo(function ChatSidebar({
   onCloseMobile,
   onSelectConversation,
   onNewChat,
-  onDeleteChat,
-  onUpdateTitle,
-  onAutoGenerateTitle,
 }: ChatSidebarProps) {
-  // editingId: tracks which conversation UUID is currently in inline title editing mode (or null if none)
-  const [editingId, setEditingId] = useState<string | null>(null);
-  // generatingId: tracks which conversation UUID is currently having an AI title generated
-  const [generatingId, setGeneratingId] = useState<string | null>(null);
-  // editTitle: holds the draft title string being actively typed in the rename input
-  const [editTitle, setEditTitle] = useState<string>("");
   // collapsedParentIds: tracks which parent conversation UUIDs have their child branch trees collapsed in the sidebar
   const [collapsedParentIds, setCollapsedParentIds] = useState<Record<string, boolean>>({});
-  // editInputRef: HTMLInputElement reference used to auto-focus and auto-select existing title text on mount
-  const editInputRef = useRef<HTMLInputElement>(null);
 
   // Flattens `conversations` into a depth-annotated tree list so child branches render nested beneath their parent
   const treeRows = useMemo(() => {
@@ -198,31 +181,6 @@ const ChatSidebar = memo(function ChatSidebar({
     }
   }, [isResizing]);
 
-  // Initiates inline rename mode for a specific conversation row
-  const handleStartEdit = (conv: Conversation, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setEditingId(conv.id);
-    setEditTitle(conv.title);
-    queueMicrotask(() => {
-      editInputRef.current?.focus();
-      editInputRef.current?.select();
-    });
-  };
-
-  // Cancels inline edit mode and clears transient draft title
-  const handleCancelEdit = () => {
-    setEditingId(null);
-    setEditTitle("");
-  };
-
-  // Commits the updated title to the parent orchestrator and exits edit mode
-  const handleSaveEdit = (id: string) => {
-    const trimmed = editTitle.trim();
-    if (trimmed && onUpdateTitle) {
-      onUpdateTitle(id, trimmed);
-    }
-    handleCancelEdit();
-  };
   const hasNewChatDraft = Boolean(drafts?.[DRAFT_NEW_KEY]?.trim());
 
   // Helper to render the expanded drawer body (shared between desktop expanded `<aside>` and mobile slide-over overlay)
@@ -303,55 +261,6 @@ const ChatSidebar = memo(function ChatSidebar({
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {treeRows.map(({ conv, depth, childCount, isBranchCollapsed }) => {
-          const isEditing = editingId === conv.id;
-          if (isEditing) {
-            // Inline Rename Input Form: Allows editing the conversation title with Enter to commit, Escape to cancel
-            return (
-              <div
-                key={conv.id}
-                style={depth > 0 ? { marginLeft: `${Math.min(depth * 14, 42)}px` } : undefined}
-                className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-bg-tertiary border border-accent-cyan/40 shadow-sm"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <input
-                  ref={editInputRef}
-                  type="text"
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleSaveEdit(conv.id);
-                    } else if (e.key === "Escape") {
-                      e.preventDefault();
-                      handleCancelEdit();
-                    }
-                  }}
-                  className="flex-1 min-w-0 bg-bg-primary/90 border border-border-subtle rounded px-2 py-1 text-base md:text-xs text-text-primary focus:outline-none focus:border-accent-cyan"
-                  placeholder="Chat title..."
-                />
-                <button
-                  type="button"
-                  onClick={() => handleSaveEdit(conv.id)}
-                  className="p-1 rounded text-accent-cyan hover:bg-accent-cyan/20 transition-colors text-xs font-bold"
-                  title="Save title (Enter)"
-                  aria-label="Save title"
-                >
-                  ✓
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCancelEdit}
-                  className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-secondary transition-colors text-xs"
-                  title="Cancel (Esc)"
-                  aria-label="Cancel editing title"
-                >
-                  ✕
-                </button>
-              </div>
-            );
-          }
-
           const hasDraft = Boolean(drafts?.[conv.id]?.trim());
 
           return (
@@ -362,10 +271,6 @@ const ChatSidebar = memo(function ChatSidebar({
                 onSelectConversation(conv.id);
                 if (isMobileDrawer) onCloseMobile?.();
               }}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                handleStartEdit(conv);
-              }}
               className={`group relative flex items-center px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors overflow-hidden ${
                 depth > 0 ? "border-l-2 border-emerald-500/30 pl-2.5 text-xs " : ""
               }${
@@ -373,7 +278,7 @@ const ChatSidebar = memo(function ChatSidebar({
                   ? "bg-bg-tertiary text-text-primary"
                   : "text-text-secondary hover:bg-bg-tertiary/50"
               }`}
-              title={`${conv.title}${conv.merged_at ? " (Merged to parent)" : ""}${hasDraft ? " (Draft saved)" : ""} (double-click or hover pencil to rename)`}
+              title={`${conv.title}${conv.merged_at ? " (Merged to parent)" : ""}${hasDraft ? " (Draft saved)" : ""}`}
             >
               {/* Conversation title: takes full available row width without reserved sibling space; truncates with ellipsis */}
               <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center">
@@ -406,61 +311,6 @@ const ChatSidebar = memo(function ChatSidebar({
                     </span>
                   )}
                 </div>
-              </div>
-
-              {/* Hover Actions: Floats over the right end on hover on desktop (or stays accessible on mobile drawer) */}
-              <div
-                className={`absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 ${
-                  isMobileDrawer ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                } transition-opacity rounded-md px-1 py-0.5 z-10 ${
-                  activeConvId === conv.id
-                    ? "bg-bg-secondary/95 border border-border-subtle shadow-md"
-                    : "bg-bg-secondary/95 backdrop-blur-sm border border-border-subtle shadow-md"
-                }`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button
-                  type="button"
-                  onClick={(e) => handleStartEdit(conv, e)}
-                  className="p-1 text-text-muted hover:text-accent-cyan hover:bg-bg-tertiary rounded transition-colors"
-                  title="Rename Chat"
-                  aria-label="Rename Chat"
-                >
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
-                </button>
-                {onAutoGenerateTitle && (
-                  <button
-                    type="button"
-                    disabled={generatingId === conv.id}
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      setGeneratingId(conv.id);
-                      try {
-                        await onAutoGenerateTitle(conv.id);
-                      } finally {
-                        setGeneratingId(null);
-                      }
-                    }}
-                    className={`p-1 text-text-muted hover:text-accent-violet hover:bg-bg-tertiary rounded transition-colors text-xs ${
-                      generatingId === conv.id ? "animate-pulse text-accent-violet" : ""
-                    }`}
-                    title="Auto-generate title with AI"
-                    aria-label="Auto-generate title with AI"
-                  >
-                    ✨
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={(e) => onDeleteChat(conv.id, e)}
-                  className="p-1 text-text-muted hover:text-red-400 hover:bg-bg-tertiary rounded transition-colors"
-                  title="Delete Chat"
-                  aria-label="Delete Chat"
-                >
-                  ✕
-                </button>
               </div>
             </div>
           );

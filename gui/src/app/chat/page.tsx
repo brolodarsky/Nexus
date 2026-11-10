@@ -496,8 +496,8 @@ export default function ChatPage() {
   );
 
   const handleDeleteChat = useCallback(
-    async (id: string, e: React.MouseEvent) => {
-      e.stopPropagation();
+    async (id: string, e?: React.MouseEvent) => {
+      e?.stopPropagation();
 
       // Cleanly abort in-flight SSE stream if deleting the active streaming thread
       if (activeStreamConvIdRef.current === id) {
@@ -1023,9 +1023,6 @@ export default function ChatPage() {
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         onSelectConversation={handleSelectConversation}
         onNewChat={handleNewChat}
-        onDeleteChat={handleDeleteChat}
-        onUpdateTitle={handleUpdateTitle}
-        onAutoGenerateTitle={handleAutoGenerateTitle}
       />
 
       {/* ── Main Chat Area ──────────────────────────────────── */}
@@ -1039,6 +1036,7 @@ export default function ChatPage() {
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
           onUpdateTitle={handleUpdateTitle}
           onAutoGenerateTitle={handleAutoGenerateTitle}
+          onDeleteChat={handleDeleteChat}
         />
 
         <BranchLineageBar

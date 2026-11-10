@@ -7,7 +7,8 @@
  */
 
 // memo: Prevents header re-renders when sibling chat components or drafts mutate
-import { useState, useRef, memo } from "react";
+// useEffect: Binds click-outside and keydown listeners to dismiss the conversation options dropdown
+import { useState, useRef, useEffect, memo } from "react";
 
 // ChatHeaderProps: defines the display state and callbacks for the Chat workspace header
 // - title: active conversation title string (falls back to "Chat" when starting a fresh session)
@@ -18,6 +19,7 @@ import { useState, useRef, memo } from "react";
 // - onOpenMobileSidebar: optional callback invoked on mobile (< 768px) to open the slide-over conversation drawer
 // - onUpdateTitle: optional async callback invoked when committing an edited conversation title
 // - onAutoGenerateTitle: optional async callback invoked to generate a smart AI title via fast low-tier model
+// - onDeleteChat: optional async callback invoked to delete the active conversation thread
 export interface ChatHeaderProps {
   title?: string;
   activeConvId?: string | null;
@@ -27,6 +29,7 @@ export interface ChatHeaderProps {
   onOpenMobileSidebar?: () => void;
   onUpdateTitle?: (id: string, newTitle: string) => Promise<void> | void;
   onAutoGenerateTitle?: (id: string) => Promise<void> | void;
+  onDeleteChat?: (id: string) => Promise<void> | void;
 }
 
 const ChatHeader = memo(function ChatHeader({
@@ -38,6 +41,7 @@ const ChatHeader = memo(function ChatHeader({
   onOpenMobileSidebar,
   onUpdateTitle,
   onAutoGenerateTitle,
+  onDeleteChat,
 }: ChatHeaderProps) {
   // isEditing: boolean controlling whether the title text is replaced by an inline edit input
   const [isEditing, setIsEditing] = useState<boolean>(false);
@@ -45,12 +49,43 @@ const ChatHeader = memo(function ChatHeader({
   const [editTitle, setEditTitle] = useState<string>("");
   // isGenerating: boolean indicating whether an AI auto-titling request is currently in flight
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  // isMenuOpen: boolean controlling visibility of the folded three-dots options dropdown menu
+  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   // headerInputRef: HTMLInputElement reference used for auto-focus and text selection
   const headerInputRef = useRef<HTMLInputElement>(null);
+  // menuRef: HTMLDivElement reference used for detecting outside clicks to dismiss the options dropdown
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown menu on outside click or Escape key press
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isMenuOpen]);
+
+  // Dismiss dropdown menu whenever active conversation changes
+  useEffect(() => {
+    setIsMenuOpen(false);
+  }, [activeConvId]);
 
   // Initiates inline header rename mode
   const handleStartEdit = () => {
     if (!activeConvId) return;
+    setIsMenuOpen(false);
     setIsEditing(true);
     setEditTitle(title || "New Chat");
     queueMicrotask(() => {
@@ -77,11 +112,21 @@ const ChatHeader = memo(function ChatHeader({
   // Triggers backend AI auto-titling coroutine via low-tier Flash/Sonnet model
   const handleAutoTitle = async () => {
     if (!activeConvId || !onAutoGenerateTitle || isGenerating) return;
+    setIsMenuOpen(false);
     setIsGenerating(true);
     try {
       await onAutoGenerateTitle(activeConvId);
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  // Deletes active conversation thread via parent orchestrator callback
+  const handleDelete = async () => {
+    if (!activeConvId || !onDeleteChat) return;
+    setIsMenuOpen(false);
+    if (window.confirm("Are you sure you want to delete this conversation?")) {
+      await onDeleteChat(activeConvId);
     }
   };
 
@@ -143,7 +188,7 @@ const ChatHeader = memo(function ChatHeader({
             </button>
           </div>
         ) : (
-          // Standard Display Mode: Title with always-visible rename pencil and AI auto-generate sparkle pill
+          // Standard Display Mode: Title with folded three-dots conversation options menu
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
             <h1
               className={`text-lg md:text-xl font-bold tracking-tight truncate ${activeConvId ? "cursor-pointer hover:opacity-90" : ""}`}
@@ -153,47 +198,96 @@ const ChatHeader = memo(function ChatHeader({
               <span className="gradient-text">{title || "Chat"}</span>
             </h1>
 
-            {activeConvId ? (
-              <div className="flex items-center gap-1 md:gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleStartEdit}
-                  className="p-1.5 rounded-lg text-text-muted hover:text-accent-cyan hover:bg-bg-tertiary transition-colors"
-                  title="Rename Chat"
-                  aria-label="Rename Chat"
-                >
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
-                </button>
-                {onAutoGenerateTitle && (
+            {activeConvId && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* Visual indicator when background AI auto-titling is actively generating */}
+                {isGenerating && (
+                  <span className="text-xs px-2 py-0.5 rounded-md bg-accent-violet/15 text-purple-300 border border-accent-violet/30 animate-pulse flex items-center gap-1 font-mono shrink-0">
+                    <span>✨</span>
+                    <span className="hidden sm:inline text-[0.7rem]">Titling...</span>
+                  </span>
+                )}
+
+                {/* Three-dots menu container with outside click detection */}
+                <div className="relative shrink-0" ref={menuRef}>
                   <button
                     type="button"
-                    disabled={isGenerating}
-                    onClick={handleAutoTitle}
-                    className={`text-xs px-2 md:px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1.5 font-medium ${
-                      isGenerating
-                        ? "bg-accent-violet/20 border-accent-violet/40 text-purple-300 animate-pulse"
-                        : "bg-accent-violet/10 border-accent-violet/30 text-purple-300 hover:bg-accent-violet/20 hover:border-accent-violet/50"
+                    onClick={() => setIsMenuOpen((prev) => !prev)}
+                    className={`p-1.5 rounded-lg transition-colors flex items-center justify-center ${
+                      isMenuOpen
+                        ? "bg-bg-tertiary text-text-primary border border-border-subtle"
+                        : "text-text-muted hover:text-text-primary hover:bg-bg-tertiary"
                     }`}
-                    title="Auto-generate concise conversation title with AI"
-                    aria-label="Auto-generate title with AI"
+                    title="Conversation options"
+                    aria-label="Conversation options"
+                    aria-haspopup="menu"
+                    aria-expanded={isMenuOpen}
                   >
-                    <span className="text-xs">✨</span>
-                    <span className="hidden sm:inline">{isGenerating ? "Generating..." : "Auto-title"}</span>
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <circle cx="5" cy="12" r="2" />
+                      <circle cx="12" cy="12" r="2" />
+                      <circle cx="19" cy="12" r="2" />
+                    </svg>
                   </button>
-                )}
-              </div>
-            ) : (
-              // Blank draft state: renders a subtle disabled pill so users see the capability upfront
-              <div className="hidden sm:flex items-center gap-1.5 shrink-0 opacity-40">
-                <span
-                  className="text-xs px-2.5 py-1 rounded-lg border border-border-subtle bg-bg-tertiary/40 text-text-muted flex items-center gap-1.5 cursor-not-allowed select-none"
-                  title="Send a message first to generate title with AI"
-                >
-                  <span className="text-xs">✨</span>
-                  <span>Auto-title</span>
-                </span>
+
+                  {/* Popover options dropdown */}
+                  {isMenuOpen && (
+                    <div
+                      role="menu"
+                      aria-orientation="vertical"
+                      className="absolute left-0 top-full mt-1.5 w-48 rounded-xl bg-bg-secondary/95 backdrop-blur-md border border-border-subtle shadow-xl p-1 z-50 animate-in fade-in zoom-in-95 duration-100"
+                    >
+                      {/* Rename action */}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={handleStartEdit}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors text-left"
+                      >
+                        <svg className="w-3.5 h-3.5 text-text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                        <span>Rename</span>
+                      </button>
+
+                      {/* AI Auto-generate title action */}
+                      {onAutoGenerateTitle && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={isGenerating}
+                          onClick={handleAutoTitle}
+                          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left ${
+                            isGenerating
+                              ? "text-purple-300 bg-accent-violet/10 cursor-wait animate-pulse"
+                              : "text-text-secondary hover:text-purple-300 hover:bg-accent-violet/10"
+                          }`}
+                        >
+                          <span className="text-xs shrink-0">✨</span>
+                          <span>{isGenerating ? "Generating title..." : "Auto-generate title"}</span>
+                        </button>
+                      )}
+
+                      {/* Visual separator before destructive action */}
+                      {onDeleteChat && <div className="my-1 border-t border-border-subtle" />}
+
+                      {/* Delete conversation action */}
+                      {onDeleteChat && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={handleDelete}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors text-left"
+                        >
+                          <svg className="w-3.5 h-3.5 text-red-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          <span>Delete conversation</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
