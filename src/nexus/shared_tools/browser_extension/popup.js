@@ -17,8 +17,12 @@ function refreshPopupStatus() {
     badge.textContent = anyConnected ? "Connected" : "Standby";
     badge.className = anyConnected ? "badge connected" : "badge";
 
-    port8000.textContent = res.apiConnected ? "Connected" : "Listening";
-    port8765.textContent = res.cliConnected ? "Connected" : "Standby";
+    port8000.textContent = res.apiConnected ? "Connected" : "Standby";
+    port8765.textContent = res.cliConnected
+      ? "Connected"
+      : res.apiConnected
+      ? "Routed via 8000"
+      : "Standby";
     tabCounts.textContent = `${res.tabCount ?? 0} tabs / ${res.groupCount ?? 0} groups`;
   });
 }

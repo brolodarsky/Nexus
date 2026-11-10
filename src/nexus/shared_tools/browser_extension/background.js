@@ -21,10 +21,24 @@ const ENDPOINTS = {
   cli: "ws://127.0.0.1:8765/api/browser/ws",
 };
 
+// Lightweight HTTP probe URLs checked via `fetch()` before constructing `new WebSocket(...)`
+// so Chrome never logs `WebSocket connection to 'ws://...' failed: net::ERR_CONNECTION_REFUSED`
+// in `chrome://extensions` Errors when an endpoint is offline.
+const PROBE_URLS = {
+  api: "http://127.0.0.1:8000/api/browser/status",
+  cli: "http://127.0.0.1:8765/api/browser/status",
+};
+
 // Map holding active WebSocket instances keyed by endpoint name ("api" | "cli")
 const sockets = {
   api: null,
   cli: null,
+};
+
+// In-flight HTTP probe guards keyed by endpoint name ("api" | "cli")
+const probing = {
+  api: false,
+  cli: false,
 };
 
 // Guard flag preventing duplicate concurrent offscreen document creation calls
@@ -58,16 +72,54 @@ async function ensureOffscreenDocument() {
 }
 
 /**
- * Establishes a WebSocket connection to a local Nexus endpoint ("api" or "cli")
+ * Probes and establishes a WebSocket connection to a local Nexus endpoint ("api" or "cli")
  * if not already connected or connecting.
  *
+ * By verifying the endpoint is reachable over HTTP (`fetch(PROBE_URLS[key])`) inside a
+ * `try / catch` block before calling `new WebSocket(url)`, we prevent Chromium's C++
+ * WebSocket handshake layer from logging `net::ERR_CONNECTION_REFUSED` into the
+ * `chrome://extensions` Error console when a local listener is offline.
+ *
  * @param {"api" | "cli"} key - Endpoint key from ENDPOINTS
+ * @returns {Promise<boolean>} True if already connected or probe succeeded
  */
-function connectEndpoint(key) {
+async function connectEndpoint(key) {
   const existing = sockets[key];
   // WebSocket.OPEN === 1, WebSocket.CONNECTING === 0
   if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
-    return;
+    return true;
+  }
+  if (probing[key]) {
+    return false;
+  }
+
+  probing[key] = true;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 800);
+    try {
+      const res = await fetch(PROBE_URLS[key], {
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        return false;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (_err) {
+    // Endpoint is offline; return cleanly without invoking `new WebSocket(url)`
+    return false;
+  } finally {
+    probing[key] = false;
+  }
+
+  // Re-check socket state after async probe completes
+  const afterProbe = sockets[key];
+  if (afterProbe && (afterProbe.readyState === WebSocket.OPEN || afterProbe.readyState === WebSocket.CONNECTING)) {
+    return true;
   }
 
   const url = ENDPOINTS[key];
@@ -75,7 +127,7 @@ function connectEndpoint(key) {
   try {
     ws = new WebSocket(url);
   } catch (_err) {
-    return;
+    return false;
   }
 
   sockets[key] = ws;
@@ -170,6 +222,8 @@ function connectEndpoint(key) {
       sockets[key] = null;
     }
   };
+
+  return true;
 }
 
 /**
@@ -184,19 +238,26 @@ function safeSend(ws, obj) {
 }
 
 /**
- * Attempts connection to both primary API (8000) and standalone CLI (8765) loopback sockets.
+ * Maintains connection to the primary API (`8000`) loopback socket, falling back to the
+ * standalone CLI (`8765`) socket only when port `8000` is offline. When `8000` is already
+ * open, skips all probes to port `8765` because `browser_bridge.py` routes CLI commands
+ * through the active FastAPI relay on port `8000`.
  */
-function ensureConnections() {
+async function ensureConnections() {
   ensureOffscreenDocument();
-  connectEndpoint("api");
-  connectEndpoint("cli");
 
-  // Also send a lightweight heartbeat over any open socket to prevent idle socket drops
+  // Send a lightweight heartbeat over any already-open socket to prevent idle socket drops
   for (const key of ["api", "cli"]) {
     const ws = sockets[key];
     if (ws && ws.readyState === WebSocket.OPEN) {
       safeSend(ws, { type: "heartbeat", timestamp: Date.now() });
     }
+  }
+
+  // If the primary FastAPI bridge (`8000`) is already connected or connects now, do not poll `8765`
+  const apiReady = await connectEndpoint("api");
+  if (!apiReady) {
+    await connectEndpoint("cli");
   }
 }
 
@@ -344,7 +405,14 @@ function extractTabMarkdownReadOnly(maxChars) {
     if (!htmlStr || typeof htmlStr !== "string") return "";
     const tmp = document.createElement("div");
     tmp.innerHTML = htmlStr;
-    return (tmp.textContent || tmp.innerText || "").replace(/\s+/g, " ").trim();
+    // Run a second pass in case the JSON-LD string contained HTML-escaped tags (e.g. `&lt;p&gt;`)
+    const pass1 = tmp.textContent || tmp.innerText || "";
+    tmp.innerHTML = pass1;
+    return (tmp.textContent || tmp.innerText || "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\\"/g, '"')
+      .replace(/\s+/g, " ")
+      .trim();
   };
 
   for (const script of ldScripts) {
@@ -433,7 +501,20 @@ function extractTabMarkdownReadOnly(maxChars) {
     if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
     const tag = el.tagName.toUpperCase();
     if (SKIP_TAGS.has(tag)) return true;
-    if (skipBoilerplate && BOILERPLATE_TAGS.has(tag)) return true;
+    if (skipBoilerplate) {
+      if (BOILERPLATE_TAGS.has(tag)) return true;
+      // Skip floating chat overlay containers and dialogs during the main document body walk
+      // so raw floating drawer noise does not pollute the primary document flow.
+      // The dedicated active overlay / chat pass cleanly structures them at the end.
+      const cls = (el.className || "").toString();
+      if (cls.includes("msg-overlay-container") || cls.includes("chat-window") || cls.includes("chat-overlay")) {
+        return true;
+      }
+      const role = (el.getAttribute && el.getAttribute("role")) || "";
+      if (role === "dialog" || role === "alertdialog" || tag === "DIALOG") {
+        return true;
+      }
+    }
     if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return true;
     try {
       const style = window.getComputedStyle(el);
@@ -643,7 +724,313 @@ function extractTabMarkdownReadOnly(maxChars) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  // Assemble header + optional JSON-LD schema + rendered DOM markdown
+  // 5. Active Overlay / Chat Extraction Pass
+  // Captures expanded floating chat windows (e.g. LinkedIn InMail/messaging overlay), active dialogs,
+  // and drawers rendered outside the <main> container that standard Readability passes miss.
+  // Returns clean Markdown or empty string if no overlays/chats are open.
+  const extractActiveOverlaysMarkdown = () => {
+    try {
+      const overlayBlocks = [];
+      const processedElements = new Set();
+
+      // Candidate overlay selectors targeting expanded chat bubbles, active floating drawers, and visible dialogs
+      const OVERLAY_SELECTORS = [
+        "aside.msg-overlay-container .msg-overlay-conversation-bubble--is-expanded",
+        ".msg-overlay-conversation-bubble--is-expanded",
+        "aside.msg-overlay-container .msg-overlay-conversation-bubble:not(.msg-overlay-conversation-bubble--is-minimized)",
+        '[data-testid*="chat-window"]',
+        '[data-testid*="conversation-overlay"]',
+        '[data-testid*="chat-overlay"]',
+        '.chat-window:not([hidden])',
+        '.chat-overlay:not([hidden])',
+        '[role="dialog"]:not([aria-hidden="true"])',
+        '[role="alertdialog"]:not([aria-hidden="true"])',
+        'dialog[open]',
+      ];
+
+      // Collect all candidate overlay elements across selectors
+      const rawCandidates = [];
+      for (const sel of OVERLAY_SELECTORS) {
+        try {
+          const matches = document.querySelectorAll(sel);
+          for (const el of matches) {
+            rawCandidates.push(el);
+          }
+        } catch (_e) {}
+      }
+
+      for (const el of rawCandidates) {
+        if (!el || el.nodeType !== Node.ELEMENT_NODE) continue;
+        if (processedElements.has(el)) continue;
+
+        // Skip hidden elements (display: none, visibility: hidden, hidden attr)
+        if (isElementHidden(el, false)) continue;
+
+        // Skip collapsed or minimized elements
+        const classStr = (el.className || "").toString().toLowerCase();
+        if (classStr.includes("minimized") || classStr.includes("collapsed")) continue;
+        if (el.getAttribute("aria-expanded") === "false") continue;
+
+        // Filter out non-chat dialogs like cookie/consent banners or main page roots
+        const tag = el.tagName.toUpperCase();
+        if (tag === "BODY" || tag === "MAIN" || tag === "HTML") continue;
+
+        const ariaLabel = (el.getAttribute("aria-label") || "").toLowerCase();
+        const idStr = (el.id || "").toLowerCase();
+
+        // Check if element is a cookie consent / privacy modal
+        if (
+          /cookie|consent|gdpr|onetrust|banner|privacy-modal/i.test(
+            `${classStr} ${idStr} ${ariaLabel}`
+          )
+        ) {
+          continue;
+        }
+
+        // Avoid nested duplicates: if an ancestor is already processed, skip
+        let ancestorProcessed = false;
+        let parent = el.parentElement;
+        while (parent) {
+          if (processedElements.has(parent)) {
+            ancestorProcessed = true;
+            break;
+          }
+          parent = parent.parentElement;
+        }
+        if (ancestorProcessed) continue;
+
+        processedElements.add(el);
+
+        // Step A: Extract Conversation Participant / Title
+        let participant = "";
+        const TITLE_SELECTORS = [
+          "header .msg-overlay-bubble-header__title",
+          ".msg-overlay-bubble-header__title",
+          ".msg-overlay-bubble-header__details h2",
+          "header h2",
+          "header [role='heading']",
+          ".msg-conversation-card__participant-names",
+          "[data-control-name='overlay.open_thread']",
+          "header a[href*='/in/']",
+          "[role='heading']",
+          "h1, h2, h3, h4",
+          "[class*='participant-name']",
+          "[class*='user-name']",
+          "[class*='chat-title']",
+        ];
+
+        for (const tSel of TITLE_SELECTORS) {
+          try {
+            const titleEl = el.querySelector(tSel);
+            if (titleEl && !isElementHidden(titleEl, false)) {
+              const rawTitle = (titleEl.textContent || "").trim();
+              if (rawTitle) {
+                participant = rawTitle;
+                break;
+              }
+            }
+          } catch (_e) {}
+        }
+
+        if (!participant) {
+          participant = (el.getAttribute("aria-label") || "").trim();
+        }
+
+        // Clean status artifacts from participant name (e.g. "Active now", "Status is reachable", "1st degree")
+        participant = participant
+          .replace(/(?:Status is reachable|Status is active|Active now|Available on mobile|Available on desktop)/gi, "")
+          .replace(/,\s*\d+(?:st|nd|rd|th)?\s*(?:degree)?(?:\s+connection)?/gi, "")
+          .replace(/^Conversation with\s+/i, "")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        if (participant.includes("\n")) {
+          participant = participant.split("\n")[0].trim();
+        }
+
+        if (!participant) {
+          participant = "Conversation Participant";
+        }
+
+        // Step B: Extract Message Thread
+        const messages = [];
+
+        // Try candidate message element selectors
+        const MESSAGE_SELECTORS = [
+          ".msg-s-event-listitem",
+          ".msg-s-message-list__event",
+          "[data-event-urn]",
+          ".msg-s-message-group",
+          ".chat-message",
+          ".message-item",
+          "[data-testid*='message' i]",
+          "[class*='message-bubble']",
+          "[class*='chat-bubble']",
+        ];
+
+        let messageElements = [];
+        for (const mSel of MESSAGE_SELECTORS) {
+          try {
+            const found = el.querySelectorAll(mSel);
+            if (found && found.length > 0) {
+              messageElements = Array.from(found);
+              break;
+            }
+          } catch (_e) {}
+        }
+
+        let lastSender = participant;
+        let lastTimestamp = "";
+
+        if (messageElements.length > 0) {
+          for (const mEl of messageElements) {
+            if (isElementHidden(mEl, false)) continue;
+
+            // 1. Resolve Sender
+            let sender = "";
+            const SENDER_SELECTORS = [
+              ".msg-s-message-group__name",
+              ".msg-s-event-listitem__name",
+              "a.msg-s-event-listitem__link",
+              ".msg-s-message-group__profile-link",
+              "[class*='sender-name']",
+              "[class*='author-name']",
+              "[class*='sender']",
+            ];
+
+            for (const sSel of SENDER_SELECTORS) {
+              const sEl = mEl.querySelector(sSel) || mEl.closest(".msg-s-message-group, [class*='message-group']")?.querySelector(sSel);
+              if (sEl) {
+                const sText = (sEl.textContent || "").trim();
+                if (sText) {
+                  sender = sText;
+                  break;
+                }
+              }
+            }
+
+            // Check if message belongs to the current user (viewer/me)
+            const mClass = (mEl.className || "").toString().toLowerCase();
+            const groupEl = mEl.closest(".msg-s-message-group, [class*='message-group']");
+            const gClass = groupEl ? (groupEl.className || "").toString().toLowerCase() : "";
+            const isViewer =
+              mClass.includes("--me") ||
+              mClass.includes("--viewer") ||
+              gClass.includes("--me") ||
+              gClass.includes("--viewer");
+
+            if (!sender) {
+              if (isViewer) {
+                sender = "You";
+              } else if (lastSender) {
+                sender = lastSender;
+              } else {
+                sender = participant;
+              }
+            } else {
+              lastSender = sender;
+            }
+
+            // Clean sender text
+            sender = sender.replace(/\s+/g, " ").trim();
+            if (sender.includes("\n")) sender = sender.split("\n")[0].trim();
+
+            // 2. Resolve Timestamp
+            let timestamp = "";
+            const timeEl =
+              mEl.querySelector("time, .msg-s-event-listitem__timestamp, .msg-s-message-group__timestamp, [class*='timestamp'], [class*='time']") ||
+              groupEl?.querySelector("time, .msg-s-message-group__timestamp, [class*='timestamp']");
+
+            if (timeEl) {
+              timestamp = (timeEl.textContent || timeEl.getAttribute("datetime") || "").replace(/\s+/g, " ").trim();
+              if (timestamp) {
+                lastTimestamp = timestamp;
+              }
+            }
+            if (!timestamp && lastTimestamp) {
+              timestamp = lastTimestamp;
+            }
+
+            // 3. Resolve Subject (for InMail messages)
+            let subjectPrefix = "";
+            const subjEl = mEl.querySelector(".msg-s-event-listitem__subject, [class*='subject']");
+            if (subjEl) {
+              const sTxt = (subjEl.textContent || "").replace(/\s+/g, " ").trim();
+              if (sTxt) subjectPrefix = `**Subject:** ${sTxt}\n\n`;
+            }
+
+            // 4. Resolve Body: Check if mEl contains multiple message bodies (e.g. if grouped)
+            const bodyElements = mEl.querySelectorAll(
+              ".msg-s-event-listitem__body, .msg-s-message-bubble__content, p.msg-s-event-listitem__body"
+            );
+
+            const bodies = bodyElements.length > 0 ? Array.from(bodyElements) : [mEl];
+
+            for (const bEl of bodies) {
+              let bodyText = "";
+              if (bEl !== mEl) {
+                bodyText = nodeToMarkdown(bEl, 0, false).trim();
+              } else {
+                try {
+                  const clone = mEl.cloneNode(true);
+                  const toRemove = clone.querySelectorAll(
+                    "time, [class*='sender'], [class*='timestamp'], [class*='author'], [class*='meta'], header, button"
+                  );
+                  for (const r of toRemove) r.remove();
+                  bodyText = nodeToMarkdown(clone, 0, false).trim();
+                } catch (_e) {
+                  bodyText = nodeToMarkdown(mEl, 0, false).trim();
+                }
+              }
+
+              bodyText = bodyText
+                .replace(/[ \t]+\n/g, "\n")
+                .replace(/\n{3,}/g, "\n\n")
+                .trim();
+
+              if (!bodyText) continue;
+
+              const fullMessageText = subjectPrefix ? `${subjectPrefix}${bodyText}` : bodyText;
+              subjectPrefix = "";
+
+              const quotedBody = fullMessageText
+                .split("\n")
+                .map((line) => (line.trim() ? `> ${line}` : ">"))
+                .join("\n");
+
+              const timeStr = timestamp ? ` (${timestamp})` : "";
+              messages.push(`- **Sender:** ${sender}${timeStr}\n${quotedBody}`);
+            }
+          }
+        } else {
+          // Dialog without message items: extract dialog content directly
+          const rawContent = nodeToMarkdown(el, 0, false).trim();
+          if (rawContent && rawContent.length > 30) {
+            const quotedBody = rawContent
+              .split("\n")
+              .map((line) => (line.trim() ? `> ${line}` : ">"))
+              .join("\n");
+            messages.push(`- **Sender:** ${participant}\n${quotedBody}`);
+          }
+        }
+
+        if (messages.length > 0) {
+          overlayBlocks.push(`### ${participant}\n${messages.join("\n\n")}`);
+        }
+      }
+
+      if (overlayBlocks.length > 0) {
+        return `---\n## Active Chat & Floating Overlays\n\n${overlayBlocks.join("\n\n")}`;
+      }
+      return "";
+    } catch (_err) {
+      return "";
+    }
+  };
+
+  const overlayMarkdown = extractActiveOverlaysMarkdown();
+
+  // Assemble header + optional JSON-LD schema + rendered DOM markdown + active overlays
   const sections = [];
   if (siteName) sections.push(`**Site:** ${siteName}`);
   if (metaDescription) sections.push(`**Meta Description:** ${metaDescription}`);
@@ -651,6 +1038,9 @@ function extractTabMarkdownReadOnly(maxChars) {
     sections.push(jsonLdBlocks.join("\n\n"));
   }
   sections.push(cleanMarkdown);
+  if (overlayMarkdown) {
+    sections.push(overlayMarkdown);
+  }
 
   const fullText = sections.filter(Boolean).join("\n\n");
   const truncated = fullText.length > charBudget;

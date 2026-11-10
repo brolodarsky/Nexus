@@ -10,6 +10,7 @@ anti-bot network footprint.
 import argparse
 # asyncio: Standard library async I/O runtime used for standalone WebSocket server fallback
 import asyncio
+import http
 import json
 import sys
 import threading
@@ -21,6 +22,7 @@ from typing import Any, Coroutine, Dict, List, Optional
 import httpx
 # websockets: Standards-compliant WebSocket library used for standalone CLI mode when FastAPI is offline
 from websockets.asyncio.server import ServerConnection, serve
+from websockets.http11 import Request, Response
 
 from nexus.core.constants import PROJECT_ROOT
 
@@ -115,11 +117,22 @@ async def _execute_via_ephemeral_ws(
             if not result_future.done():
                 result_future.set_exception(exc)
 
+    # Answers the Chrome Extension's lightweight HTTP status probe (`GET /api/browser/status`)
+    # with `200 OK` so `background.js` only initiates `new WebSocket(...)` when a listener is live,
+    # preventing Chromium's C++ WebSocket layer from logging `ERR_CONNECTION_REFUSED` in `chrome://extensions`.
+    async def _process_request(connection: ServerConnection, request: Request) -> Optional[Response]:
+        if request.headers.get("Upgrade", "").lower() != "websocket":
+            resp = connection.respond(http.HTTPStatus.OK, '{"ok": true, "mode": "ephemeral_cli"}\n')
+            resp.headers["Content-Type"] = "application/json"
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            return resp
+        return None
+
     servers = []
-    # Bind port 8765 (dedicated CLI bridge port) and also port 8000 if FastAPI is completely offline
-    for port in (CLI_WS_PORT, API_WS_PORT):
+    # Bind port 8000 (if FastAPI is completely offline) and port 8765 (dedicated CLI bridge port)
+    for port in (API_WS_PORT, CLI_WS_PORT):
         try:
-            srv = await serve(_ws_handler, CLI_WS_HOST, port)
+            srv = await serve(_ws_handler, CLI_WS_HOST, port, process_request=_process_request)
             servers.append(srv)
         except OSError:
             # Port is already bound by another process (e.g. FastAPI on 8000); skip cleanly

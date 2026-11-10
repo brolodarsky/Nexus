@@ -4,9 +4,10 @@ test_browser_bridge.py — Unit and integration tests for the Read-Only Nexus Br
 Verifies:
 1. `tool_catalog.py` static AST discovery of `nexus.shared_tools.browser_bridge [CLI]`.
 2. Markdown formatting (`format_tabs_as_markdown`, `format_tab_reads_as_markdown`) for Chrome Tab Groups and tabs.
-3. Standalone ephemeral WebSocket RPC loop (`_execute_via_ephemeral_ws`) with a simulated Chrome Extension client.
-4. FastAPI `/api/browser` router (`/status`, `/tabs`, `/read`, `/ws`) end-to-end request/response correlation.
-5. LangChain `@tool` wrappers (`list_browser_tabs`, `read_browser_tabs`) registration in `CORE_TOOLS`.
+3. Active Chat & Floating Overlays parsing and formatting from live rendered DOM.
+4. Standalone ephemeral WebSocket RPC loop (`_execute_via_ephemeral_ws`) with a simulated Chrome Extension client.
+5. FastAPI `/api/browser` router (`/status`, `/tabs`, `/read`, `/ws`) end-to-end request/response correlation.
+6. LangChain `@tool` wrappers (`list_browser_tabs`, `read_browser_tabs`) registration in `CORE_TOOLS`.
 """
 import asyncio
 import json
@@ -124,6 +125,71 @@ def test_format_tab_reads_as_markdown() -> None:
     assert "[tab_id: 42] Senior AI Engineer - Acme" in md
     assert "Build LangGraph agents." in md
     assert "❌ Error — Cannot extract DOM from restricted browser URL" in md
+
+
+def test_format_tab_reads_with_active_chat_overlays() -> None:
+    """Verify Markdown rendering of tab content with active chat & floating overlays."""
+    sample = {
+        "ok": True,
+        "data": {
+            "requested_count": 1,
+            "succeeded_count": 1,
+            "tabs": [
+                {
+                    "tab_id": 101,
+                    "title": "Jane Doe | LinkedIn",
+                    "url": "https://www.linkedin.com/in/janedoe/",
+                    "group_title": "Recruiters",
+                    "group_color": "purple",
+                    "ok": True,
+                    "char_count": 450,
+                    "truncated": False,
+                    "markdown": (
+                        "# Jane Doe\nStaff Technical Recruiter at Acme\n\n"
+                        "---\n## Active Chat & Floating Overlays\n\n"
+                        "### Jane Doe\n"
+                        "- **Sender:** Jane Doe (10:14 AM)\n"
+                        "> Hi William, check out this role: [AI Engineer](https://jobs.example.com/123)\n\n"
+                        "- **Sender:** William (10:20 AM)\n"
+                        "> Thanks Jane, reviewing now!"
+                    ),
+                }
+            ],
+        },
+    }
+    md = browser_bridge.format_tab_reads_as_markdown(sample)
+    assert "1/1 tabs read successfully" in md
+    assert "[tab_id: 101] Jane Doe | LinkedIn" in md
+    assert "**Chrome Tab Group:** Recruiters (purple)" in md
+    assert "## Active Chat & Floating Overlays" in md
+    assert "### Jane Doe" in md
+    assert "- **Sender:** Jane Doe (10:14 AM)" in md
+    assert "> Hi William, check out this role: [AI Engineer](https://jobs.example.com/123)" in md
+    assert "- **Sender:** William (10:20 AM)" in md
+    assert "> Thanks Jane, reviewing now!" in md
+
+
+def test_browser_extension_active_overlay_dom_extraction() -> None:
+    """Execute extractTabMarkdownReadOnly against a simulated DOM in Node.js to verify active overlay extraction."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node_bin = shutil.which("node")
+    if not node_bin:
+        pytest.skip("Node.js not available on system PATH; skipping JS DOM simulation test.")
+
+    test_script_path = Path(__file__).resolve().parent / "test_browser_extension_dom.js"
+    assert test_script_path.exists(), f"test_browser_extension_dom.js not found at {test_script_path}"
+
+    proc = subprocess.run(
+        [node_bin, str(test_script_path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert proc.returncode == 0, f"Node script failed ({proc.returncode}):\n{proc.stderr}\n{proc.stdout}"
+    assert "All Node.js browser extension DOM tests passed successfully!" in proc.stdout
 
 
 def test_ephemeral_ws_roundtrip() -> None:
