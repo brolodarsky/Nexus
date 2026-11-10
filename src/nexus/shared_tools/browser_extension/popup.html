@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Nexus Browser Bridge</title>
+  <style>
+    body {
+      width: 310px;
+      margin: 0;
+      padding: 14px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      font-size: 13px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1e293b;
+    }
+    .title {
+      font-weight: 600;
+      font-size: 14px;
+      color: #38bdf8;
+    }
+    .badge {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-weight: 600;
+      background: #1e293b;
+      color: #94a3b8;
+    }
+    .badge.connected {
+      background: #064e3b;
+      color: #34d399;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      margin: 6px 0;
+      color: #cbd5e1;
+    }
+    .row span.val {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #f1f5f9;
+    }
+    .note {
+      margin-top: 10px;
+      padding: 8px;
+      border-radius: 6px;
+      background: #1e293b;
+      color: #94a3b8;
+      font-size: 11.5px;
+      line-height: 1.4;
+    }
+    button {
+      margin-top: 10px;
+      width: 100%;
+      padding: 7px 10px;
+      background: #0284c7;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button:hover {
+      background: #0369a1;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="title">Nexus Browser Bridge</span>
+    <span id="status-badge" class="badge">Checking...</span>
+  </div>
+  <div class="row">
+    <span>Mode:</span>
+    <span class="val">Strictly Read-Only</span>
+  </div>
+  <div class="row">
+    <span>API Endpoint (8000):</span>
+    <span id="port-8000" class="val">—</span>
+  </div>
+  <div class="row">
+    <span>CLI Endpoint (8765):</span>
+    <span id="port-8765" class="val">—</span>
+  </div>
+  <div class="row">
+    <span>Open Tabs / Groups:</span>
+    <span id="tab-counts" class="val">—</span>
+  </div>
+  <div class="note">
+    Exposes live Chrome Tab Groups and rendered DOM Markdown to your local Nexus Engine over loopback (`127.0.0.1`).
+  </div>
+  <button id="reconnect-btn">Reconnect Now</button>
+  <script src="popup.js"></script>
+</body>
+</html>

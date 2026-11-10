@@ -90,6 +90,13 @@ To use the universal chat scraper, you must have ADB (Android Debug Bridge) inst
 3. **Connect**: Connect via USB (or wireless ADB) and tap "Allow" on the phone's authorization dialog.
 4. **Run**: Open the chat you want to save on your phone's screen and run `python src/nexus/shared_tools/ingest_phone.py --screens <N>`.
 
+### Live Chrome Browser & Tab Group Bridge Setup (`browser_bridge.py`)
+To allow Nexus to read open Chrome Tab Groups and extract rendered DOM Markdown from authenticated tabs (LinkedIn, Workday, Greenhouse, etc.) with zero vision tokens and zero anti-bot friction:
+1. Open Chrome and navigate to `chrome://extensions`.
+2. Enable **Developer mode** (toggle in the top-right corner).
+3. Click **Load unpacked** (top-left) and select `src/nexus/shared_tools/browser_extension`.
+4. Verify connection via `python -m nexus.shared_tools.browser_bridge --status` or list tabs/groups via `python -m nexus.shared_tools.browser_bridge --list`.
+
 ## The Engine (Skills, Workflows & Tools)
 
 This repository distinguishes between capabilities and constraints that define how the Brain automation works. It is critical to understand the distinction between Rules, Skills, Workflows, and Tools:
@@ -120,6 +127,7 @@ This repository distinguishes between capabilities and constraints that define h
 |---|---|---|
 | `youtube_transcript.py` | Downloads YouTube transcripts to text files. | `python src/nexus/shared_tools/youtube_transcript.py <url>` |
 | `web_search.py` | Agentic web search engine backed by Tavily (`basic` / `advanced` depth, domain filters, and Markdown citation formatting). | `python -m nexus.shared_tools.web_search "<query>" [-n 5] [-d basic\|advanced] [--domain <domain>]` |
+| `browser_bridge.py` | Read-only live Chrome Browser & Tab Group bridge (`chrome.tabGroups` + live rendered DOM & JSON-LD Markdown extraction via `src/nexus/shared_tools/browser_extension/`). | `python -m nexus.shared_tools.browser_bridge --list` / `--group "<name>" [--read]` / `--tab-id <id> --read` / `--active --read` |
 | `read_webpage.py` | Extracts clean markdown content from single webpages via trafilatura. | `python src/nexus/shared_tools/read_webpage.py <url> [-o output.md]` |
 | `gmail_engine.py` | Gmail REST API v1 multi-account integration: search (native Gmail syntax), read/thread as markdown, labels, archive, trash, drafts (never sends). Supports `--accounts`, `--auth --account <name>`, and `--account all` multi-inbox aggregation with isolated OAuth tokens at `.secrets/token_gmail*.json`. | `python -m nexus.shared_tools.gmail_engine --accounts` / `--auth --account <name>` / `--list 10 [--account all]` / `--search "from:x newer_than:7d"` / `--read <id>` / `--draft TO SUBJ BODY` |
 | `calendar_engine.py` | Deterministic Google Calendar integration for listing, creating, and updating events with local OAuth token isolation. | `python src/nexus/shared_tools/calendar_engine.py --today` |
@@ -140,7 +148,8 @@ This repository distinguishes between capabilities and constraints that define h
 | `src/nexus/evals/runner.py` | Benchmarks `NexusAgent` against the Golden Dataset. | `python -m nexus.evals.runner` |
 | `src/nexus/agent/graph.py` | Single Universal Agent (`NexusAgent`). Boots with prompt-cache-isolated `inject_root_instructions()`, routes across native `ChatGoogleGenerativeAI` (Argon / Flash) and OpenAI tiers (`get_chat_model` / `resolve_model_config`) with per-turn `model_tier` selection via LangGraph `RunnableConfig`, configurable timeout (`ai_request_timeout`), and resilient tier fallback on 504 Deadline Exceeded, preserves 100% lossless KV-cached history, binds core Vault/HITL/Blackboard tools, and spawns parallel isolated subagents (`spawn_subagent(task_prompt, model_tier="low")`). | `python -m nexus.agent.api` |
 | `src/nexus/shared_tools/vault_reader.py` | Pure-Python filesystem utilities for Vault navigation, PDF ingestion (text, layout, Markdown tables), and recent modification queries (`get_recent_modifications`, `get_directory_tree`, `resolve_vault_note_path`, `read_note_content`, `search_within`). | `python -m nexus.shared_tools.vault_reader --today` |
-| `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` wrappers (`get_directory_structure`, `read_file`, `modify_file`, `create_file`, `move_file`, `delete_file`, `search_vault`, `get_recent_modifications`, `search_web`, `fetch_emails`, calendar tools, `post_to_board`, `read_board`, `spawn_subagent`, `run_shared_tool_cli`). | N/A (library module) |
+| `src/nexus/shared_tools/shared.py` | Shared LangChain `@tool` wrappers (`get_directory_structure`, `read_file`, `modify_file`, `create_file`, `move_file`, `delete_file`, `search_vault`, `get_recent_modifications`, `search_web`, `list_browser_tabs`, `read_browser_tabs`, `fetch_emails`, calendar tools, `post_to_board`, `read_board`, `spawn_subagent`, `run_shared_tool_cli`). | N/A (library module) |
+| `src/nexus/api/routers/browser.py` | Loopback WebSocket relay (`/api/browser/ws`) and REST endpoints (`/status`, `/tabs`, `/read`) connecting the unpacked Chrome Extension (`browser_extension/`) to the Nexus Engine. | Via GUI, CLI, or API |
 | `src/nexus/core/blackboard.py` | Shared Agent Blackboard (`blackboard.db`) for cross-subagent and cross-turn situational bulletins. | N/A (library module) |
 | `src/nexus/core/engine_constitution.py` | Hydrates `Vault/Master Instructions.md` via `inject_root_instructions()` (`{current_time}`, `{user_name}`, `{vault_structure}`, `{shared_tools}`). IDE Resident agents and `NexusAgent` inject its output at boot. | `python -m nexus.core.engine_constitution` |
 | `src/nexus/core/tool_catalog.py` | Static (`ast`, no imports) catalog of `src/nexus/shared_tools/` modules for the `{shared_tools}` placeholder. | `python -m nexus.core.tool_catalog` |

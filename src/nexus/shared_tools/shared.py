@@ -792,6 +792,78 @@ def search_web(
     return format_search_results_as_markdown(data)
 
 
+# Signature breakdown for list_browser_tabs:
+# - group_name: Optional case-insensitive Chrome Tab Group title filter (e.g. "Jobs")
+# - query: Optional substring filter matching tab title, URL, or group name
+# - active_only: When True, returns only the currently focused tab in each Chrome window
+@tool
+def list_browser_tabs(
+    group_name: Optional[str] = None,
+    query: Optional[str] = None,
+    active_only: bool = False,
+) -> str:
+    """List open tabs and Chrome Tab Groups from the user's live Chrome browser (strictly read-only).
+
+    Use this tool whenever the user refers to their open browser tabs, a Chrome Tab Group
+    (e.g. a group of job listings, articles, or shopping pages), or their active webpage.
+    Returns all open Chrome Tab Groups (title, color, tab count) and matching tabs with their
+    `tab_id`, title, URL, and group assignment.
+
+    Args:
+        group_name: Optional Chrome Tab Group title to filter by (case-insensitive, e.g. 'Jobs').
+        query: Optional keyword filter matching tab title, URL, or group name.
+        active_only: Set True to list only the currently active/focused tab.
+    """
+    from nexus.shared_tools.browser_bridge import format_tabs_as_markdown, list_tabs
+
+    result = list_tabs(group_name=group_name, query=query, active_only=active_only)
+    return format_tabs_as_markdown(result)
+
+
+# Signature breakdown for read_browser_tabs:
+# - tab_ids: Optional list of integer Chrome tab IDs (from `list_browser_tabs`) to extract
+# - group_name: Optional Chrome Tab Group title to extract all tabs from
+# - query: Optional substring filter on tab title or URL
+# - active_only: Set True to read only the currently focused Chrome tab
+# - max_chars: Maximum Markdown character budget per tab (default 15,000)
+@tool
+def read_browser_tabs(
+    tab_ids: Optional[List[int]] = None,
+    group_name: Optional[str] = None,
+    query: Optional[str] = None,
+    active_only: bool = False,
+    max_chars: int = 15000,
+) -> str:
+    """Extract clean, read-only Markdown (and structured JSON-LD schema) from the live rendered DOM of open Chrome tabs.
+
+    Reads directly from the user's authenticated Chrome session via the local Nexus Browser Bridge,
+    bypassing anti-bot walls (LinkedIn, Workday, Greenhouse, Cloudflare) with zero vision tokens.
+
+    CONTEXT HYGIENE DIRECTIVE: Reading 1–2 tabs directly in the primary thread is fine.
+    However, when inspecting or triaging a Chrome Tab Group or >2 tabs (e.g. evaluating a batch of job
+    descriptions), call `list_browser_tabs` first to get the `tab_id` list, then delegate the reading
+    and evaluation to parallel `spawn_subagent(task_prompt, model_tier="low")` workers (passing 1–2 `tab_ids`
+    per subagent) so raw webpage Markdown does not bloat your primary context window.
+
+    Args:
+        tab_ids: Optional list of specific integer `tab_id` values to read (e.g. [142, 145]).
+        group_name: Optional Chrome Tab Group title (case-insensitive, e.g. 'Jobs').
+        query: Optional substring filter matching tab title or URL.
+        active_only: Set True to read only the currently active/focused tab.
+        max_chars: Maximum characters of Markdown to return per tab (default: 15000).
+    """
+    from nexus.shared_tools.browser_bridge import format_tab_reads_as_markdown, read_tabs
+
+    result = read_tabs(
+        tab_ids=tab_ids,
+        group_name=group_name,
+        query=query,
+        active_only=active_only,
+        max_chars=max_chars,
+    )
+    return format_tab_reads_as_markdown(result)
+
+
 @tool
 def run_shared_tool_cli(module: str, cli_args: Optional[List[str]] = None) -> str:
     """Invoke any `[CLI]` module listed in the `Shared Tools` catalog on demand via `.venv` Python.
