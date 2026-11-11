@@ -46,8 +46,12 @@ def test_read_pdf_vault_single_page():
 
 def test_read_pdf_vault_multi_page_slicing():
     """Validates that page slicing (start_page, end_page) isolates the requested page range."""
-    # Doc - Fordham University Transcript.pdf has 4 pages
-    result = read_note_content("Doc - Fordham University Transcript.pdf", start_page=2, end_page=2)
+    # Scope to explicit Vault path to avoid ambiguity with newly ingested copies in 0. Inbox
+    result = read_note_content(
+        "3. Operations/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Doc - Fordham University Transcript.pdf",
+        start_page=2,
+        end_page=2,
+    )
     assert "(pages 2-2 of 4)" in result
     assert "FORDHAM UNIVERSITY" in result
     assert "EXPLANATION OF TRANSCRIPT" in result
@@ -63,10 +67,22 @@ def test_read_pdf_vault_line_slicing():
 
 def test_read_pdf_vault_table_extraction():
     """Validates that real-world tables in Vault PDFs (transcript courses) are converted into Markdown tables."""
-    content = read_note_content("Doc - Fordham University Transcript.pdf", start_page=1, end_page=1)
+    content = read_note_content(
+        "3. Operations/3.1. Career Strategy & Revenue/3.1.3. Professional Portfolio & Evidence/Doc - Fordham University Transcript.pdf",
+        start_page=1,
+        end_page=1,
+    )
     # The transcript contains a 10-column course table
     assert "|COURSE#|COURSETITLE|" in content or "|COURSE #" in content or "|---|" in content
     assert "Bachelor of Science" in content
+
+
+def test_read_pdf_layout_segfault_resilience():
+    """Validates that complex receipt PDFs with vector drawings do not trigger PyMuPDF layout segfaults."""
+    receipt_path = "0. Inbox/Student Loan Payment Receipt.pdf"
+    content = read_note_content(receipt_path, start_page=1, end_page=1)
+    assert "--- File:" in content
+    assert "Total Payment Amount" in content or "Make A Payment" in content
 
 
 def test_read_pdf_synthetic_table_extraction(tmp_path: Path):

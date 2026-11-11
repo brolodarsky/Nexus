@@ -236,9 +236,16 @@ def _read_pdf_content(
                 page_num = page_idx + 1
 
                 # 1. Detect tabular structures via PyMuPDF native table recognition
+                # CRITICAL RESILIENCE DIRECTIVE (`use_layout=False`):
+                # PyMuPDF 2.1's native C++ layout analyzer (invoked by default via `page.get_layout()` when `use_layout=True`)
+                # contains an uncatchable access violation / NULL pointer dereference bug (SEH 0xc0000005) in `mupdfcpp64.dll`
+                # on specific PDF drawing vector streams or receipt fonts (e.g., student loan or banking payment receipts).
+                # Because native C++ segfaults bypass Python exception handling and terminate the entire process,
+                # passing `use_layout=False` restricts detection to line/edge-based vector analysis, which is memory-safe,
+                # fast, and prevents catastrophic crashes of the backend server worker.
                 table_entries: List[Tuple[Tuple[float, float, float, float], str]] = []
                 try:
-                    tabs = page.find_tables()
+                    tabs = page.find_tables(use_layout=False)
                     if tabs and tabs.tables:
                         for tab in tabs:
                             try:
