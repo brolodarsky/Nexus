@@ -34,12 +34,18 @@ def test_resolve_model_pricing():
     assert mini_rates["input"] == 0.15
     assert mini_rates["output"] == 0.60
 
-    # Anthropic Claude Opus 4.5 & Sonnet 4.5 exact and dot-alias matches
-    opus_rates = resolve_model_pricing("claude-opus-4-5")
-    assert opus_rates["input"] == 5.00
-    assert opus_rates["cached"] == 0.50
-    assert opus_rates["output"] == 25.00
-    assert resolve_model_pricing("claude-opus-4.5") == opus_rates
+    # Anthropic Claude Opus 5.5, Opus 4.5 & Sonnet 4.5 exact and dot-alias matches
+    opus55_rates = resolve_model_pricing("claude-opus-5-5")
+    assert opus55_rates["input"] == 4.00
+    assert opus55_rates["cached"] == 0.20
+    assert opus55_rates["output"] == 20.00
+    assert resolve_model_pricing("claude-opus-5.5") == opus55_rates
+
+    opus45_rates = resolve_model_pricing("claude-opus-4-5")
+    assert opus45_rates["input"] == 5.00
+    assert opus45_rates["cached"] == 0.50
+    assert opus45_rates["output"] == 25.00
+    assert resolve_model_pricing("claude-opus-4.5") == opus45_rates
 
     sonnet_rates = resolve_model_pricing("claude-sonnet-4-5")
     assert sonnet_rates["input"] == 3.00
@@ -48,7 +54,8 @@ def test_resolve_model_pricing():
     assert resolve_model_pricing("claude-sonnet-4.5") == sonnet_rates
 
     # Anthropic models do NOT double above 128k context (flat rate across 200k window)
-    assert resolve_model_pricing("claude-opus-4-5", tier="strong", input_tokens=160_000) == opus_rates
+    assert resolve_model_pricing("claude-opus-5-5", tier="strong", input_tokens=160_000) == opus55_rates
+    assert resolve_model_pricing("claude-opus-4-5", tier="strong", input_tokens=160_000) == opus45_rates
     assert resolve_model_pricing("claude-sonnet-4-5", tier="low", input_tokens=160_000) == sonnet_rates
 
     # Fuzzy matches

@@ -151,13 +151,13 @@ export const FALLBACK_MODELS: ModelOption[] = [
     description: "High-speed, low-cost execution — Flash (gemini-3.8-flash)",
   },
   {
-    id: "claude-opus-4-5",
+    id: "claude-opus-5-5",
     tier: "strong",
     provider: "anthropic",
-    model_name: "claude-opus-4-5",
-    label: "Opus 4.5 (claude-opus-4-5)",
-    short_label: "Opus 4.5",
-    description: "Anthropic deep reasoning & synthesis — Claude Opus 4.5 (claude-opus-4-5)",
+    model_name: "claude-opus-5-5",
+    label: "Opus 5.5 (claude-opus-5-5)",
+    short_label: "Opus 5.5",
+    description: "Anthropic deep reasoning & synthesis — Claude Opus 5.5 (claude-opus-5-5)",
   },
   {
     id: "claude-sonnet-4-5",
@@ -259,14 +259,15 @@ export function extractTurnCost(
   // Calculate from accumulated tokens if explicit cost wasn't logged in legacy trace
   if (totalIn > 0 || totalOut > 0) {
     const lowerName = (modelName || "").toLowerCase();
+    const isOpus45 = lowerName.includes("opus-4") || lowerName.includes("opus 4");
     const isOpus = lowerName.includes("opus");
     const isSonnet = lowerName.includes("sonnet");
     const isLow = (modelTier === "low") || lowerName.includes("flash") || isSonnet;
 
-    // Resolve per-million-token pricing across Anthropic Claude and Google Gemini model families
-    const inRate = isOpus ? 5.00 : isSonnet ? 3.00 : isLow ? 0.10 : 1.25;
-    const cachedRate = isOpus ? 0.50 : isSonnet ? 0.30 : isLow ? 0.025 : 0.3125;
-    const outRate = isOpus ? 25.00 : isSonnet ? 15.00 : isLow ? 0.40 : 5.00;
+    // Resolve per-million-token pricing across Anthropic Claude (Opus 5.5: $4/$0.20/$20, Opus 4.5: $5/$0.50/$25, Sonnet: $3/$0.30/$15) and Google Gemini model families
+    const inRate = isOpus45 ? 5.00 : isOpus ? 4.00 : isSonnet ? 3.00 : isLow ? 0.10 : 1.25;
+    const cachedRate = isOpus45 ? 0.50 : isOpus ? 0.20 : isSonnet ? 0.30 : isLow ? 0.025 : 0.3125;
+    const outRate = isOpus45 ? 25.00 : isOpus ? 20.00 : isSonnet ? 15.00 : isLow ? 0.40 : 5.00;
 
     const uncachedIn = Math.max(0, totalIn - totalCached);
     const cost = ((uncachedIn * inRate) + (totalCached * cachedRate) + (totalOut * outRate)) / 1000000;

@@ -955,7 +955,7 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     except Exception as e:
         err_msg = str(e)
         # Check if the failure is a deadline / timeout error from the provider gateway (e.g. 504 DEADLINE_EXCEEDED)
-        # Occurs when heavy reasoning models (`gemini-4-argon`, `claude-opus-4-5`) exceed HTTP deadlines on long conversation histories.
+        # Occurs when heavy reasoning models (`gemini-4-argon`, `claude-opus-5-5`) exceed HTTP deadlines on long conversation histories.
         is_deadline_or_timeout = any(
             token in err_msg.lower() or token in type(e).__name__.lower()
             for token in ("504", "deadline_exceeded", "timeout", "timed out")

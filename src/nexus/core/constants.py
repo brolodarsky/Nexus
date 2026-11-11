@@ -30,7 +30,7 @@ GEMINI_MODEL_MEDIUM = settings.gemini_model_medium
 GEMINI_MODEL_STRONG = settings.gemini_model_strong
 
 # AI Config — Anthropic Claude Native Client & Model Tiers
-# Resolves `ANTHROPIC_API_KEY` from `.env`; maps Opus 4.5 to `strong` and Sonnet 4.5 to `low`
+# Resolves `ANTHROPIC_API_KEY` from `.env`; maps Opus 5.5 to `strong` and Sonnet 4.5 to `low`
 ANTHROPIC_API_KEY = settings.anthropic_api_key
 ANTHROPIC_MODEL_LOW = settings.anthropic_model_low
 ANTHROPIC_MODEL_MEDIUM = settings.anthropic_model_medium
@@ -40,12 +40,14 @@ ANTHROPIC_MODEL_STRONG = settings.anthropic_model_strong
 ModelTier = Literal["low", "medium", "strong"]
 
 
-# `model_id: str` is an incoming Anthropic model string (e.g. `"claude-opus-4.5"` or `"claude-opus-4-5"`).
-# `-> str` normalizes dot-separated version suffixes (`4.5`) into Anthropic's canonical hyphenated API format (`4-5`).
+# `model_id: str` is an incoming Anthropic model string (e.g. `"claude-opus-5.5"`, `"claude-opus-5-5"`, or `"claude-opus-4-5"`).
+# `-> str` normalizes dot-separated version suffixes (`5.5`, `4.5`) into Anthropic's canonical hyphenated API format (`5-5`, `4-5`).
 def _normalize_anthropic_model_name(model_id: str) -> str:
     """Normalize shorthand or dot-versioned Anthropic model strings into canonical Anthropic API identifiers."""
     cleaned = model_id.strip()
     lower = cleaned.lower()
+    if lower in ("claude-opus-5.5", "opus-5.5", "opus-5-5", "opus 5.5"):
+        return "claude-opus-5-5"
     if lower in ("claude-opus-4.5", "opus-4.5", "opus-4-5", "opus 4.5"):
         return "claude-opus-4-5"
     if lower in ("claude-sonnet-4.5", "sonnet-4.5", "sonnet-4-5", "sonnet 4.5"):
@@ -54,7 +56,7 @@ def _normalize_anthropic_model_name(model_id: str) -> str:
 
 
 # `tier: str | None` accepts a standardized tier (`"low"`, `"medium"`, `"strong"`), a provider-qualified tier (`"anthropic:strong"`),
-# or an explicit model ID (e.g. `"gemini-4-argon"`, `"claude-opus-4-5"`, `"claude-sonnet-4-5"`).
+# or an explicit model ID (e.g. `"gemini-4-argon"`, `"claude-opus-5-5"`, `"claude-sonnet-4-5"`).
 # `provider: str | None` optionally overrides the target provider family (`"gemini"`, `"anthropic"`, `"openai"`), e.g. so subagents match the parent turn's provider.
 # `-> dict[str, str]` returns resolved metadata (`tier`, `provider`, `model_name`, `label`) for telemetry and client instantiation.
 def resolve_model_config(tier: str | None = None, provider: str | None = None) -> dict[str, str]:
@@ -126,7 +128,7 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
         effective_tier = lower_choice
         model_name = active_map[effective_tier]
     else:
-        # Caller passed an explicit model name (e.g. `"gemini-3.8-flash"`, `"claude-opus-4-5"`, `"claude-sonnet-4-5"`):
+        # Caller passed an explicit model name (e.g. `"gemini-3.8-flash"`, `"claude-opus-5-5"`, `"claude-sonnet-4-5"`):
         # 1. Detect provider from explicit model identifier if not explicitly overridden
         if any(tok in lower_choice for tok in ("claude", "opus", "sonnet", "haiku")):
             active_provider = "anthropic"
@@ -208,7 +210,7 @@ def get_available_models() -> dict[str, Any]:
             },
         )
 
-    # Append Anthropic Claude options (`claude-opus-4-5` for Strong, `claude-sonnet-4-5` for Low/Fast)
+    # Append Anthropic Claude options (`claude-opus-5-5` for Strong, `claude-sonnet-4-5` for Low/Fast)
     # when the primary provider is not already Anthropic so all 4 options appear side-by-side in the Chat UI.
     if default_resolved["provider"] != "anthropic":
         models.extend(
@@ -218,9 +220,9 @@ def get_available_models() -> dict[str, Any]:
                     "tier": "strong",
                     "provider": "anthropic",
                     "model_name": anthropic_strong,
-                    "label": f"Opus 4.5 ({anthropic_strong})",
-                    "short_label": "Opus 4.5",
-                    "description": f"Anthropic deep reasoning & synthesis — Claude Opus 4.5 ({anthropic_strong})",
+                    "label": f"Opus 5.5 ({anthropic_strong})",
+                    "short_label": "Opus 5.5",
+                    "description": f"Anthropic deep reasoning & synthesis — Claude Opus 5.5 ({anthropic_strong})",
                 },
                 {
                     "id": anthropic_low,
@@ -257,7 +259,7 @@ def get_chat_model(
     """
     live_settings = EngineSettings()
     # Resolve configurable HTTP timeout (default 300s) and max retry count (default 3) from `.env`
-    # Reasoning models (`gemini-4-argon`, `claude-opus-4-5`) require >90s on massive context histories to prevent 504 DEADLINE_EXCEEDED
+    # Reasoning models (`gemini-4-argon`, `claude-opus-5-5`) require >90s on massive context histories to prevent 504 DEADLINE_EXCEEDED
     timeout = live_settings.ai_request_timeout
     max_retries = live_settings.ai_max_retries
 

@@ -86,7 +86,7 @@ def audit_runs(backfill: bool = False, top_n: int = 5) -> Dict[str, Any]:
             model_name = raw_model_name
             model_tier = raw_model_tier
         elif "claude-opus" in reasoning_str or "opus" in reasoning_str:
-            model_name = raw_model_name or "claude-opus-4-5"
+            model_name = raw_model_name or "claude-opus-5-5"
             model_tier = raw_model_tier or "strong"
         elif "claude-sonnet" in reasoning_str or "sonnet" in reasoning_str:
             model_name = raw_model_name or "claude-sonnet-4-5"

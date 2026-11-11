@@ -111,7 +111,18 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
         "cached": 0.30,
         "output": 15.00,
     },
-    # Deep Reasoning / Strong-Tier Option: Claude Opus 4.5 ($5.00 in / $0.50 cached [90% discount] / $25.00 out)
+    # Deep Reasoning / Strong-Tier Option: Claude Opus 5.5 ($4.00 in / $0.20 cached [95% discount] / $20.00 out)
+    "claude-opus-5-5": {
+        "input": 4.00,      # $4.00 / 1M prompt tokens
+        "cached": 0.20,     # $0.20 / 1M cached tokens (95% discount)
+        "output": 20.00,    # $20.00 / 1M completion tokens
+    },
+    "claude-opus-5.5": {
+        "input": 4.00,
+        "cached": 0.20,
+        "output": 20.00,
+    },
+    # Legacy Anthropic Strong-Tier: Claude Opus 4.5 ($5.00 in / $0.50 cached [90% discount] / $25.00 out)
     "claude-opus-4-5": {
         "input": 5.00,      # $5.00 / 1M prompt tokens
         "cached": 0.50,     # $0.50 / 1M cached tokens (90% discount)
@@ -175,7 +186,7 @@ def resolve_model_pricing(
             elif "sonnet" in clean_model:
                 base_rates = MODEL_PRICING["claude-sonnet-4-5"]
             elif "opus" in clean_model:
-                base_rates = MODEL_PRICING["claude-opus-4-5"]
+                base_rates = MODEL_PRICING["claude-opus-5-5"]
             elif "terra" in clean_model or "4o" in clean_model:
                 base_rates = MODEL_PRICING["gpt-5.6-terra"]
             elif "argon" in clean_model or "pro" in clean_model:
