@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 import nexus.shared_tools.telegram_bridge as tb
@@ -25,7 +26,9 @@ def isolated_telegram_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     test_lock_file = tmp_path / "telegram_poller.lock"
     monkeypatch.setattr(tb, "STATE_FILE_PATH", test_state_file)
     monkeypatch.setattr(tb, "POLLER_LOCK_PATH", test_lock_file)
+    tb.close_telegram_http_client()
     yield test_state_file
+    tb.close_telegram_http_client()
 
 
 def test_default_model_tier_is_low():
@@ -273,3 +276,107 @@ def test_process_telegram_voice_and_swipe_reply_continuity(monkeypatch: pytest.M
         # Must reuse the exact same conversation_id!
         assert res2["conversation_id"] == first_conv_id
         assert captured_threads == [first_conv_id, first_conv_id]
+
+
+def test_telegram_http_client_singleton_and_close():
+    """Verify get_telegram_http_client returns a reusable singleton and closes cleanly."""
+    c1 = tb.get_telegram_http_client()
+    c2 = tb.get_telegram_http_client()
+    assert c1 is c2
+    assert not c1.is_closed
+
+    tb.close_telegram_http_client()
+    assert tb._http_client is None
+    assert c1.is_closed
+
+
+def test_download_telegram_file_retries_on_ssl_timeout_and_succeeds(monkeypatch: pytest.MonkeyPatch):
+    """Verify download_telegram_file retries after transient SSL handshake timeouts and succeeds."""
+    mock_settings = MagicMock()
+    mock_settings.telegram_bot_token = "test_bot_token"
+    monkeypatch.setattr(tb, "EngineSettings", lambda: mock_settings)
+    monkeypatch.setattr(tb.time, "sleep", lambda s: None)
+
+    attempts = {"getFile": 0, "download": 0}
+
+    class DummyClient:
+        def post(self, url: str, json: dict[str, Any]):
+            attempts["getFile"] += 1
+            if attempts["getFile"] == 1:
+                # Simulate cold SSL handshake timeout (_ssl.c:993)
+                raise httpx.ConnectTimeout("_ssl.c:993: The handshake operation timed out")
+            # Attempt 2 succeeds
+            resp = MagicMock()
+            resp.raise_for_status = lambda: None
+            resp.json = lambda: {"ok": True, "result": {"file_path": "voice/test.oga"}}
+            return resp
+
+        def get(self, url: str):
+            attempts["download"] += 1
+            resp = MagicMock()
+            resp.raise_for_status = lambda: None
+            resp.content = b"fake_audio_payload_bytes"
+            return resp
+
+    monkeypatch.setattr(tb, "get_telegram_http_client", lambda: DummyClient())
+
+    content, remote_path = tb.download_telegram_file("voice_123", max_retries=3)
+    assert content == b"fake_audio_payload_bytes"
+    assert remote_path == "voice/test.oga"
+    assert attempts["getFile"] == 2
+    assert attempts["download"] == 1
+
+
+def test_download_telegram_file_exhaustion_raises(monkeypatch: pytest.MonkeyPatch):
+    """Verify download_telegram_file raises RuntimeError when retries are exhausted."""
+    mock_settings = MagicMock()
+    mock_settings.telegram_bot_token = "test_bot_token"
+    monkeypatch.setattr(tb, "EngineSettings", lambda: mock_settings)
+    monkeypatch.setattr(tb.time, "sleep", lambda s: None)
+
+    class FailingClient:
+        def post(self, url: str, json: dict[str, Any]):
+            raise httpx.ConnectTimeout("_ssl.c:993: The handshake operation timed out")
+
+    monkeypatch.setattr(tb, "get_telegram_http_client", lambda: FailingClient())
+
+    with pytest.raises(RuntimeError) as exc_info:
+        tb.download_telegram_file("voice_fail", max_retries=3)
+    assert "exhausted 3 attempts" in str(exc_info.value) or "Failed to download Telegram file" in str(exc_info.value)
+
+
+def test_process_telegram_message_distinguishes_download_failure(monkeypatch: pytest.MonkeyPatch):
+    """Verify voice download errors are logged and pinged back as 'Voice Download Error' rather than transcription error."""
+    mock_settings = MagicMock()
+    mock_settings.telegram_bot_token = "test_token"
+    mock_settings.telegram_allowed_user_id = "888"
+    mock_settings.telegram_default_tier = "low"
+    monkeypatch.setattr(tb, "EngineSettings", lambda: mock_settings)
+
+    monkeypatch.setattr(tb, "send_chat_action", lambda *a, **kw: None)
+
+    def failing_download(file_id, token=None):
+        raise RuntimeError("Handshake timed out after 3 attempts")
+
+    monkeypatch.setattr(tb, "download_telegram_file", failing_download)
+
+    sent_alerts: list[str] = []
+
+    def mock_send(text: str, chat_id=None, reply_to_message_id=None, token=None):
+        sent_alerts.append(text)
+        return [701]
+
+    monkeypatch.setattr(tb, "send_telegram_message", mock_send)
+
+    voice_msg = {
+        "message_id": 303,
+        "from": {"id": 888, "username": "willi"},
+        "chat": {"id": 888},
+        "voice": {"file_id": "bad_voice_file", "mime_type": "audio/ogg"},
+    }
+    res = tb.process_telegram_message(voice_msg, token="test_token")
+    assert res["status"] == "error"
+    assert res["phase"] == "download"
+    assert "Handshake timed out" in res["error"]
+    assert len(sent_alerts) == 1
+    assert "Voice Download Error" in sent_alerts[0]
