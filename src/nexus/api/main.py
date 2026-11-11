@@ -1,16 +1,39 @@
 """
 main.py — FastAPI application for the Nexus Engine Control Panel.
 Serves as the HTTP bridge between the Next.js frontend and the Python engine.
+Automatically boots the Telegram Mobile Bridge long-polling worker during server lifespan.
 """
+# asynccontextmanager: Decorator transforming an async generator (`yield`) into an async context manager
+# used by FastAPI's `lifespan` hook to run startup initialization before `yield` and shutdown cleanup after `yield`.
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nexus.api.routers import agents, board, browser, chat_branches, hitl, tools, vault
+from nexus.shared_tools.telegram_bridge import (
+    get_telegram_bridge_status,
+    start_telegram_poller,
+    stop_telegram_poller,
+)
+
+
+# `app: FastAPI` is the application instance passed by Starlette/Uvicorn during server startup and shutdown.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage background engine workers (e.g. Telegram Mobile Bridge long-poller) across the FastAPI lifecycle."""
+    await start_telegram_poller()
+    try:
+        yield
+    finally:
+        await stop_telegram_poller()
+
 
 app = FastAPI(
     title="Nexus Engine API",
     description="HTTP bridge for the Nexus Agentic Engine Control Panel",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 # ── CORS Middleware ───────────────────────────────────────────
@@ -51,12 +74,19 @@ app.include_router(browser.router, prefix="/api/browser", tags=["browser"])
 app.include_router(tools.router, prefix="/api/tools", tags=["tools"])
 
 
-# ── Health Check ──────────────────────────────────────────────
+# ── Health Check & Mobile Bridge Status ───────────────────────
 @app.get("/api/health")
 async def health_check():
-    """Basic health check — confirms the API is reachable."""
+    """Basic health check — confirms the API is reachable and reports Telegram Mobile Bridge status."""
     return {
         "status": "ok",
         "engine": "Nexus",
         "version": "2.0.0",
+        "telegram": get_telegram_bridge_status(),
     }
+
+
+@app.get("/api/telegram/status")
+async def telegram_status():
+    """Returns live status and configuration diagnostics for the Telegram Mobile Bridge."""
+    return get_telegram_bridge_status()

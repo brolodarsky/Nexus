@@ -43,6 +43,17 @@ class EngineSettings(BaseSettings):
     
     # Gmail: auth lives in .secrets/token_gmail*.json (see shared_tools/gmail_engine.py); supports multiple accounts.
 
+    # Telegram Mobile Voice & Notification Bridge (`src/nexus/shared_tools/telegram_bridge.py`):
+    # - telegram_bot_token: Optional Bot API token from @BotFather (`TELEGRAM_BOT_TOKEN` in `.env`).
+    # - telegram_allowed_user_id: Optional numeric Telegram User ID (`TELEGRAM_ALLOWED_USER_ID` in `.env`) authorized to invoke
+    #   NexusAgent. If omitted on first launch, the bridge automatically enrolls and locks onto the first user who messages the bot.
+    # - telegram_default_tier: Default capability tier (`"low"`, `"medium"`, or `"strong"`) used for mobile turns unless overridden via `/fast` or `/strong`.
+    # - telegram_enabled: Master toggle (`True` by default) controlling automatic background long-polling during FastAPI startup.
+    telegram_bot_token: Optional[str] = None
+    telegram_allowed_user_id: Optional[str] = None
+    telegram_default_tier: str = "strong"
+    telegram_enabled: bool = True
+
     # LangSmith Tracing
     langchain_tracing_v2: Optional[str] = None
     langchain_project: Optional[str] = None

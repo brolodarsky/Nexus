@@ -959,6 +959,28 @@ def read_board(
     return format_board_digest(limit=limit, thread_id=thread_id)
 
 
+# ── 7. Mobile Push Notification Tool (Telegram Bridge) ───────────────────────
+
+# `message: str` is the Markdown or plain-text notification body to push to the user's phone.
+@tool
+def send_telegram_notification(message: str) -> str:
+    """Send a proactive push notification message directly to the user's phone via the Telegram Mobile Bridge.
+
+    Use this tool when the user explicitly asks to be pinged, texted, or notified on their phone,
+    or when a scheduled daemon/task needs to deliver an alert to their mobile device.
+
+    Args:
+        message: Concise Markdown or plain-text message to send to the user's Telegram chat.
+    """
+    from nexus.shared_tools.telegram_bridge import send_telegram_message
+
+    try:
+        sent_ids = send_telegram_message(text=message)
+        return f"📱 Sent Telegram notification to phone (message_ids={sent_ids})."
+    except Exception as exc:
+        return f"Error sending Telegram notification: {exc}"
+
+
 # ── Backward-Compatible Factories (for any legacy callers) ───────────────────
 
 def get_read_note_tool(agent_name: str = "NexusAgent", domain_path: Optional[str] = None):

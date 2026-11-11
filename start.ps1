@@ -79,6 +79,15 @@ for ($i = 1; $i -le $maxRetries; $i++) {
         # -TimeoutSec 1: Fast probe; fails immediately if port 8000 is not yet accepting connections
         $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/health" -TimeoutSec 1 -ErrorAction Stop
         Write-Host "  [✓] Backend online: $($health.engine) v$($health.version) (ready in ${i}s)" -ForegroundColor Green
+        # Display Telegram Mobile Bridge long-poller status returned by /api/health
+        if ($health.telegram) {
+            if ($health.telegram.configured -and $health.telegram.enabled) {
+                $botLabel = if ($health.telegram.bot_username) { "@$($health.telegram.bot_username)" } else { "polling" }
+                Write-Host "  [✓] Telegram Mobile Bridge: Active ($botLabel)" -ForegroundColor Green
+            } elseif (-not $health.telegram.configured) {
+                Write-Host "  [i] Telegram Mobile Bridge: Standby (set TELEGRAM_BOT_TOKEN in .env to enable)" -ForegroundColor DarkGray
+            }
+        }
         $backendReady = $true
         break
     } catch {

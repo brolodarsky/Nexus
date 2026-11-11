@@ -61,8 +61,9 @@ Nexus/
 │   │   ├── runner.py            # Automated eval script
 │   │   └── results/             # Structured eval reports
 │   └── shared_tools/            # Shared engine utilities & deterministic CLI tools
+│       ├── telegram_bridge.py   # Bidirectional Telegram Mobile Voice & Notification Bridge (long-polling queue + Gemini/Whisper STT)
 │       ├── vault_reader.py      # Pure-Python Vault navigation & search functions
-│       ├── shared.py            # Shared LangChain @tool wrappers (read_file, modify_file, create_file, move_file, delete_file, get_directory_structure, search_vault)
+│       ├── shared.py            # Shared LangChain @tool wrappers (read_file, modify_file, create_file, move_file, delete_file, get_directory_structure, search_vault, send_telegram_notification)
 │       └── summarizer.py        # Conversation window compression & archiving node
 ├── start.ps1                   # Launches backend + frontend Control Panel
 ├── pyproject.toml              # UV dependency configuration
@@ -136,6 +137,7 @@ This repository distinguishes between capabilities and constraints that define h
 | `ingest_phone.py` | Universal ADB screen-scraper for Android chat ingestion. Captures any app on screen. | `python src/nexus/shared_tools/ingest_phone.py --screens 50` |
 | `export_conversation.py` | Universal JSON/JSONL chat transcript exporter with Turn Coalescing and collapsible tool summaries (supports JSON arrays, JSONL streams, ChatGPT exports, stdin piping, and local Antigravity transcripts). | `python -m nexus.shared_tools.export_conversation <id|file> [-o out.md] [-v] [--raw]` |
 | `vault_reader.py` | Deterministic Vault filesystem inspector: lists documents created or edited today (`--today`), within the last N hours (`--hours`), or since a date (`--since`), plus folder tree browsing (`--tree`), note reading (`--read`), and keyword search (`--search`). | `python -m nexus.shared_tools.vault_reader --today` / `--hours 6` / `--since YYYY-MM-DD` / `--path "<section>"` / `--tree` |
+| `telegram_bridge.py` | Bidirectional Telegram Mobile Voice & Notification Bridge: long-polling store-and-forward queue (`getUpdates`), Pixel Gboard STT text & Telegram mic voice note ingestion (`.ogg` Opus $\to$ Gemini Flash multimodal audio / Whisper STT), automatic `📱` thread creation & swipe-to-reply continuity in `chats.db`, HITL staging ping-backs, and Windows logon autostart. | `python -m nexus.shared_tools.telegram_bridge --status` / `--poll` / `--send "<msg>"` / `--install-autostart` |
 
 ### Meta Scripts (`scripts/`)
 
