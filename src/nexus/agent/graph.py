@@ -591,6 +591,27 @@ def _invoke_llm_with_resilience(
             return llm.invoke(messages)
         except Exception as e:
             last_exception = e
+            err_msg_lower = str(e).lower()
+
+            # Dynamic Sampling Parameter Self-Healing:
+            # Newer frontier models (such as Claude Opus 5.5) deprecate custom temperature/sampling controls and return HTTP 400
+            # (`temperature is deprecated for this model`). If encountered, strip the temperature attribute from the active client
+            # (handling both direct BaseChatModel instances and tool-bound RunnableBinding instances) and retry immediately.
+            if "temperature" in err_msg_lower and ("deprecated" in err_msg_lower or "not supported" in err_msg_lower):
+                has_cleared_temp = False
+                if hasattr(llm, "temperature") and getattr(llm, "temperature", None) is not None:
+                    llm.temperature = None
+                    has_cleared_temp = True
+                if hasattr(llm, "bound") and hasattr(llm.bound, "temperature") and getattr(llm.bound, "temperature", None) is not None:
+                    llm.bound.temperature = None
+                    has_cleared_temp = True
+                if has_cleared_temp:
+                    tracer.info(
+                        f"ℹ️ Model '{model_name}' deprecated custom temperature sampling. Cleared temperature parameter and retrying...",
+                        data={"model": model_name, "model_tier": tier},
+                    )
+                    continue
+
             # Only intercept rate-limit / quota errors for backoff; let 504 timeouts and logic errors propagate
             if _is_rate_limit_error(e) and attempt < max_retries:
                 delay = _extract_retry_delay(e, attempt=attempt)

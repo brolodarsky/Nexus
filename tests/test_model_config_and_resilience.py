@@ -132,6 +132,10 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
     anthropic_llm = get_chat_model(tier="claude-opus-5-5")
     assert getattr(anthropic_llm, "model", None) == "claude-opus-5-5"
+    assert getattr(anthropic_llm, "temperature", None) is None
+
+    sonnet_llm = get_chat_model(tier="claude-sonnet-4-5")
+    assert getattr(sonnet_llm, "temperature", None) == 0.0
 
     recorded_tiers: list[str | None] = []
     mock_llm = MagicMock()
@@ -242,6 +246,38 @@ def test_extract_retry_delay_from_payloads():
     assert _extract_retry_delay(generic_429, attempt=0) == 15.0
     assert _extract_retry_delay(generic_429, attempt=1) == 30.0
     assert _extract_retry_delay(generic_429, attempt=2) == 60.0
+
+
+def test_invoke_llm_with_resilience_temperature_deprecated_self_heals():
+    """Verify _invoke_llm_with_resilience clears temperature and retries when a model deprecates temperature."""
+    mock_llm = MagicMock()
+    mock_llm.temperature = 0.0
+    expected_response = AIMessage(content="Self-healed response")
+
+    calls = []
+
+    def fake_invoke(messages):
+        calls.append(mock_llm.temperature)
+        if len(calls) == 1:
+            raise Exception("400 Bad Request: `temperature` is deprecated for this model.")
+        return expected_response
+
+    mock_llm.invoke.side_effect = fake_invoke
+
+    tracer = MagicMock()
+    result = _invoke_llm_with_resilience(
+        llm=mock_llm,
+        messages=[HumanMessage(content="Hello")],
+        tracer=tracer,
+        thread_ids=["test_thread"],
+        model_name="claude-opus-5-5",
+        tier="strong",
+    )
+
+    assert result == expected_response
+    assert mock_llm.temperature is None
+    assert len(calls) == 2
+    tracer.info.assert_called_once()
 
 
 def test_cooperative_sleep_cancellation():

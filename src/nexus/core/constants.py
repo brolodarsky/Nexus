@@ -270,12 +270,22 @@ def get_chat_model(
     anthropic_key = live_settings.anthropic_api_key or ANTHROPIC_API_KEY
 
     if resolved["provider"] == "anthropic":
+        lower_name = model_name.lower()
+        # Newer Anthropic reasoning models (Opus 5.5, Opus 4.7+, Sonnet 5+) have deprecated custom sampling
+        # dials (temperature, top_p, top_k) and return HTTP 400 (`temperature is deprecated for this model`).
+        # Omitting or passing `temperature=None` causes `ChatAnthropic._get_request_payload` to exclude `temperature`
+        # entirely from the JSON payload, respecting the model's native default sampling behavior.
+        is_temp_deprecated = any(
+            tok in lower_name
+            for tok in ("opus-5", "opus 5", "opus-4-7", "opus 4.7", "sonnet-5", "sonnet 5")
+        )
         anthropic_kwargs: dict[str, Any] = {
             "model": model_name,
-            "temperature": temperature,
             "timeout": timeout,
             "max_retries": max_retries,
         }
+        if not is_temp_deprecated and temperature is not None:
+            anthropic_kwargs["temperature"] = temperature
         if anthropic_key:
             anthropic_kwargs["api_key"] = anthropic_key
         return ChatAnthropic(**anthropic_kwargs)
