@@ -24,6 +24,13 @@ def setup_logger():
     # Remove default unconfigured handler to prevent duplicate log outputs
     logger.remove()
 
+    # On Windows, ensure stdout uses utf-8 with replacement to prevent charmap UnicodeEncodeErrors on emojis
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     # 1. Console Handler (stdout): Color-coded output for terminal sessions
     logger.add(
         sys.stdout,

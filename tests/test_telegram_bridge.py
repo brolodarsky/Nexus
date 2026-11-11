@@ -28,6 +28,14 @@ def isolated_telegram_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     yield test_state_file
 
 
+def test_default_model_tier_is_low():
+    """Verify EngineSettings defaults telegram_default_tier to 'low' for fast, inexpensive mobile turns."""
+    from nexus.core.config import EngineSettings
+
+    settings = EngineSettings()
+    assert settings.telegram_default_tier == "low"
+
+
 def test_first_user_auto_enrollment_and_unauthorized_rejection(monkeypatch: pytest.MonkeyPatch):
     """When TELEGRAM_ALLOWED_USER_ID is unset, the first user is auto-enrolled and all other IDs are blocked."""
     mock_settings = MagicMock()
@@ -111,6 +119,28 @@ def test_send_telegram_message_markdown_fallback_on_400(monkeypatch: pytest.Monk
     assert "parse_mode" not in calls[1]
 
 
+def test_transcribe_audio_bytes_via_whisper(monkeypatch: pytest.MonkeyPatch):
+    """Verify Telegram voice notes are transcribed via OpenAI Whisper API when OPENAI_API_KEY is configured."""
+    mock_settings = MagicMock()
+    mock_settings.gemini_api_key = None
+    mock_settings.google_api_key = None
+    mock_settings.openai_api_key = "test_openai_key"
+    monkeypatch.setattr(tb, "EngineSettings", lambda: mock_settings)
+
+    mock_client = MagicMock()
+    mock_tx = MagicMock()
+    mock_tx.text = "Add apples and bananas to my shopping list."
+    mock_client.audio.transcriptions.create.return_value = mock_tx
+
+    with patch("openai.OpenAI", return_value=mock_client):
+        transcript = tb.transcribe_audio_bytes(b"fake_audio_bytes", mime_type="audio/ogg", remote_path="voice/memo.oga")
+        assert transcript == "Add apples and bananas to my shopping list."
+        assert mock_client.audio.transcriptions.create.called
+        call_kwargs = mock_client.audio.transcriptions.create.call_args.kwargs
+        assert call_kwargs["model"] == "whisper-1"
+        assert getattr(call_kwargs["file"], "name", "") == "voice_note.ogg"
+
+
 def test_transcribe_audio_bytes_via_gemini(monkeypatch: pytest.MonkeyPatch):
     """Verify Telegram voice note bytes are base64-encoded and transcribed via Gemini Flash multimodal audio."""
     mock_settings = MagicMock()
@@ -126,9 +156,43 @@ def test_transcribe_audio_bytes_via_gemini(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(tb, "get_chat_model", lambda tier, temperature: mock_llm)
 
-    transcript = tb.transcribe_audio_bytes(b"OggS_fake_opus_bytes", mime_type="audio/ogg")
+    transcript = tb.transcribe_audio_bytes(b"OggS_fake_opus_bytes", mime_type="audio/ogg", remote_path="voice/file_1.oga")
     assert transcript == "Check my calendar for tomorrow afternoon and add a task to call Mom."
     assert mock_llm.invoke.called
+
+
+def test_audio_document_detection(monkeypatch: pytest.MonkeyPatch):
+    """Verify audio files forwarded or uploaded as documents are recognized as audio payloads."""
+    mock_settings = MagicMock()
+    mock_settings.telegram_bot_token = "test_token"
+    mock_settings.telegram_allowed_user_id = "888"
+    mock_settings.telegram_default_tier = "low"
+    monkeypatch.setattr(tb, "EngineSettings", lambda: mock_settings)
+
+    monkeypatch.setattr(tb, "send_chat_action", lambda *a, **kw: None)
+    monkeypatch.setattr(tb, "download_telegram_file", lambda file_id, token=None: (b"wav_bytes", "documents/note.wav"))
+    monkeypatch.setattr(tb, "transcribe_audio_bytes", lambda *a, **kw: "Document audio transcript")
+    monkeypatch.setattr(tb, "send_telegram_message", lambda *a, **kw: [301])
+    monkeypatch.setattr(tb, "log_run", lambda **kw: None)
+
+    with patch("nexus.agent.api.run_nexus_agent_with_trace") as mock_run:
+        mock_run.return_value = {
+            "response": "Acknowledged audio document",
+            "agent": "nexus",
+            "domain": None,
+            "confidence": 1.0,
+            "model_tier": "low",
+            "model_name": "gemini-3.8-flash",
+        }
+        doc_msg = {
+            "message_id": 105,
+            "from": {"id": 888, "username": "willi"},
+            "chat": {"id": 888},
+            "document": {"file_id": "doc_wav", "file_name": "voice_recording.wav", "mime_type": "audio/wav"},
+        }
+        res = tb.process_telegram_message(doc_msg, token="test_token")
+        assert res["status"] == "ok"
+        assert res["transcribed_voice"] == "Document audio transcript"
 
 
 def test_process_telegram_voice_and_swipe_reply_continuity(monkeypatch: pytest.MonkeyPatch):
@@ -142,7 +206,7 @@ def test_process_telegram_voice_and_swipe_reply_continuity(monkeypatch: pytest.M
     # Stub network & transcription helpers
     monkeypatch.setattr(tb, "send_chat_action", lambda *a, **kw: None)
     monkeypatch.setattr(tb, "download_telegram_file", lambda file_id, token=None: (b"ogg_bytes", "voice/file_1.oga"))
-    monkeypatch.setattr(tb, "transcribe_audio_bytes", lambda audio_bytes, mime_type="audio/ogg": "Add task to inspect Pilot radiator")
+    monkeypatch.setattr(tb, "transcribe_audio_bytes", lambda audio_bytes, mime_type="audio/ogg", **kw: "Add task to inspect Pilot radiator")
     monkeypatch.setattr(tb, "_generate_mobile_conversation_title", lambda cid, q, r="": "📱 Inspect Pilot Radiator")
     monkeypatch.setattr(
         tb,

@@ -330,16 +330,22 @@ def download_telegram_file(file_id: str, token: Optional[str] = None) -> tuple[b
 
 # `audio_bytes: bytes` raw audio payload downloaded from Telegram (typically `.oga` / `audio/ogg` Opus).
 # `mime_type: str` MIME type of the audio stream (default `"audio/ogg"`).
+# `remote_path: str` optional remote Telegram file path (e.g. `"voice/file_1.oga"`) for container/extension detection.
 # `-> str` returns the verbatim natural-language transcript.
-def transcribe_audio_bytes(audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
+def transcribe_audio_bytes(
+    audio_bytes: bytes,
+    mime_type: str = "audio/ogg",
+    remote_path: str = "",
+) -> str:
     """Transcribe a Telegram voice note or audio clip into clean text.
 
     Strategy:
-      1. Primary (Gemini Flash Multimodal Audio): Sends base64-encoded audio directly to the configured
-         low-tier Gemini Flash model (`gemini-3.8-flash`), which natively decodes `audio/ogg` Opus voice notes
-         with high accuracy and punctuation.
-      2. Fallback (OpenAI Whisper API): If Gemini is not configured or raises an error and `OPENAI_API_KEY`
-         is available, transcribes via OpenAI's `whisper-1` endpoint.
+      1. Primary (OpenAI Whisper API): When `OPENAI_API_KEY` is configured, transcribes via OpenAI's
+         `whisper-1` endpoint. Whisper is specialized for speech-to-text, returning high-accuracy
+         transcripts in ~1-2 seconds with near-zero hallucination on silence or accents.
+      2. Secondary / Fallback (Gemini Flash Multimodal Audio): When `GEMINI_API_KEY` is configured,
+         sends base64-encoded audio directly to the low-tier Gemini Flash model (`gemini-3.8-flash`),
+         which natively decodes audio/ogg, audio/mp3, audio/wav, and audio/flac.
     """
     if not audio_bytes:
         raise ValueError("Cannot transcribe empty audio payload.")
@@ -348,10 +354,49 @@ def transcribe_audio_bytes(audio_bytes: bytes, mime_type: str = "audio/ogg") -> 
     gemini_key = live_settings.gemini_api_key or live_settings.google_api_key
     errors: list[str] = []
 
-    # 1. Primary Path: Gemini Flash native multimodal audio transcription
+    # Clean and resolve file extension and MIME type
+    lower_path = remote_path.lower()
+    lower_mime = (mime_type or "").lower().split(";")[0].strip()
+
+    ext = "ogg"
+    if lower_path.endswith((".oga", ".ogg")) or "ogg" in lower_mime or "opus" in lower_mime:
+        ext = "ogg"
+    elif lower_path.endswith(".mp3") or "mpeg" in lower_mime or "mp3" in lower_mime:
+        ext = "mp3"
+    elif lower_path.endswith(".wav") or "wav" in lower_mime:
+        ext = "wav"
+    elif lower_path.endswith((".m4a", ".mp4")) or "m4a" in lower_mime or "mp4" in lower_mime:
+        ext = "m4a"
+    elif lower_path.endswith(".flac") or "flac" in lower_mime:
+        ext = "flac"
+    elif lower_path.endswith(".webm") or "webm" in lower_mime:
+        ext = "webm"
+    elif "." in lower_path:
+        ext = lower_path.rsplit(".", 1)[-1]
+
+    # 1. Primary Path: OpenAI Whisper (`whisper-1`) if OPENAI_API_KEY is configured (fast, ~1-2s latency)
+    if live_settings.openai_api_key:
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=live_settings.openai_api_key)
+            bio = io.BytesIO(audio_bytes)
+            bio.name = f"voice_note.{ext}"
+            tx = client.audio.transcriptions.create(model="whisper-1", file=bio)
+            transcript = (getattr(tx, "text", "") or "").strip()
+            if transcript:
+                return transcript
+        except Exception as exc:
+            errors.append(f"OpenAI Whisper transcription failed: {exc}")
+
+    # 2. Secondary Path: Gemini Flash native multimodal audio transcription
     if gemini_key:
         try:
             from nexus.agent.graph import extract_message_text
+
+            clean_gemini_mime = lower_mime if lower_mime and "/" in lower_mime else f"audio/{ext}"
+            if "ogg" in clean_gemini_mime or "opus" in clean_gemini_mime or ext == "ogg":
+                clean_gemini_mime = "audio/ogg"
 
             b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
             chat_model = get_chat_model(tier="gemini:low", temperature=0.0)
@@ -367,7 +412,7 @@ def transcribe_audio_bytes(audio_bytes: bytes, mime_type: str = "audio/ogg") -> 
                     },
                     {
                         "type": "media",
-                        "mime_type": mime_type or "audio/ogg",
+                        "mime_type": clean_gemini_mime,
                         "data": b64_audio,
                     },
                 ]
@@ -379,23 +424,7 @@ def transcribe_audio_bytes(audio_bytes: bytes, mime_type: str = "audio/ogg") -> 
         except Exception as exc:
             errors.append(f"Gemini audio transcription failed: {exc}")
 
-    # 2. Fallback Path: OpenAI Whisper (`whisper-1`) if OPENAI_API_KEY is configured
-    if live_settings.openai_api_key:
-        try:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=live_settings.openai_api_key)
-            ext = "ogg" if "ogg" in (mime_type or "").lower() else "mp3"
-            bio = io.BytesIO(audio_bytes)
-            bio.name = f"voice_note.{ext}"
-            tx = client.audio.transcriptions.create(model="whisper-1", file=bio)
-            transcript = (getattr(tx, "text", "") or "").strip()
-            if transcript:
-                return transcript
-        except Exception as exc:
-            errors.append(f"OpenAI Whisper transcription failed: {exc}")
-
-    err_detail = "; ".join(errors) if errors else "No multimodal audio provider (GEMINI_API_KEY or OPENAI_API_KEY) configured."
+    err_detail = "; ".join(errors) if errors else "No multimodal audio provider (OPENAI_API_KEY or GEMINI_API_KEY) configured."
     raise RuntimeError(f"Failed to transcribe voice note: {err_detail}")
 
 
@@ -503,7 +532,16 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
         return {"status": "unauthorized", "user_id": user_id}
 
     raw_text = (message.get("text") or message.get("caption") or "").strip()
-    voice_obj = message.get("voice") or message.get("audio")
+    # Detect audio payload across native voice notes, audio tracks, circular video notes, and audio document uploads
+    voice_obj = message.get("voice") or message.get("audio") or message.get("video_note")
+    if not voice_obj and isinstance(message.get("document"), dict):
+        doc = message["document"]
+        doc_mime = (doc.get("mime_type") or "").lower()
+        doc_name = (doc.get("file_name") or "").lower()
+        if doc_mime.startswith("audio/") or any(
+            doc_name.endswith(sfx) for sfx in (".oga", ".ogg", ".opus", ".mp3", ".m4a", ".wav", ".aac", ".flac", ".webm")
+        ):
+            voice_obj = doc
     photo_list = message.get("photo")
 
     # ── Built-in Zero-Cost Slash Commands ──
@@ -557,7 +595,15 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
         send_telegram_message(hitl_reply, chat_id=chat_id, reply_to_message_id=incoming_msg_id, token=bot_token)
         return {"status": "command", "command": "/hitl"}
 
-    # Immediately notify phone UI that Nexus is processing
+    # Immediately notify phone UI that Nexus is processing; maintain continuous heartbeat until turn completion
+    stop_typing = threading.Event()
+
+    def _typing_heartbeat() -> None:
+        while not stop_typing.wait(4.0):
+            send_chat_action(chat_id=chat_id, action="typing", token=bot_token)
+
+    heartbeat_thread = threading.Thread(target=_typing_heartbeat, daemon=True)
+    heartbeat_thread.start()
     send_chat_action(chat_id=chat_id, action="typing", token=bot_token)
 
     # ── Phase 1: Voice Note Transcription (Telegram Mic Option) ──
@@ -565,10 +611,11 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
     if isinstance(voice_obj, dict) and voice_obj.get("file_id"):
         try:
             audio_bytes, remote_path = download_telegram_file(voice_obj["file_id"], token=bot_token)
-            mime_type = voice_obj.get("mime_type") or ("audio/ogg" if remote_path.endswith(".oga") else "audio/mpeg")
-            transcribed_voice_text = transcribe_audio_bytes(audio_bytes, mime_type=mime_type)
+            mime_type = voice_obj.get("mime_type") or ("audio/ogg" if remote_path.endswith((".oga", ".ogg")) else "audio/mpeg")
+            transcribed_voice_text = transcribe_audio_bytes(audio_bytes, mime_type=mime_type, remote_path=remote_path)
             logger.info(f"🎙️ Transcribed Telegram voice note ({len(audio_bytes)} bytes): {transcribed_voice_text}")
         except Exception as exc:
+            stop_typing.set()
             err_msg = f"❌ *Voice Transcription Error:* {exc}"
             send_telegram_message(err_msg, chat_id=chat_id, reply_to_message_id=incoming_msg_id, token=bot_token)
             return {"status": "error", "error": str(exc)}
@@ -601,6 +648,7 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
             logger.warning(f"Failed downloading Telegram photo attachment: {exc}")
 
     if not effective_query and not uploaded_images:
+        stop_typing.set()
         return {"status": "ignored", "reason": "empty_message"}
 
     # ── Phase 3: Parse Optional Tier / Thread Directives (`/fast`, `/strong`, `/continue`) ──
@@ -628,6 +676,7 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
     if not effective_query and uploaded_images:
         effective_query = "Analyze the attached image(s)."
     elif not effective_query:
+        stop_typing.set()
         send_telegram_message(
             "ℹ️ Provide a prompt after the command (e.g. `/fast check my schedule tomorrow`).",
             chat_id=chat_id,
@@ -671,17 +720,7 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
         images=uploaded_images if uploaded_images else None,
     )
 
-    # ── Phase 5: Execute `NexusAgent` with Background Typing Heartbeat ──
-    stop_typing = threading.Event()
-
-    def _typing_heartbeat() -> None:
-        # Telegram's 'typing...' status expires after ~5 seconds; refresh every 4s while agent reasons
-        while not stop_typing.wait(4.0):
-            send_chat_action(chat_id=chat_id, action="typing", token=bot_token)
-
-    heartbeat_thread = threading.Thread(target=_typing_heartbeat, daemon=True)
-    heartbeat_thread.start()
-
+    # ── Phase 5: Execute `NexusAgent` with Live Trace Capture ──
     trace_events: list[dict[str, Any]] = []
 
     def _on_trace(evt: dict[str, Any]) -> None:
@@ -701,7 +740,6 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
             images=uploaded_images if uploaded_images else None,
         )
     finally:
-        stop_typing.set()
         unsub()
         reset_trace_thread_id(trace_token)
 
@@ -800,6 +838,9 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
     # Record all outbound message IDs so swiping-to-reply on the bot's answer continues this exact conversation
     for mid in sent_msg_ids:
         record_message_thread(mid, conversation_id)
+
+    # Stop typing indicator right after response is dispatched
+    stop_typing.set()
 
     return {
         "status": "ok",

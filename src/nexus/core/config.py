@@ -47,11 +47,11 @@ class EngineSettings(BaseSettings):
     # - telegram_bot_token: Optional Bot API token from @BotFather (`TELEGRAM_BOT_TOKEN` in `.env`).
     # - telegram_allowed_user_id: Optional numeric Telegram User ID (`TELEGRAM_ALLOWED_USER_ID` in `.env`) authorized to invoke
     #   NexusAgent. If omitted on first launch, the bridge automatically enrolls and locks onto the first user who messages the bot.
-    # - telegram_default_tier: Default capability tier (`"low"`, `"medium"`, or `"strong"`) used for mobile turns unless overridden via `/fast` or `/strong`.
+    # - telegram_default_tier: Default capability tier (`"low"`, `"medium"`, or `"strong"`) used for mobile turns unless overridden via `/fast` or `/strong`. Defaults to `"low"` for fast sub-second mobile turns.
     # - telegram_enabled: Master toggle (`True` by default) controlling automatic background long-polling during FastAPI startup.
     telegram_bot_token: Optional[str] = None
     telegram_allowed_user_id: Optional[str] = None
-    telegram_default_tier: str = "strong"
+    telegram_default_tier: str = "low"
     telegram_enabled: bool = True
 
     # LangSmith Tracing
