@@ -13,7 +13,14 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
 from nexus.agent.api import run_nexus_agent_with_trace
-from nexus.agent.graph import _invoke_tool_node_resilient, call_model
+from nexus.agent.graph import (
+    _cooperative_sleep,
+    _extract_retry_delay,
+    _invoke_llm_with_resilience,
+    _invoke_tool_node_resilient,
+    _is_rate_limit_error,
+    call_model,
+)
 from nexus.core.config import EngineSettings
 from nexus.core.constants import get_available_models, get_chat_model, resolve_model_config
 
@@ -186,4 +193,148 @@ def test_invoke_tool_node_resilient_fallback_on_executor_shutdown():
     mock_node.invoke.side_effect = RuntimeError("unrelated runtime failure")
     with pytest.raises(RuntimeError, match="unrelated runtime failure"):
         _invoke_tool_node_resilient(mock_node, {"messages": [ai_msg]})
+
+
+def test_is_rate_limit_error_classification():
+    """Verify _is_rate_limit_error identifies 429 status codes, RESOURCE_EXHAUSTED, and quota keywords."""
+    # Google AI Studio / gRPC 429 errors
+    assert _is_rate_limit_error(Exception("429 RESOURCE_EXHAUSTED. Quota exceeded for metric..."))
+    assert _is_rate_limit_error(Exception("Error calling model 'gemini-3.8-flash' (RESOURCE_EXHAUSTED)"))
+    assert _is_rate_limit_error(Exception("Rate limit reached for requests per minute"))
+
+    # Object with status_code attribute
+    class DummyHttpError(Exception):
+        status_code = 429
+
+    assert _is_rate_limit_error(DummyHttpError("Too Many Requests"))
+
+    # Non-rate-limit errors must return False
+    assert not _is_rate_limit_error(Exception("504 DEADLINE_EXCEEDED"))
+    assert not _is_rate_limit_error(ValueError("Invalid argument format"))
+    assert not _is_rate_limit_error(RuntimeError("Connection reset by peer"))
+
+
+def test_extract_retry_delay_from_payloads():
+    """Verify _extract_retry_delay extracts structured and natural-language delays with safety buffer."""
+    # 1. Google AI Studio structured RetryInfo dict format
+    google_err = Exception(
+        "{'error': {'code': 429, 'details': [{'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '23s'}]}}"
+    )
+    # 23 + 1.5s buffer = 24.5s
+    assert _extract_retry_delay(google_err) == 24.5
+
+    # 2. Google AI Studio decimal delay in message
+    google_decimal_err = Exception(
+        "Generate content input tokens per minute limit exceeded on Tier 1. Please retry in 23.991883049s."
+    )
+    assert abs(_extract_retry_delay(google_decimal_err) - (23.991883049 + 1.5)) < 1e-4
+
+    # 3. Natural language 'try again in Xs'
+    natural_err = Exception("Rate limit reached. Please try again in 18s.")
+    assert _extract_retry_delay(natural_err) == 19.5
+
+    # 4. HTTP retry-after header pattern
+    header_err = Exception("HTTP 429: retry-after: 12")
+    assert _extract_retry_delay(header_err) == 13.5
+
+    # 5. Fallback exponential backoff when no delay is present
+    generic_429 = Exception("429 Too Many Requests")
+    assert _extract_retry_delay(generic_429, attempt=0) == 15.0
+    assert _extract_retry_delay(generic_429, attempt=1) == 30.0
+    assert _extract_retry_delay(generic_429, attempt=2) == 60.0
+
+
+def test_cooperative_sleep_cancellation():
+    """Verify _cooperative_sleep polls thread cancellation and raises InterruptedError immediately."""
+    import threading
+    from nexus.agent.graph import register_cancel_event, unregister_cancel_event
+
+    thread_id = "test_coop_sleep_thread"
+    event = threading.Event()
+    register_cancel_event(thread_id, event)
+
+    # Signal stop before or during sleep
+    event.set()
+    try:
+        with pytest.raises(InterruptedError, match="stopped by user during rate-limit backoff"):
+            _cooperative_sleep(10.0, [thread_id])
+    finally:
+        unregister_cancel_event(thread_id)
+
+
+def test_invoke_llm_with_resilience_retries_and_succeeds(monkeypatch: pytest.MonkeyPatch):
+    """Verify _invoke_llm_with_resilience catches 429, logs telemetry, sleeps, and returns subsequent success."""
+    mock_llm = MagicMock()
+    # Fail twice with 429, succeed on attempt 3
+    expected_response = AIMessage(content="Success after backoff")
+    mock_llm.invoke.side_effect = [
+        Exception("429 RESOURCE_EXHAUSTED. Please retry in 5s."),
+        Exception("429 RESOURCE_EXHAUSTED. {'retryDelay': '2s'}"),
+        expected_response,
+    ]
+
+    slept_intervals: list[float] = []
+
+    def fake_sleep(seconds: float, thread_ids: list):
+        slept_intervals.append(seconds)
+
+    monkeypatch.setattr("nexus.agent.graph._cooperative_sleep", fake_sleep)
+
+    mock_tracer = MagicMock()
+    res = _invoke_llm_with_resilience(
+        llm=mock_llm,
+        messages=[HumanMessage(content="Hello")],
+        tracer=mock_tracer,
+        thread_ids=["test_thread"],
+        model_name="gemini-3.8-flash",
+        tier="low",
+        max_retries=3,
+    )
+
+    assert res == expected_response
+    assert mock_llm.invoke.call_count == 3
+    # Verify 2 sleep intervals were executed with provider delay + 1.5s buffer
+    assert len(slept_intervals) == 2
+    assert slept_intervals[0] == 6.5  # 5 + 1.5
+    assert slept_intervals[1] == 3.5  # 2 + 1.5
+    assert mock_tracer.info.call_count == 2
+
+
+def test_invoke_llm_with_resilience_exhaustion(monkeypatch: pytest.MonkeyPatch):
+    """Verify _invoke_llm_with_resilience raises when max_retries are exhausted."""
+    mock_llm = MagicMock()
+    mock_llm.invoke.side_effect = Exception("429 RESOURCE_EXHAUSTED. Quota exceeded.")
+
+    monkeypatch.setattr("nexus.agent.graph._cooperative_sleep", lambda sec, tids: None)
+    mock_tracer = MagicMock()
+
+    with pytest.raises(Exception, match="429 RESOURCE_EXHAUSTED"):
+        _invoke_llm_with_resilience(
+            llm=mock_llm,
+            messages=[HumanMessage(content="Hello")],
+            tracer=mock_tracer,
+            thread_ids=["test_thread"],
+            model_name="gemini-3.8-flash",
+            tier="low",
+            max_retries=2,
+        )
+
+    # 1 initial + 2 retries = 3 calls
+    assert mock_llm.invoke.call_count == 3
+
+
+def test_run_nexus_agent_with_trace_429_diagnostic_message(monkeypatch: pytest.MonkeyPatch):
+    """Verify run_nexus_agent_with_trace translates 429 RESOURCE_EXHAUSTED into clear user guidance."""
+    mock_graph = MagicMock()
+    mock_graph.invoke.side_effect = Exception(
+        "Error calling model 'gemini-3.8-flash' (RESOURCE_EXHAUSTED): 429 RESOURCE_EXHAUSTED. Quota exceeded for metric..."
+    )
+    monkeypatch.setattr("nexus.agent.api.nexus_graph", mock_graph)
+
+    res = run_nexus_agent_with_trace(query="Process all Keep notes", thread_id="test_429_thread")
+    assert "429 RESOURCE_EXHAUSTED" in res["response"]
+    assert "token-per-minute (TPM)" in res["response"]
+    assert "sliding windows typically roll over within 20–60 seconds" in res["response"]
+    assert res["confidence"] == 0.0
+
 

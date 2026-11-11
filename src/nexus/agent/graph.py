@@ -17,6 +17,8 @@ or restricting directory access, Nexus runs ONE universal agent design (`NexusAg
 """
 # sqlite3: Standard library SQL engine used for local thread checkpointing (`SqliteSaver`)
 import json
+# re: Regular expressions used to parse provider error payloads (e.g. `retryDelay` intervals on 429)
+import re
 import sqlite3
 # threading: Provides thread-safe locking (`Lock`) for assigning unique serial numbers to parallel subagents
 import threading
@@ -459,6 +461,155 @@ def _log_token_usage(
     }
 
 
+# ── Helper: Resilient LLM Invocation with Cooperative 429 Rate-Limit Backoff ─
+
+# `error: Exception` is the raw provider or LangChain exception intercepted during `.invoke()`.
+# `-> bool` returns True if the exception represents an HTTP 429 Too Many Requests, Google RESOURCE_EXHAUSTED,
+# or provider rate-limit quota exhaustion event.
+def _is_rate_limit_error(error: Exception) -> bool:
+    """Determine whether an exception represents an AI provider 429 rate limit or quota exhaustion.
+
+    Catches:
+      1. HTTP 429 status codes across all provider clients (Google, Anthropic, OpenAI).
+      2. Google gRPC `RESOURCE_EXHAUSTED` errors (`generativelanguage.googleapis.com` TPM/RPM quota breaches).
+      3. Provider SDK exception classes (`RateLimitError`, `ResourceExhausted`).
+    """
+    err_str = str(error)
+    err_lower = err_str.lower()
+    type_name = type(error).__name__.lower()
+
+    # Check status code attributes if present on the exception or its nested response
+    status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
+    if status_code in (429, "429", "RESOURCE_EXHAUSTED"):
+        return True
+
+    # Check error string for HTTP 429 or Google RESOURCE_EXHAUSTED tokens
+    if "429" in err_str:
+        return True
+    if "RESOURCE_EXHAUSTED" in err_str.upper() or "resourceexhausted" in type_name:
+        return True
+    if "ratelimit" in type_name or "rate_limit" in err_lower or "rate limit" in err_lower or "quota exceeded" in err_lower:
+        return True
+
+    return False
+
+
+# `error: Exception` is the rate-limit exception containing optional provider retry delay metadata.
+# `attempt: int` is the zero-based retry attempt index used for exponential backoff fallback.
+# `default_base_delay: float = 15.0` is the starting backoff in seconds if no provider hint is found.
+# `-> float` returns the delay in seconds to sleep before retrying (clamped to [2.0, 60.0] seconds).
+def _extract_retry_delay(error: Exception, attempt: int = 0, default_base_delay: float = 15.0) -> float:
+    """Extract recommended wait time from provider error payload, or compute exponential backoff.
+
+    Why dynamic delay extraction is critical:
+    Google AI Studio Tier 1 applies a 2,000,000 input tokens per minute (2M TPM) sliding window. When breached,
+    the API payload specifies exact remaining time until window rollover (e.g. `'retryDelay': '23s'` or
+    `Please retry in 23.991883049s`). Sleeping standard SDK backoffs (1s, 2s, 4s) prematurely exhausts retries
+    while the window is still closed; extracting the true delay guarantees the retry executes on a fresh window.
+    """
+    err_str = str(error)
+
+    # 1. Match Google RPC `RetryInfo` dictionary pattern (e.g. `'retryDelay': '23s'` or `"retryDelay": "23.99s"`)
+    m = re.search(r"""['"]retryDelay['"]:\s*['"](\d+(?:\.\d+)?)s?['"]""", err_str, re.IGNORECASE)
+    if m:
+        # Add 1.5s safety buffer so clock drift between local host and Google gateway does not trigger immediate re-rejection
+        return min(60.0, max(2.0, float(m.group(1)) + 1.5))
+
+    # 2. Match natural-language diagnostic text (e.g. 'retry in 23.991883049s' or 'try again in 20s')
+    m = re.search(r"""(?:retry|try again) in (\d+(?:\.\d+)?)s""", err_str, re.IGNORECASE)
+    if m:
+        return min(60.0, max(2.0, float(m.group(1)) + 1.5))
+
+    # 3. Match standard HTTP `retry-after` header syntax (e.g. 'retry-after: 25')
+    m = re.search(r"""retry-after:\s*(\d+(?:\.\d+)?)""", err_str, re.IGNORECASE)
+    if m:
+        return min(60.0, max(2.0, float(m.group(1)) + 1.5))
+
+    # 4. Fallback exponential backoff: 15s -> 30s -> 60s (scaled by attempt index)
+    return min(60.0, float(default_base_delay * (2 ** attempt)))
+
+
+# `seconds: float` is the total duration to wait.
+# `thread_ids: Sequence[Optional[str]]` list of thread/conversation identifiers to inspect for user Stop & Revert.
+def _cooperative_sleep(seconds: float, thread_ids: Sequence[Optional[str]]) -> None:
+    """Sleep for `seconds` in 0.5s increments while polling for user Stop & Revert cancellation.
+
+    Prevents UI hangs: if a user clicks 'Stop & Revert' while an agent is paused for 24s waiting for a rate-limit
+    window to roll over, slicing sleep into 500ms intervals ensures the turn aborts cleanly in <500ms instead of
+    blocking the worker thread for the entire delay.
+    """
+    deadline = time.time() + max(0.0, seconds)
+    while time.time() < deadline:
+        # Check cancellation across all associated thread and conversation UUIDs
+        for tid in thread_ids:
+            if tid and is_thread_cancelled(tid):
+                raise InterruptedError(f"Turn execution for thread '{tid}' stopped by user during rate-limit backoff.")
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        time.sleep(min(0.5, remaining))
+
+
+# `llm: Any` is the bound LangChain runnable (e.g. `active_llm.bind_tools(TOOLS)` or `sub_llm`).
+# `messages: list[BaseMessage]` is the message history submitted to `.invoke()`.
+# `tracer: AgentTracer` is the telemetry tracer emitting structured events to terminal and SSE stream.
+# `thread_ids: Sequence[Optional[str]]` contains thread and conversation IDs for cooperative cancellation checks.
+# `model_name: str` is the active model identifier (e.g. `'gemini-3.8-flash'`) displayed in telemetry.
+# `tier: str` is the capability tier (e.g. `'low'`, `'strong'`).
+# `max_retries: int = 3` maximum number of rate-limit backoff retry attempts before re-raising.
+# `-> BaseMessage` returns the model output (`AIMessage`).
+def _invoke_llm_with_resilience(
+    llm: Any,
+    messages: list[BaseMessage],
+    tracer: AgentTracer,
+    thread_ids: Sequence[Optional[str]],
+    model_name: str,
+    tier: str,
+    max_retries: int = 3,
+) -> BaseMessage:
+    """Invoke an LLM with automatic 429 rate-limit backoff and sliding token-window rollover handling.
+
+    Why this wrapper exists:
+    LangChain's default HTTP retry policies use short 1s–4s exponential backoffs intended for network blips.
+    When parallel subagents burst token velocity past provider minute-level ceilings (e.g. 2M TPM on Tier 1),
+    immediate retries burn all retry attempts while the sliding window remains saturated. This wrapper intercepts
+    429/RESOURCE_EXHAUSTED errors, extracts the exact `retryDelay` required for the sliding window to clear,
+    notifies the user via SSE trace events, cooperatively sleeps, and seamlessly retries the invocation.
+    """
+    last_exception: Exception | None = None
+    for attempt in range(max_retries + 1):
+        # Pre-inference cancellation check: abort immediately if user pressed Stop & Revert
+        for tid in thread_ids:
+            if tid and is_thread_cancelled(tid):
+                raise InterruptedError(f"Turn execution for thread '{tid}' stopped by user.")
+
+        try:
+            return llm.invoke(messages)
+        except Exception as e:
+            last_exception = e
+            # Only intercept rate-limit / quota errors for backoff; let 504 timeouts and logic errors propagate
+            if _is_rate_limit_error(e) and attempt < max_retries:
+                delay = _extract_retry_delay(e, attempt=attempt)
+                tracer.info(
+                    f"⏳ Rate limit reached (429 RESOURCE_EXHAUSTED). Waiting {delay:.1f}s for sliding token window rollover "
+                    f"before automatic retry (attempt {attempt + 1}/{max_retries})...",
+                    data={
+                        "model": model_name,
+                        "model_tier": tier,
+                        "retry_delay": delay,
+                        "attempt": attempt + 1,
+                        "max_retries": max_retries,
+                    },
+                )
+                _cooperative_sleep(delay, thread_ids)
+                continue
+            raise e
+
+    if last_exception:
+        raise last_exception
+    raise RuntimeError("Unexpected failure in _invoke_llm_with_resilience")
+
+
 # ── Dynamic Subagent Spawner (`spawn_subagent`) ──────────────────────────────
 
 @tool
@@ -562,7 +713,15 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
 
             turn_idx += 1
             local_tracer.llm_call(metadata={"turn": turn_idx, "model_tier": effective_tier, "model_name": sub_model_name})
-            ai_msg = sub_llm.invoke(sub_messages)
+            ai_msg = _invoke_llm_with_resilience(
+                llm=sub_llm,
+                messages=sub_messages,
+                tracer=local_tracer,
+                thread_ids=[parent_convo, parent_thread, sub_id],
+                model_name=sub_model_name,
+                tier=effective_tier,
+                max_retries=settings.ai_max_retries,
+            )
             _log_token_usage(local_tracer, ai_msg, model_name=sub_model_name, tier=effective_tier)
             sub_messages.append(ai_msg)
 
@@ -780,7 +939,15 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     nexus_tracer.llm_call(metadata={"model_tier": effective_tier, "model_name": active_model_name})
     active_llm = get_chat_model(tier=requested_tier, temperature=0.0)
     try:
-        response = active_llm.bind_tools(TOOLS).invoke(messages_for_llm)
+        response = _invoke_llm_with_resilience(
+            llm=active_llm.bind_tools(TOOLS),
+            messages=messages_for_llm,
+            tracer=nexus_tracer,
+            thread_ids=[active_thread_id, active_convo_id],
+            model_name=active_model_name,
+            tier=effective_tier,
+            max_retries=settings.ai_max_retries,
+        )
     except Exception as e:
         err_msg = str(e)
         # Check if the failure is a deadline / timeout error from the provider gateway (e.g. 504 DEADLINE_EXCEEDED)
@@ -799,7 +966,15 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
                 f"Gracefully falling back to low-latency tier ({fallback_resolved['model_name']}) to complete the turn..."
             )
             fallback_llm = get_chat_model(tier=fallback_tier_arg, temperature=0.0)
-            response = fallback_llm.bind_tools(TOOLS).invoke(messages_for_llm)
+            response = _invoke_llm_with_resilience(
+                llm=fallback_llm.bind_tools(TOOLS),
+                messages=messages_for_llm,
+                tracer=nexus_tracer,
+                thread_ids=[active_thread_id, active_convo_id],
+                model_name=fallback_resolved["model_name"],
+                tier="low",
+                max_retries=settings.ai_max_retries,
+            )
             active_model_name = fallback_resolved["model_name"]
             effective_tier = "low"
         else:

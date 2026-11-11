@@ -202,6 +202,14 @@ def run_nexus_agent_with_trace(
                 f"conversation history. You can continue by sending your next prompt, or use `spawn_subagent` to isolate "
                 f"heavy file reading so raw notes do not inflate the conversation context."
             )
+        # Demystify 429 RESOURCE_EXHAUSTED / Rate Limit errors if backoff retries were exhausted
+        elif any(k in err_str or k in err_lower for k in ("429", "resource_exhausted", "quota exceeded", "rate limit")):
+            user_msg = (
+                f"⏳ NexusAgent paused because the AI provider rate limit was reached (429 RESOURCE_EXHAUSTED).\n\n"
+                f"The provider's token-per-minute (TPM) or request limit was exceeded during heavy reasoning or "
+                f"parallel subagent execution. Provider sliding windows typically roll over within 20–60 seconds—"
+                f"please re-send your prompt or instruct the agent to run tasks sequentially to stay within quota."
+            )
         # Demystify Python ThreadPoolExecutor shutdown errors caused by mid-turn `uvicorn --reload` worker restarts
         elif "cannot schedule new futures after" in err_lower or "brokenthreadpool" in type(e).__name__.lower():
             user_msg = (
