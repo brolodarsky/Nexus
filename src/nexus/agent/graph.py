@@ -99,6 +99,7 @@ from nexus.shared_tools.shared import (
     search_vault,
     search_web,
     send_telegram_notification,
+    transcribe_media,
     update_calendar_event,
 )
 
@@ -389,6 +390,7 @@ CORE_TOOLS = [
     post_to_board,
     read_board,
     send_telegram_notification,
+    transcribe_media,
     run_shared_tool_cli,
 ]
 

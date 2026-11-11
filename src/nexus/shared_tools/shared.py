@@ -981,6 +981,46 @@ def send_telegram_notification(message: str) -> str:
         return f"Error sending Telegram notification: {exc}"
 
 
+# ── 8. Media Transcription Tool (Gemini File API) ────────────────────────────
+
+# `file_path: str` relative (to Vault/Project) or absolute path to an audio or video file.
+# `output_note_path: Optional[str]` optional relative path in Vault to save Markdown transcript note.
+# `include_timestamps: bool` whether to format transcript with [MM:SS] timestamps at speaker turns.
+# `save_to_vault: bool` whether to persist the formatted transcript note into the Obsidian Vault.
+# `-> str` returns the complete verbatim transcript text (never summarized or abridged).
+@tool
+def transcribe_media(
+    file_path: str,
+    output_note_path: Optional[str] = None,
+    include_timestamps: bool = True,
+    save_to_vault: bool = True,
+) -> str:
+    """Transcribe an audio (.mp3, .wav, .m4a, .aac, .flac, .ogg, .opus, .webm) or video (.mp4, .mov, .mkv, .avi) file into verbatim text via the Gemini File API.
+
+    Uploads media directly to Gemini without requiring local FFmpeg extraction or GPU dependencies.
+    Returns the complete, unabridged verbatim transcript (including speaker turns and periodic timestamps).
+    Optionally archives a formatted Markdown note with YAML frontmatter directly into the Obsidian Vault.
+
+    Args:
+        file_path: Path to the media file (e.g. "Vault/0. Inbox/meeting.mp4", "recording.mp3", or absolute path).
+        output_note_path: Optional relative note path in Vault to save the transcript (e.g. "0. Inbox/Transcripts/Meeting.md").
+                          If omitted and `save_to_vault=True`, automatically archives to "Vault/0. Inbox/Transcripts/Transcript — <filename>.md".
+        include_timestamps: Whether to format transcript with [MM:SS] timestamps (default: True).
+        save_to_vault: Whether to persist the formatted transcript note in the Obsidian Vault (default: True).
+    """
+    from nexus.shared_tools.transcribe_media import transcribe_media_file
+
+    try:
+        return transcribe_media_file(
+            file_path=file_path,
+            output_note_path=output_note_path,
+            include_timestamps=include_timestamps,
+            save_to_vault=save_to_vault,
+        )
+    except Exception as exc:
+        return f"Error transcribing media file '{file_path}': {exc}"
+
+
 # ── Backward-Compatible Factories (for any legacy callers) ───────────────────
 
 def get_read_note_tool(agent_name: str = "NexusAgent", domain_path: Optional[str] = None):
