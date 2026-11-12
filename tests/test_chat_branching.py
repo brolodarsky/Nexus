@@ -11,6 +11,7 @@ Tests:
   6. Error guards for missing conversations (HTTP 404) and root merge attempts (HTTP 400).
 """
 
+from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
@@ -18,6 +19,7 @@ from langchain_core.messages import AIMessage
 
 from nexus.api.main import app
 from nexus.agent.graph import rollback_checkpoints_for_thread
+import nexus.core.chats_db as chats_db
 from nexus.core.chats_db import (
     create_conversation,
     delete_conversation,
@@ -25,6 +27,13 @@ from nexus.core.chats_db import (
     get_conversation,
     log_message,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_chats_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Redirect `chats_db.DB_PATH` to an isolated temporary SQLite database per test."""
+    monkeypatch.setattr(chats_db, "DB_PATH", tmp_path / "test_chats.db")
+    chats_db.init_db()
 
 
 @pytest.fixture

@@ -13,7 +13,9 @@ import pytest
 from pathlib import Path
 
 from nexus.agent.graph import MEMORY_DB_PATH, get_latest_checkpoint_id
+import nexus.core.blackboard as blackboard
 from nexus.core.blackboard import get_board_connection, get_bulletins, init_board_db, post_bulletin
+import nexus.core.chats_db as chats_db
 from nexus.core.chats_db import _get_conn as get_chats_conn, create_conversation, log_message, get_chat_history
 from nexus.core.hitl_queue import get_db_connection as get_hitl_conn, add_transaction, get_pending_transactions
 
@@ -57,8 +59,12 @@ def test_memory_db_wal_mode_and_busy_timeout():
         assert busy_timeout == 30000
 
 
-def test_concurrent_chat_logging_without_lock():
+def test_concurrent_chat_logging_without_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Verify multiple worker threads can write messages simultaneously to chats.db without collision."""
+    # Isolate DB_PATH to tmp_path so test conversations never pollute live logs/chats.db
+    monkeypatch.setattr(chats_db, "DB_PATH", tmp_path / "test_chats.db")
+    chats_db.init_db()
+
     conv_id = create_conversation(title="Concurrency Test Thread")
     worker_count = 10
     messages_per_worker = 5
@@ -80,8 +86,10 @@ def test_concurrent_chat_logging_without_lock():
     assert len(history) == worker_count * messages_per_worker
 
 
-def test_concurrent_blackboard_bulletin_posting():
+def test_concurrent_blackboard_bulletin_posting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Verify multiple parallel subagents posting to blackboard.db succeed concurrently under WAL mode."""
+    # Isolate BOARD_DB_PATH to tmp_path so test bulletins never pollute live blackboard.db
+    monkeypatch.setattr(blackboard, "BOARD_DB_PATH", tmp_path / "test_blackboard.db")
     init_board_db()
     test_thread = "concurrency_test_thread"
     worker_count = 8

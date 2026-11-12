@@ -10,9 +10,11 @@ Validates:
   7. `GET /api/agents/messages/{message_id}/trace` API endpoint returns on-demand telemetry.
 """
 import uuid
+from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import nexus.core.chats_db as chats_db
 from nexus.core.chats_db import (
     _get_conn,
     create_conversation,
@@ -27,6 +29,13 @@ from nexus.core.trace import AgentTracer, trace_bus
 from nexus.api.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def isolated_chats_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Redirect `chats_db.DB_PATH` to an isolated temporary SQLite database per test."""
+    monkeypatch.setattr(chats_db, "DB_PATH", tmp_path / "test_chats.db")
+    init_db()
 
 
 @pytest.fixture

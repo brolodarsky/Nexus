@@ -14,6 +14,7 @@ Tests:
 """
 
 import json
+from pathlib import Path
 import queue
 import sqlite3
 import threading
@@ -34,6 +35,7 @@ from nexus.agent.graph import (
     rollback_checkpoints_for_thread,
     unregister_cancel_event,
 )
+import nexus.core.chats_db as chats_db
 from nexus.core.chats_db import (
     create_conversation,
     delete_conversation,
@@ -41,12 +43,22 @@ from nexus.core.chats_db import (
     log_message,
     revert_last_turn,
 )
+import nexus.core.hitl_queue as hitl_queue
 from nexus.core.hitl_queue import (
     add_transaction,
     cancel_pending_transactions_for_conversation,
     get_db_connection,
     get_pending_transactions,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_dbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Redirect `chats_db.DB_PATH` and `hitl_queue.DB_PATH` to isolated temporary SQLite DBs per test."""
+    monkeypatch.setattr(chats_db, "DB_PATH", tmp_path / "test_chats.db")
+    chats_db.init_db()
+    monkeypatch.setattr(hitl_queue, "DB_PATH", tmp_path / "test_hitl.db")
+    hitl_queue.init_db()
 
 
 @pytest.fixture
@@ -199,49 +211,50 @@ def test_rollback_checkpoints_for_thread(temp_conv):
     if not MEMORY_DB_PATH.exists():
         pytest.skip("memory.sqlite not present")
 
-    with sqlite3.connect(MEMORY_DB_PATH) as conn:
-        # Insert baseline checkpoint
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-            VALUES (?, '', 'cp-001', '', 'state', '{}', ?)
-            """,
-            (temp_conv, json.dumps({"source": "loop", "step": 1})),
-        )
-        # Insert turn 2 input checkpoint
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-            VALUES (?, '', 'cp-002', 'cp-001', 'state', '{}', ?)
-            """,
-            (temp_conv, json.dumps({"source": "input", "step": 2})),
-        )
-        # Insert turn 2 tool loop checkpoint
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-            VALUES (?, '', 'cp-003', 'cp-002', 'state', '{}', ?)
-            """,
-            (temp_conv, json.dumps({"source": "loop", "step": 3})),
-        )
-        conn.commit()
+    try:
+        with sqlite3.connect(MEMORY_DB_PATH) as conn:
+            # Insert baseline checkpoint
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
+                VALUES (?, '', 'cp-001', '', 'state', '{}', ?)
+                """,
+                (temp_conv, json.dumps({"source": "loop", "step": 1})),
+            )
+            # Insert turn 2 input checkpoint
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
+                VALUES (?, '', 'cp-002', 'cp-001', 'state', '{}', ?)
+                """,
+                (temp_conv, json.dumps({"source": "input", "step": 2})),
+            )
+            # Insert turn 2 tool loop checkpoint
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
+                VALUES (?, '', 'cp-003', 'cp-002', 'state', '{}', ?)
+                """,
+                (temp_conv, json.dumps({"source": "loop", "step": 3})),
+            )
+            conn.commit()
 
-    # Rollback turn 2
-    deleted = rollback_checkpoints_for_thread(temp_conv, pre_turn_checkpoint_id="cp-001")
-    assert deleted >= 1
+        # Rollback turn 2
+        deleted = rollback_checkpoints_for_thread(temp_conv, pre_turn_checkpoint_id="cp-001")
+        assert deleted >= 1
 
-    with sqlite3.connect(MEMORY_DB_PATH) as conn:
-        remaining = conn.execute(
-            "SELECT checkpoint_id FROM checkpoints WHERE thread_id = ? ORDER BY checkpoint_id ASC",
-            (temp_conv,),
-        ).fetchall()
-        cids = [r[0] for r in remaining]
-        assert "cp-001" in cids
-        assert "cp-002" not in cids
-        assert "cp-003" not in cids
-
-    # Rollback all checkpoints for this temp thread to clean up
-    rollback_checkpoints_for_thread(temp_conv, pre_turn_checkpoint_id=None)
+        with sqlite3.connect(MEMORY_DB_PATH) as conn:
+            remaining = conn.execute(
+                "SELECT checkpoint_id FROM checkpoints WHERE thread_id = ? ORDER BY checkpoint_id ASC",
+                (temp_conv,),
+            ).fetchall()
+            cids = [r[0] for r in remaining]
+            assert "cp-001" in cids
+            assert "cp-002" not in cids
+            assert "cp-003" not in cids
+    finally:
+        # Rollback all checkpoints for this temp thread to clean up even if assertions fail
+        rollback_checkpoints_for_thread(temp_conv, pre_turn_checkpoint_id=None)
 
 
 def test_api_stop_and_revert_in_flight_run(client, temp_conv):

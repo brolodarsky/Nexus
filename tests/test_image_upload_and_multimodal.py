@@ -13,12 +13,20 @@ from PIL import Image
 from fastapi.testclient import TestClient
 
 from nexus.api.main import app
+import nexus.core.chats_db as chats_db
 from nexus.core.chats_db import init_db, log_message, get_chat_history, create_conversation, delete_conversation
 from nexus.agent.api import resolve_image_to_data_url
 from nexus.core.constants import PROJECT_ROOT
 
 client = TestClient(app)
 UPLOADS_DIR = PROJECT_ROOT / "logs" / "uploads"
+
+
+@pytest.fixture(autouse=True)
+def isolated_chats_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Redirect `chats_db.DB_PATH` to an isolated temporary SQLite database per test."""
+    monkeypatch.setattr(chats_db, "DB_PATH", tmp_path / "test_chats.db")
+    init_db()
 
 
 def create_test_image_bytes(format="PNG", size=(100, 100), color="blue") -> bytes:

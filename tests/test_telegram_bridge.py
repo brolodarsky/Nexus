@@ -16,16 +16,21 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+import nexus.core.chats_db as chats_db
 import nexus.shared_tools.telegram_bridge as tb
 
 
 @pytest.fixture(autouse=True)
 def isolated_telegram_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Redirect `STATE_FILE_PATH` and `POLLER_LOCK_PATH` to an isolated temporary directory per test."""
+    """Redirect Telegram bridge state files and `chats.db` to an isolated temporary directory per test."""
     test_state_file = tmp_path / "telegram_state.json"
     test_lock_file = tmp_path / "telegram_poller.lock"
+    test_chats_db = tmp_path / "test_chats.db"
     monkeypatch.setattr(tb, "STATE_FILE_PATH", test_state_file)
     monkeypatch.setattr(tb, "POLLER_LOCK_PATH", test_lock_file)
+    # Isolate chats_db.DB_PATH so process_telegram_message never writes test convos to live logs/chats.db
+    monkeypatch.setattr(chats_db, "DB_PATH", test_chats_db)
+    chats_db.init_db()
     tb.close_telegram_http_client()
     yield test_state_file
     tb.close_telegram_http_client()
