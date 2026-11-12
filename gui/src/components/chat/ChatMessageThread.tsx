@@ -268,6 +268,7 @@ const ChatMessageThread = memo(function ChatMessageThread({
                 )}
               </div>
               <ThinkingPanel
+                key={`live-${activeConvId ?? "new"}`}
                 events={liveTrace}
                 isLive={true}
                 defaultExpanded={false}

@@ -1000,18 +1000,16 @@ export const ThinkingPanel = memo(function ThinkingPanel({
   // expanded: controls visibility of the inner graph/step visualization; initialized via defaultExpanded (default: false)
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [viewMode, setViewMode] = useState<"graph" | "steps" | "raw">("graph");
-  const [internalEvents, setInternalEvents] = useState<TraceEvent[]>(initialEvents || []);
+  // fetchedEvents holds trace arrays lazy-loaded on demand via getMessageTrace(messageId) for historical messages
+  const [fetchedEvents, setFetchedEvents] = useState<TraceEvent[]>([]);
   const [isLoadingTrace, setIsLoadingTrace] = useState(false);
   const [traceLoadError, setTraceLoadError] = useState<string | null>(null);
 
-  // Sync internalEvents if incoming initialEvents change (e.g. live SSE streaming ticks)
-  useEffect(() => {
-    if (initialEvents && initialEvents.length > 0) {
-      setInternalEvents(initialEvents);
-    }
-  }, [initialEvents]);
-
-  const activeEvents = internalEvents.length > 0 ? internalEvents : (initialEvents || []);
+  // Derive activeEvents directly from live/inline initialEvents when provided, falling back to lazy-fetched events
+  const activeEvents = useMemo(
+    () => (initialEvents && initialEvents.length > 0 ? initialEvents : fetchedEvents),
+    [initialEvents, fetchedEvents]
+  );
 
   // expandAllSteps: toggles global expand/collapse of all steps in chronological list; defaults to false (collapsed by default)
   const [expandAllSteps, setExpandAllSteps] = useState(false);
@@ -1049,7 +1047,7 @@ export const ThinkingPanel = memo(function ThinkingPanel({
         setTraceLoadError(null);
         try {
           const fetched = await getMessageTrace(messageId);
-          setInternalEvents(fetched);
+          setFetchedEvents(fetched);
         } catch (err) {
           console.error("Failed to load message trace:", err);
           setTraceLoadError("Failed to load execution trace.");
@@ -1196,7 +1194,7 @@ export const ThinkingPanel = memo(function ThinkingPanel({
                     setIsLoadingTrace(true);
                     setTraceLoadError(null);
                     getMessageTrace(messageId)
-                      .then(setInternalEvents)
+                      .then(setFetchedEvents)
                       .catch(() => setTraceLoadError("Failed to load trace events."))
                       .finally(() => setIsLoadingTrace(false));
                   }

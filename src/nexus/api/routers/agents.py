@@ -6,6 +6,7 @@ Bridges the Next.js frontend to the existing LangGraph multi-agent swarm.
 import asyncio
 import io
 import json
+import math
 import mimetypes
 from pathlib import Path
 import queue
@@ -13,7 +14,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 from PIL import Image
 
 # FastAPI primitives:
@@ -27,7 +28,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 # Pydantic BaseModel: Validates incoming request JSON payloads and serializes outgoing response schemas
 from pydantic import BaseModel
-from nexus.core.constants import PROJECT_ROOT
+from nexus.core.constants import PROJECT_ROOT, resolve_model_config
 # trace_bus: Global pub/sub event bus where LangGraph agents emit live trace events (tools, LLM calls)
 from nexus.core.cost import calculate_token_cost
 from nexus.core.trace import reset_trace_thread_id, set_trace_thread_id, trace_bus
@@ -99,9 +100,38 @@ class StopAndRevertResponse(BaseModel):
     reverted_messages_count: int = 0    # Number of messages purged from chats.db
 
 
-class ActiveRun:
-    """Tracks runtime context, cancellation tokens, and SSE event queues for an in-flight agent turn."""
+# Standard SSE response headers disabling HTTP caching and reverse-proxy chunk buffering
+SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 
+
+def _sanitize_for_json(value):
+    """Recursively converts non-finite floats (NaN/Inf) to None so SSE JSON never fails browser JSON.parse."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_for_json(v) for v in value]
+    return value
+
+
+def _safe_json_dumps(payload: dict) -> str:
+    """Serializes SSE payloads strictly as valid JSON, coercing non-finite numbers and exotic objects."""
+    try:
+        return json.dumps(payload, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        sanitized = _sanitize_for_json(payload)
+        return json.dumps(sanitized, ensure_ascii=False, allow_nan=False, default=str)
+
+
+class ActiveRun:
+    """Tracks runtime context, cancellation tokens, lossless trace backlog, and multi-client SSE subscribers."""
+
+    # Optional[...] parameters preserve backward compatibility with unit tests that instantiate ActiveRun directly
     def __init__(
         self,
         conversation_id: str,
@@ -109,21 +139,122 @@ class ActiveRun:
         images: Optional[list[str]],
         cancel_event: threading.Event,
         pre_turn_checkpoint_id: Optional[str],
-        event_queue: queue.Queue,
+        event_queue: Optional[queue.Queue] = None,
+        model_tier: Optional[str] = None,
+        model_name: Optional[str] = None,
+        model_label: Optional[str] = None,
+        user_message_id: Optional[int] = None,
     ):
         self.conversation_id = conversation_id
         self.query = query
         self.images = images or []
         self.cancel_event = cancel_event
         self.pre_turn_checkpoint_id = pre_turn_checkpoint_id
+        # Optional legacy queue retained for Stop & Revert test assertions
         self.event_queue = event_queue
+        self.model_tier = model_tier
+        self.model_name = model_name
+        self.model_label = model_label
+        self.user_message_id = user_message_id
         self.start_time = time.time()
         self.is_stopped = False
+        # Mutex protecting trace_events, subscribers, and terminal_event so re-attaching clients never drop or duplicate steps
+        self.lock = threading.Lock()
+        self.trace_events: list[dict] = []
+        self.subscribers: list[queue.Queue] = []
+        self.terminal_event: Optional[dict] = None
+
+    def publish_trace(self, event: dict) -> None:
+        """Records a live trace event in the run backlog and fans it out to every connected SSE subscriber."""
+        with self.lock:
+            # Ignore late-arriving events once the run has reached a terminal state
+            if self.terminal_event is not None:
+                return
+            self.trace_events.append(event)
+            if self.event_queue is not None:
+                self.event_queue.put(event)
+            for sub_q in self.subscribers:
+                sub_q.put(event)
+
+    def publish_terminal(self, event: dict) -> None:
+        """Stores the terminal ('done' or 'error') packet once and delivers it to all attached subscribers."""
+        with self.lock:
+            # Guard against duplicate terminal events when Stop & Revert races with worker teardown
+            if self.terminal_event is not None:
+                return
+            self.terminal_event = event
+            if self.event_queue is not None:
+                self.event_queue.put(event)
+            for sub_q in self.subscribers:
+                sub_q.put(event)
+
+    def subscribe(self) -> tuple[list[dict], Optional[dict], Optional[queue.Queue]]:
+        """Atomically snapshots emitted trace history and registers a live queue if the turn is still running."""
+        with self.lock:
+            backlog = list(self.trace_events)
+            if self.terminal_event is not None:
+                return backlog, self.terminal_event, None
+            # Fresh thread-safe FIFO queue receiving every event emitted after this snapshot
+            sub_q: queue.Queue = queue.Queue()
+            self.subscribers.append(sub_q)
+            return backlog, None, sub_q
+
+    def unsubscribe(self, sub_q: Optional[queue.Queue]) -> None:
+        """Removes a disconnected or completed client queue from fan-out delivery."""
+        if sub_q is None:
+            return
+        with self.lock:
+            try:
+                self.subscribers.remove(sub_q)
+            except ValueError:
+                pass
+
+    def snapshot_trace(self) -> list[dict]:
+        """Returns a shallow thread-safe copy of all trace events emitted during this run."""
+        with self.lock:
+            return list(self.trace_events)
+
+    def snapshot_status(self) -> dict:
+        """Returns lightweight metadata describing this in-flight run for UI state restoration."""
+        with self.lock:
+            return {
+                "active": not self.is_stopped and self.terminal_event is None,
+                "conversation_id": self.conversation_id,
+                "query": self.query,
+                "model_tier": self.model_tier,
+                "model_name": self.model_name,
+                "model_label": self.model_label,
+                "user_message_id": self.user_message_id,
+                "started_at": datetime.fromtimestamp(self.start_time, timezone.utc).isoformat(),
+                "step_count": len(self.trace_events),
+                "is_stopped": self.is_stopped,
+            }
 
 
 # Thread-safe dictionary tracking active runs per conversation UUID
 _active_runs: dict[str, ActiveRun] = {}
 _active_runs_lock = threading.Lock()
+
+
+def _cancel_active_run_record(active_run: ActiveRun) -> None:
+    """Marks an ActiveRun stopped, trips its cancellation event, and notifies attached SSE clients."""
+    active_run.is_stopped = True
+    active_run.cancel_event.set()
+    # Push clean interruption notice onto SSE subscribers so frontend terminates streaming immediately
+    try:
+        active_run.publish_trace({
+            "type": "info",
+            "message": "⏹ Execution stopped and reverted by user.",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        active_run.publish_terminal({
+            "type": "done",
+            "response": "",
+            "stopped": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass
 
 
 # ── Image Upload & Asset Routes ──────────────────────────────
@@ -303,7 +434,11 @@ async def create_new_conversation(req: CreateConversationRequest):
 # Deletes a conversation and cascades to delete all its messages
 @router.delete("/ask/conversations/{conversation_id}")
 async def remove_conversation(conversation_id: str):
-    """Removes a conversation thread by UUID."""
+    """Removes a conversation thread by UUID, halting any in-flight run first."""
+    with _active_runs_lock:
+        active_run = _active_runs.get(conversation_id)
+        if active_run:
+            _cancel_active_run_record(active_run)
     delete_conversation(conversation_id)
     return {"status": "deleted"}
 
@@ -550,49 +685,22 @@ async def ask_brain(request: AskRequest):
 
 # Worker function executed inside a dedicated background OS thread
 def _run_pipeline(
-    query: str,
-    conversation_id: str,
-    event_queue: queue.Queue,
+    active_run: ActiveRun,
+    unsub_trace: Callable[[], None],
     model_tier: Optional[str] = None,
-    images: Optional[list[str]] = None,
 ):
     """
     Runs agent graph execution in a background thread so the async event loop is not blocked.
-    Collects trace events via trace_bus subscription and pushes the final 'done' event to event_queue.
+    Uses ActiveRun's buffered trace stream and fan-out subscribers so clients that switch away
+    and return (or reload the page) can re-attach mid-turn without losing trace history.
     Supports atomic interruption and zero-vestige turn reversion via `Stop & Revert`.
     """
-    t0 = time.time()
-    effective_query = query.strip() or "Analyze the attached image(s)."
+    t0 = active_run.start_time
+    conversation_id = active_run.conversation_id
+    effective_query = active_run.query
+    images = active_run.images or None
+    user_msg_id = active_run.user_message_id
 
-    # Capture checkpointer baseline BEFORE writing messages or graph state so rollback is 100% deterministic
-    pre_turn_checkpoint_id = get_latest_checkpoint_id(conversation_id)
-    cancel_event = threading.Event()
-    register_cancel_event(conversation_id, cancel_event)
-
-    active_run = ActiveRun(
-        conversation_id=conversation_id,
-        query=effective_query,
-        images=images,
-        cancel_event=cancel_event,
-        pre_turn_checkpoint_id=pre_turn_checkpoint_id,
-        event_queue=event_queue,
-    )
-    with _active_runs_lock:
-        _active_runs[conversation_id] = active_run
-
-    # Log user query and image attachments to database immediately, capturing its SQLite primary key
-    user_msg_id = log_message(
-        role="user",
-        content=effective_query,
-        conversation_id=conversation_id,
-        images=images,
-    )
-    
-    # Subscribe to trace_bus to capture all LLM and tool events emitted during this run
-    trace_events = []
-    def _on_trace(evt):
-        trace_events.append(evt)
-    unsub = trace_bus.subscribe(_on_trace, thread_id=conversation_id)
     trace_token = set_trace_thread_id(conversation_id)
 
     try:
@@ -623,16 +731,19 @@ def _run_pipeline(
         # Generate ISO-8601 UTC timestamp for terminal SSE 'done' packet
         now = datetime.now(timezone.utc).isoformat()
 
+        # Snapshot all trace events captured in ActiveRun under lock before persisting and publishing terminal status
+        captured_traces = active_run.snapshot_trace()
+
         # Compute turn cost from trace events
         turn_cost_usd = sum(
             float(e.get("data", {}).get("cost_usd", 0.0) or 0.0)
-            for e in trace_events
+            for e in captured_traces
             if e.get("type") == "info"
         )
         if not turn_cost_usd:
-            tot_in = sum(int(e.get("data", {}).get("input_tokens", 0) or 0) for e in trace_events if e.get("type") == "info")
-            tot_out = sum(int(e.get("data", {}).get("output_tokens", 0) or 0) for e in trace_events if e.get("type") == "info")
-            tot_cached = sum(int(e.get("data", {}).get("cached_tokens", 0) or 0) for e in trace_events if e.get("type") == "info")
+            tot_in = sum(int(e.get("data", {}).get("input_tokens", 0) or 0) for e in captured_traces if e.get("type") == "info")
+            tot_out = sum(int(e.get("data", {}).get("output_tokens", 0) or 0) for e in captured_traces if e.get("type") == "info")
+            tot_cached = sum(int(e.get("data", {}).get("cached_tokens", 0) or 0) for e in captured_traces if e.get("type") == "info")
             if tot_in or tot_out:
                 turn_cost_usd = calculate_token_cost(
                     input_tokens=tot_in,
@@ -642,7 +753,7 @@ def _run_pipeline(
                     tier=used_tier,
                 )
         turn_cost_formatted = round(turn_cost_usd, 4) if turn_cost_usd else None
-                
+
         # Persist assistant message along with full trace array to chats.db, capturing its SQLite primary key
         assistant_msg_id = log_message(
             role="assistant",
@@ -650,7 +761,7 @@ def _run_pipeline(
             agent=agent_name,
             domain=routed_domain,
             confidence=result.get("confidence"),
-            trace=trace_events,
+            trace=captured_traces,
             conversation_id=conversation_id,
             model_tier=used_tier,
             model_name=used_model,
@@ -660,20 +771,20 @@ def _run_pipeline(
         # Persist structured JSON run snapshot to logs/runs/
         log_run(
             agent_name=agent_name,
-            query=query,
+            query=effective_query,
             response=response_text,
             thread_id=conversation_id,
             domain=routed_domain,
             confidence=result.get("confidence"),
             reasoning=result.get("reasoning"),
             tool_calls=result.get("tool_calls"),
-            trace_events=trace_events,
+            trace_events=captured_traces,
             latency_seconds=elapsed_sec,
             metadata={"model_tier": used_tier, "model_name": used_model},
         )
 
-        # Push terminal 'done' event to thread queue to complete the SSE stream
-        event_queue.put({
+        # Publish terminal 'done' event to every active/re-attached SSE subscriber
+        active_run.publish_terminal({
             "type": "done",
             "response": response_text,
             "agent": agent_name,
@@ -689,26 +800,34 @@ def _run_pipeline(
         })
     except InterruptedError:
         # Interrupted cleanly by user via Stop & Revert: push clean terminal event without recording partial error
-        event_queue.put({
+        active_run.publish_trace({
             "type": "info",
             "message": "⏹ Agent execution stopped and reverted by user.",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        event_queue.put({
+        active_run.publish_terminal({
             "type": "done",
             "response": "",
             "stopped": True,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
     except Exception as e:
-        # Push terminal 'error' event to thread queue on failure
-        event_queue.put({
+        # Push terminal 'error' event to every active/re-attached SSE subscriber on failure
+        active_run.publish_terminal({
             "type": "error",
             "message": f"Agent execution failed: {str(e)}",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
     finally:
-        unsub() # Unsubscribe trace listener to prevent memory leaks
+        # Ensure any attached subscriber unblocks even if the worker exited early on cancellation
+        if active_run.terminal_event is None:
+            active_run.publish_terminal({
+                "type": "done",
+                "response": "",
+                "stopped": True,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+        unsub_trace() # Unsubscribe trace listener to prevent memory leaks
         reset_trace_thread_id(trace_token)
         unregister_cancel_event(conversation_id)
         with _active_runs_lock:
@@ -716,13 +835,66 @@ def _run_pipeline(
                 _active_runs.pop(conversation_id, None)
 
 
+# Shared async SSE generator helper used by both initial POST /ask/stream and re-attach GET /ask/stream/{conversation_id}
+async def _stream_active_run(
+    active_run: ActiveRun,
+    req: Request,
+    initial_subscription: Optional[tuple[list[dict], Optional[dict], Optional[queue.Queue]]] = None,
+):
+    """
+    Async generator yielding formatted SSE packets (`data: {...}\\n\\n`) from an ActiveRun.
+    Replays buffered trace history first, then drains live subscriber queue events with periodic RFC 8895 pings.
+    """
+    backlog, terminal_evt, sub_queue = (
+        initial_subscription if initial_subscription is not None else active_run.subscribe()
+    )
+    try:
+        # Phase 1: Replay any buffered trace events emitted before this SSE stream attached
+        for evt in backlog:
+            if await req.is_disconnected():
+                return
+            yield f"data: {_safe_json_dumps(evt)}\n\n"
+
+        # If the turn already terminated before live polling began, emit the terminal packet and close
+        if terminal_evt is not None:
+            yield f"data: {_safe_json_dumps(terminal_evt)}\n\n"
+            return
+
+        if sub_queue is None:
+            return
+
+        # Phase 2: Poll non-blockingly for live events while keeping idle connections alive via ': ping' comments
+        last_ping_time = time.time()
+        while True:
+            if await req.is_disconnected():
+                break
+
+            try:
+                event = sub_queue.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.05)
+                now_ts = time.time()
+                if now_ts - last_ping_time >= 10.0:
+                    last_ping_time = now_ts
+                    yield ": ping\n\n"
+                continue
+
+            last_ping_time = time.time()
+            yield f"data: {_safe_json_dumps(event)}\n\n"
+
+            if event.get("type") in ("done", "error"):
+                break
+    finally:
+        active_run.unsubscribe(sub_queue)
+
+
 # Server-Sent Events (SSE) streaming endpoint
 @router.post("/ask/stream")
 async def ask_brain_stream(request: AskRequest, req: Request):
     """
     SSE streaming endpoint for live Thinking Panel updates.
-    Spawns a background thread to run the agent, subscribes to trace_bus,
-    and yields SSE data packets (data: {...}\n\n) as events occur.
+    Registers an ActiveRun with buffered trace replay, spawns a background worker thread,
+    and yields SSE data packets (`data: {...}\\n\\n`) as events occur.
     """
     effective_query = request.query.strip()
     if not effective_query and not request.images:
@@ -730,64 +902,126 @@ async def ask_brain_stream(request: AskRequest, req: Request):
     if not effective_query:
         effective_query = "Analyze the attached image(s)."
 
-    # Thread-safe FIFO queue to transfer events from background thread to async generator
-    event_queue = queue.Queue()
+    conversation_id = request.conversation_id
 
-    # Subscribe to trace_bus: every time an agent prints/emits a trace step for this conversation, push it to event_queue
-    unsubscribe = trace_bus.subscribe(lambda evt: event_queue.put(evt), thread_id=request.conversation_id)
+    # Guard against two simultaneous turns mutating the same conversation thread concurrently
+    with _active_runs_lock:
+        existing = _active_runs.get(conversation_id)
+        if existing and not existing.is_stopped and existing.terminal_event is None:
+            raise HTTPException(
+                status_code=409,
+                detail="An agent turn is already running in this conversation.",
+            )
 
-    # Spawn synchronous agent pipeline in background OS thread (daemon=True allows clean shutdown)
-    pipeline_thread = threading.Thread(
-        target=_run_pipeline, 
-        args=(effective_query, request.conversation_id, event_queue, request.model_tier, request.images), 
-        daemon=True
+    # Resolve model metadata upfront so re-attaching UIs display the active turn's exact model label
+    resolved_model = resolve_model_config(request.model_tier)
+    pre_turn_checkpoint_id = get_latest_checkpoint_id(conversation_id)
+    cancel_event = threading.Event()
+    register_cancel_event(conversation_id, cancel_event)
+
+    # Persist the initiating user message before starting the worker so reloading/switching threads immediately shows it
+    user_msg_id = log_message(
+        role="user",
+        content=effective_query,
+        conversation_id=conversation_id,
+        images=request.images,
     )
-    pipeline_thread.start()
 
-    # Async generator function yielding formatted SSE packets
-    # - Non-blocking event_queue.get_nowait() prevents starving the asyncio event loop thread
-    # - Periodic SSE comment ping packets (': ping\n\n') keep HTTP connections open across browser and proxy timeouts
-    async def event_generator():
-        last_ping_time = time.time()
-        try:
-            while True:
-                # Detect if the client closed browser tab or canceled request
-                if await req.is_disconnected():
-                    break
+    active_run = ActiveRun(
+        conversation_id=conversation_id,
+        query=effective_query,
+        images=request.images,
+        cancel_event=cancel_event,
+        pre_turn_checkpoint_id=pre_turn_checkpoint_id,
+        model_tier=resolved_model.get("tier"),
+        model_name=resolved_model.get("model_name"),
+        model_label=resolved_model.get("label"),
+        user_message_id=user_msg_id,
+    )
 
-                try:
-                    # Non-blocking poll of thread-safe FIFO queue
-                    event = event_queue.get_nowait()
-                except queue.Empty:
-                    # Yield execution to the asyncio event loop so other concurrent tasks can progress
-                    await asyncio.sleep(0.05)
-                    # RFC 8895: Emit periodic SSE comment line (': ping\n\n') every 10s of idle wait to keep TCP alive
-                    now_ts = time.time()
-                    if now_ts - last_ping_time >= 10.0:
-                        last_ping_time = now_ts
-                        yield ": ping\n\n"
-                    continue
+    with _active_runs_lock:
+        _active_runs[conversation_id] = active_run
 
-                last_ping_time = time.time()
-                # SSE protocol format: 'data: <json_string>\n\n'
-                event_data = json.dumps(event, ensure_ascii=False)
-                yield f"data: {event_data}\n\n"
+    # Subscribe to trace_bus and attach the initial SSE queue BEFORE starting the worker thread so step #1 is never missed
+    unsub_trace = trace_bus.subscribe(active_run.publish_trace, thread_id=conversation_id)
+    initial_subscription = active_run.subscribe()
 
-                # Stop streaming after terminal events
-                if event.get("type") in ("done", "error"):
-                    break
-        finally:
-            unsubscribe() # Clean up global trace subscription when stream ends
+    try:
+        pipeline_thread = threading.Thread(
+            target=_run_pipeline,
+            args=(active_run, unsub_trace, request.model_tier),
+            daemon=True,
+        )
+        pipeline_thread.start()
+    except Exception:
+        active_run.unsubscribe(initial_subscription[2])
+        unsub_trace()
+        unregister_cancel_event(conversation_id)
+        with _active_runs_lock:
+            if _active_runs.get(conversation_id) is active_run:
+                _active_runs.pop(conversation_id, None)
+        raise
 
-    # Return StreamingResponse with SSE headers (no caching, keep-alive, no reverse proxy buffering)
     return StreamingResponse(
-        event_generator(),
+        _stream_active_run(active_run, req, initial_subscription=initial_subscription),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=SSE_HEADERS,
+    )
+
+
+# Active-run discovery routes (placed before parameterized /{conversation_id} catch-alls)
+@router.get("/ask/active")
+async def list_active_runs():
+    """Returns metadata snapshots for every conversation currently executing an agent turn in the background."""
+    with _active_runs_lock:
+        runs = [
+            run.snapshot_status()
+            for run in _active_runs.values()
+            if not run.is_stopped and run.terminal_event is None
+        ]
+    return {"active_runs": runs}
+
+
+@router.get("/ask/active/{conversation_id}")
+async def get_active_run_status(conversation_id: str):
+    """Checks whether a specific conversation has an in-flight agent turn that the UI can re-attach to."""
+    with _active_runs_lock:
+        run = _active_runs.get(conversation_id)
+        if run and not run.is_stopped and run.terminal_event is None:
+            return run.snapshot_status()
+    return {"active": False, "conversation_id": conversation_id}
+
+
+@router.get("/ask/stream/{conversation_id}")
+async def reattach_brain_stream(conversation_id: str, req: Request):
+    """
+    Re-attaches a returning client to an in-flight conversation stream via SSE.
+    Replays all trace steps captured since the turn began, then streams remaining live steps until completion.
+    If the run finished right before connection arrived, emits a `sync_required` event so the UI fetches history.
+    """
+    with _active_runs_lock:
+        active_run = _active_runs.get(conversation_id)
+
+    if not active_run:
+        # Run already completed (or never existed); instruct client to reconcile with SQLite history
+        async def sync_generator():
+            payload = {
+                "type": "sync_required",
+                "conversation_id": conversation_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            yield f"data: {_safe_json_dumps(payload)}\n\n"
+
+        return StreamingResponse(
+            sync_generator(),
+            media_type="text/event-stream",
+            headers=SSE_HEADERS,
+        )
+
+    return StreamingResponse(
+        _stream_active_run(active_run, req),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
     )
 
 
@@ -812,23 +1046,7 @@ async def stop_and_revert_turn(req: StopAndRevertRequest):
     with _active_runs_lock:
         active_run = _active_runs.get(conv_id)
         if active_run:
-            active_run.is_stopped = True
-            active_run.cancel_event.set()
-            # Push clean interruption notice onto SSE event queue so frontend terminates streaming immediately
-            try:
-                active_run.event_queue.put({
-                    "type": "info",
-                    "message": "⏹ Execution stopped and reverted by user.",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
-                active_run.event_queue.put({
-                    "type": "done",
-                    "response": "",
-                    "stopped": True,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
-            except Exception:
-                pass
+            _cancel_active_run_record(active_run)
 
     # Phase 2: Cancel all staged unapproved HITL transactions for this thread
     cancelled_tx_ids = cancel_pending_transactions_for_conversation(conv_id)

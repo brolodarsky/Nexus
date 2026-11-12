@@ -311,5 +311,29 @@ export async function stopAndRevertTurn(
   });
 }
 
+// Interface describing the runtime state of an in-flight background turn returned by /api/agents/ask/active
+export interface ActiveRunStatus {
+  active: boolean;                 // True when a background pipeline thread is currently executing for this conversation
+  conversation_id: string;         // Target conversation UUID
+  query?: string;                  // User prompt currently being processed
+  model_tier?: string | null;      // Model tier selected for this active turn
+  model_name?: string | null;      // Concrete model identifier executing this turn (e.g. "gemini-4-argon")
+  model_label?: string | null;     // Formatted model label for the live status indicator
+  user_message_id?: number | null; // SQLite messages.id assigned to the turn's user message
+  started_at?: string;             // ISO-8601 UTC start timestamp
+  step_count?: number;             // Number of trace events buffered so far on the server
+  is_stopped?: boolean;            // Whether Stop & Revert has been signaled for this run
+}
+
+// Fetches all currently active background conversation turns (used for sidebar running indicators)
+export async function getActiveRuns(): Promise<{ active_runs: ActiveRunStatus[] }> {
+  return apiFetch<{ active_runs: ActiveRunStatus[] }>("/api/agents/ask/active");
+}
+
+// Checks whether a specific conversation has an active in-flight turn that the UI can re-attach to
+export async function getActiveRunStatus(conversationId: string): Promise<ActiveRunStatus> {
+  return apiFetch<ActiveRunStatus>(`/api/agents/ask/active/${encodeURIComponent(conversationId)}`);
+}
+
 
 

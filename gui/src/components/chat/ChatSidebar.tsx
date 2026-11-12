@@ -25,6 +25,7 @@ import {
 // - modelOptions: available LLM tiers returned by GET /api/agents/models
 // - selectedModelTier: currently selected model tier ID ("strong", "medium", "low")
 // - drafts: optional dictionary mapping conversation IDs (and DRAFT_NEW_KEY) to unsubmitted prompt drafts
+// - activeRunConvIds: optional array of conversation UUIDs currently executing an agent turn in the background
 // - onToggleCollapse: callback invoked to expand or collapse the desktop conversation history panel
 // - onCloseMobile: optional callback invoked to close the mobile slide-over drawer
 // - onSelectConversation: callback invoked when the user clicks a conversation row
@@ -37,6 +38,7 @@ export interface ChatSidebarProps {
   modelOptions: ModelOption[];
   selectedModelTier: string;
   drafts?: Record<string, string>;
+  activeRunConvIds?: string[];
   onToggleCollapse: (collapsed: boolean) => void;
   onCloseMobile?: () => void;
   onSelectConversation: (id: string) => void;
@@ -51,6 +53,7 @@ const ChatSidebar = memo(function ChatSidebar({
   modelOptions,
   selectedModelTier,
   drafts,
+  activeRunConvIds,
   onToggleCollapse,
   onCloseMobile,
   onSelectConversation,
@@ -58,6 +61,8 @@ const ChatSidebar = memo(function ChatSidebar({
 }: ChatSidebarProps) {
   // collapsedParentIds: tracks which parent conversation UUIDs have their child branch trees collapsed in the sidebar
   const [collapsedParentIds, setCollapsedParentIds] = useState<Record<string, boolean>>({});
+  // activeRunSet: O(1) lookup set of conversation UUIDs currently executing in the background
+  const activeRunSet = useMemo(() => new Set(activeRunConvIds ?? []), [activeRunConvIds]);
 
   // Flattens `conversations` into a depth-annotated tree list so child branches render nested beneath their parent
   const treeRows = useMemo(() => {
@@ -262,6 +267,7 @@ const ChatSidebar = memo(function ChatSidebar({
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {treeRows.map(({ conv, depth, childCount, isBranchCollapsed }) => {
           const hasDraft = Boolean(drafts?.[conv.id]?.trim());
+          const isRunning = activeRunSet.has(conv.id);
 
           return (
             <div
@@ -278,7 +284,7 @@ const ChatSidebar = memo(function ChatSidebar({
                   ? "bg-bg-tertiary text-text-primary"
                   : "text-text-secondary hover:bg-bg-tertiary/50"
               }`}
-              title={`${conv.title}${conv.merged_at ? " (Merged to parent)" : ""}${hasDraft ? " (Draft saved)" : ""}`}
+              title={`${conv.title}${isRunning ? " (Agent running)" : ""}${conv.merged_at ? " (Merged to parent)" : ""}${hasDraft ? " (Draft saved)" : ""}`}
             >
               {/* Conversation title: takes full available row width without reserved sibling space; truncates with ellipsis */}
               <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center">
@@ -292,6 +298,12 @@ const ChatSidebar = memo(function ChatSidebar({
                     >
                       {isBranchCollapsed ? `▸${childCount}` : "▾"}
                     </button>
+                  )}
+                  {isRunning && (
+                    <span
+                      className="w-2 h-2 rounded-full bg-accent-cyan animate-pulse shrink-0"
+                      title="Agent executing in background"
+                    />
                   )}
                   <span className="truncate font-medium">{conv.title}</span>
                   {conv.merged_at && (
@@ -356,6 +368,7 @@ const ChatSidebar = memo(function ChatSidebar({
           <div className="mt-4 flex-1 overflow-y-auto space-y-1.5 w-full px-2 flex flex-col items-center">
             {conversations.map((conv) => {
               const hasDraft = Boolean(drafts?.[conv.id]?.trim());
+              const isRunning = activeRunSet.has(conv.id);
               return (
                 <button
                   key={conv.id}
@@ -364,12 +377,14 @@ const ChatSidebar = memo(function ChatSidebar({
                     ? "bg-accent-cyan/20 text-accent-cyan border border-accent-cyan/40 shadow-[0_0_10px_rgba(56,189,248,0.15)] font-bold"
                     : "text-text-muted hover:text-text-primary hover:bg-bg-tertiary"
                     }`}
-                  title={`${conv.title}${hasDraft ? " (Draft saved)" : ""}`}
+                  title={`${conv.title}${isRunning ? " (Agent running)" : ""}${hasDraft ? " (Draft saved)" : ""}`}
                 >
                   💬
-                  {hasDraft && (
+                  {isRunning ? (
+                    <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-cyan animate-pulse border border-bg-secondary" />
+                  ) : hasDraft ? (
                     <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-cyan border border-bg-secondary" />
-                  )}
+                  ) : null}
                 </button>
               );
             })}

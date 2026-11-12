@@ -7,9 +7,12 @@
  * delegating all UI presentation to modular subcomponents in `@/components/chat`.
  */
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   askBrainStream,
+  attachBrainStream,
+  getActiveRuns,
+  getActiveRunStatus,
   getAvailableModels,
   getChatHistory,
   getConversations,
@@ -21,6 +24,9 @@ import {
   clearBoardBulletins,
   deleteBoardBulletin,
   stopAndRevertTurn,
+  type ActiveRunStatus,
+  type BrainStreamCallbacks,
+  type ChatHistoryEntry,
   type Conversation,
   type TraceEvent,
   type BoardBulletin,
@@ -50,6 +56,19 @@ import {
   type ChatDraftMap,
 } from "@/components/chat";
 
+// Compares SQLite history records against currently rendered messages so focus/poll reconciliations skip no-op re-renders
+function historyMatchesMessages(history: ChatHistoryEntry[], current: Message[]): boolean {
+  if (history.length !== current.length) return false;
+  for (let i = 0; i < history.length; i++) {
+    const h = history[i];
+    const m = current[i];
+    if (h.id !== m.id || h.role !== m.role || h.content !== m.content) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
@@ -76,8 +95,32 @@ export default function ChatPage() {
   const [selectedModelTier, setSelectedModelTier] = useState<string>("strong");
   // Staged image attachments uploaded via composer or clipboard paste for the upcoming turn
   const [pendingImages, setPendingImages] = useState<string[]>([]);
+  // activeRunIds: UUIDs of conversations currently executing a background turn on the server (shown as pulsing dots in sidebar)
+  const [activeRunIds, setActiveRunIds] = useState<string[]>([]);
+  // activeRunModel: model metadata for the currently streaming/re-attached turn so status banner matches even across switches
+  const [activeRunModel, setActiveRunModel] = useState<{
+    tier?: string | null;
+    name?: string | null;
+    label?: string | null;
+  } | null>(null);
 
   const liveTraceRef = useRef<TraceEvent[]>([]);
+  // activeConvIdRef / messagesRef / loadingRef / activeRunIdsRef: mirror React state for async timers and focus handlers
+  const activeConvIdRef = useRef<string | null>(null);
+  const messagesRef = useRef<Message[]>([]);
+  const loadingRef = useRef<boolean>(false);
+  const activeRunIdsRef = useRef<string[]>([]);
+  // modelOptionsRef / selectedModelTierRef: mirror model state for stable stream callbacks
+  const modelOptionsRef = useRef<ModelOption[]>(FALLBACK_MODELS);
+  const selectedModelTierRef = useRef<string>("strong");
+  // lastSseActivityAtRef: tracks timestamp of last received SSE chunk/heartbeat to detect half-open or tab-frozen sockets
+  const lastSseActivityAtRef = useRef<number>(0);
+  // lastCompletedTurnRef: suppresses redundant polling reconciliations right after a clean live 'done' / 'sync_required'
+  const lastCompletedTurnRef = useRef<{ convId: string; at: number } | null>(null);
+  // missingRunSinceRef: tracks when an active conversation disappeared from /ask/active before SSE settled
+  const missingRunSinceRef = useRef<Record<string, number>>({});
+  // lastFocusSyncAtRef: throttles simultaneous focus + visibilitychange + online recovery events
+  const lastFocusSyncAtRef = useRef<number>(0);
   // currentInputRef: holds the live unsubmitted string in the composer so submit/switch callbacks read it without re-rendering ChatPage on every keystroke
   const currentInputRef = useRef<string>("");
   // draftsRef: mutable ref holding current drafts dictionary to avoid stale closures in event handlers
@@ -93,6 +136,31 @@ export default function ChatPage() {
   const isInitialLoadDoneRef = useRef<boolean>(false);
   // activeStreamConvIdRef: tracks which conversation thread currently owns an active SSE stream to guard against race conditions
   const activeStreamConvIdRef = useRef<string | null>(null);
+
+  // Keep mirror refs synchronized with React state after commits
+  useEffect(() => {
+    activeConvIdRef.current = activeConvId;
+  }, [activeConvId]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
+  useEffect(() => {
+    activeRunIdsRef.current = activeRunIds;
+  }, [activeRunIds]);
+
+  useEffect(() => {
+    modelOptionsRef.current = modelOptions;
+  }, [modelOptions]);
+
+  useEffect(() => {
+    selectedModelTierRef.current = selectedModelTier;
+  }, [selectedModelTier]);
 
   // Programmatically sets the composer input value and increments `inputSyncId` so `ChatInputBar` snaps to `nextText`
   const setProgrammaticInput = useCallback((nextText: string) => {
@@ -110,16 +178,21 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Helper to fetch recent bulletins from `/api/board` scoped to active conversation
-  const refreshBoard = useCallback(() => {
-    if (!activeConvId) {
+  // Fetches recent bulletins from `/api/board` scoped to the target (or currently active) conversation
+  const refreshBoard = useCallback((targetConvId?: string | null) => {
+    const convId = targetConvId !== undefined ? targetConvId : activeConvIdRef.current;
+    if (!convId) {
       setBulletins([]);
       return;
     }
-    getBoardBulletins(25, activeConvId)
-      .then((res) => setBulletins(res.bulletins || []))
+    getBoardBulletins(25, convId)
+      .then((res) => {
+        if (activeConvIdRef.current === convId) {
+          setBulletins(res.bulletins || []);
+        }
+      })
       .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
-  }, [activeConvId]);
+  }, []);
 
   // Appends newly uploaded image URLs to the staged attachments list
   const handleAddImages = useCallback((urls: string[]) => {
@@ -217,6 +290,10 @@ export default function ChatPage() {
       })
       .catch((err) => console.error("Failed to load available models:", err));
 
+    getActiveRuns()
+      .then((res) => setActiveRunIds(res.active_runs.map((r) => r.conversation_id)))
+      .catch(() => {});
+
     getConversations()
       .then((convos) => {
         setConversations(convos);
@@ -232,6 +309,7 @@ export default function ChatPage() {
           } catch {
             // Gracefully fallback to the most recent conversation
           }
+          activeConvIdRef.current = targetId;
           setActiveConvId(targetId);
           setProgrammaticInput(draftsRef.current[targetId] ?? "");
           try {
@@ -240,6 +318,7 @@ export default function ChatPage() {
             // Ignore storage quota errors
           }
         } else {
+          activeConvIdRef.current = null;
           setActiveConvId(null);
           setProgrammaticInput(draftsRef.current[DRAFT_NEW_KEY] ?? "");
         }
@@ -263,45 +342,403 @@ export default function ChatPage() {
     inputRef.current?.focus();
   }, []);
 
-  // Fetch messages and sync Blackboard bulletins when active conversation changes
+  // Helper building unified SSE stream callbacks shared between fresh submissions and mid-turn re-attachments
+  const createStreamCallbacks = useCallback(
+    (
+      targetConvId: string,
+      options?: {
+        isNewConv?: boolean;
+        fallbackModelTier?: string | null;
+        fallbackModelName?: string | null;
+        reconnectAttempt?: number;
+        minReplyHistoryLength?: number;
+      }
+    ): BrainStreamCallbacks => {
+      // Recursive inner builder avoids self-referencing the outer `useCallback` binding before initialization
+      const buildCallbacks = (attempt: number, attemptOptions?: typeof options): BrainStreamCallbacks => {
+        const isNewConv = Boolean(attemptOptions?.isNewConv);
+        const minReplyLen = attemptOptions?.minReplyHistoryLength;
+
+        const hasCommittedAssistantReply = (history: ChatHistoryEntry[]) => {
+          const lastEntry = history[history.length - 1];
+          if (!lastEntry || lastEntry.role !== "assistant") return false;
+          return minReplyLen === undefined || history.length >= minReplyLen;
+        };
+
+        // Clear local live stream flags and optionally remove thread from sidebar active indicator
+        const finishLocalStream = (clearActiveRunBadge: boolean) => {
+          delete missingRunSinceRef.current[targetConvId];
+          setLiveTrace([]);
+          liveTraceRef.current = [];
+          setLoading(false);
+          setActiveRunModel(null);
+          activeStreamConvIdRef.current = null;
+          abortRef.current = null;
+          if (clearActiveRunBadge) {
+            setActiveRunIds((prev) => prev.filter((id) => id !== targetConvId));
+          }
+        };
+
+        // Resolve history ground-truth and synchronize UI state after completion or sync fallback
+        const reconcileHistoryFromServer = async () => {
+          const history = await getChatHistory(targetConvId);
+          if (activeConvIdRef.current !== targetConvId) return;
+          setMessages(mapHistoryEntriesToMessages(history));
+          lastCompletedTurnRef.current = { convId: targetConvId, at: Date.now() };
+          finishLocalStream(true);
+          inputRef.current?.focus();
+          getConversations().then(setConversations).catch(() => {});
+          refreshBoard(targetConvId);
+        };
+
+        return {
+          onActivity: () => {
+            if (activeStreamConvIdRef.current === targetConvId) {
+              lastSseActivityAtRef.current = Date.now();
+            }
+          },
+          onTrace: (event) => {
+            // Guard against stale stream callbacks if the user switched conversations
+            if (activeStreamConvIdRef.current !== targetConvId) return;
+            lastSseActivityAtRef.current = Date.now();
+
+            setLiveTrace((prev) => {
+              // Deduplicate events by id to protect against re-deliveries or duplicate stream packets
+              if (event.id && prev.some((e) => e.id === event.id)) {
+                return prev;
+              }
+              const newTrace = [...prev, event];
+              liveTraceRef.current = newTrace;
+              return newTrace;
+            });
+            // Live-refresh the Blackboard whenever a subagent posts a bulletin or completes
+            if (
+              event.message?.includes("Blackboard") ||
+              event.data?.tool === "post_to_board" ||
+              (event.agent === "Subagent" && event.type === "agent_end")
+            ) {
+              refreshBoard(targetConvId);
+            }
+          },
+          onDone: (event) => {
+            setActiveRunIds((prev) => prev.filter((id) => id !== targetConvId));
+            // Guard against applying final response if user switched away to a different conversation
+            if (activeStreamConvIdRef.current !== targetConvId) return;
+
+            const doneEvt = event as unknown as Record<string, unknown>;
+            // If Stop & Revert halted execution cleanly (e.g. triggered from another tab), reload clean DB state
+            if (doneEvt.stopped) {
+              reconcileHistoryFromServer().catch(() => finishLocalStream(true));
+              return;
+            }
+
+            const currentOptions = modelOptionsRef.current;
+            const fallbackTier = attemptOptions?.fallbackModelTier ?? selectedModelTierRef.current;
+            const matchedOpt =
+              currentOptions.find((m) => m.id === fallbackTier) ?? currentOptions[0];
+            const { modelTier, modelName } = extractTurnModelInfo(
+              liveTraceRef.current,
+              (doneEvt.model_tier as string | null) ?? null,
+              (doneEvt.model_name as string | null) ?? null
+            );
+            const effectiveTier = modelTier ?? attemptOptions?.fallbackModelTier ?? matchedOpt?.tier ?? fallbackTier;
+            const effectiveName = modelName ?? attemptOptions?.fallbackModelName ?? matchedOpt?.model_name ?? null;
+            const costUsd =
+              (typeof doneEvt.cost_usd === "number" ? doneEvt.cost_usd : null) ??
+              extractTurnCost(liveTraceRef.current, null, effectiveName, effectiveTier);
+            const userMsgId = typeof doneEvt.user_message_id === "number" ? doneEvt.user_message_id : undefined;
+            const assistantMsgId =
+              typeof doneEvt.assistant_message_id === "number" ? doneEvt.assistant_message_id : undefined;
+
+            const assistantMsg: Message = {
+              id: assistantMsgId,
+              role: "assistant",
+              content: event.response ?? "",
+              timestamp: new Date(event.timestamp),
+              agent: doneEvt.agent as string | undefined,
+              domain: (doneEvt.domain as string | null) ?? null,
+              confidence: (doneEvt.confidence as number | null) ?? null,
+              modelTier: effectiveTier,
+              modelName: effectiveName,
+              costUsd,
+              trace: liveTraceRef.current,
+              hasTrace: liveTraceRef.current.length > 0,
+            };
+            setMessages((msgs) => {
+              // Avoid appending duplicate bubble if history reconciliation already loaded this message ID
+              if (assistantMsgId !== undefined && msgs.some((m) => m.id === assistantMsgId)) {
+                return msgs;
+              }
+              const updated = [...msgs];
+              // Attach the SQLite `user_message_id` to the user prompt that initiated this turn
+              if (userMsgId !== undefined && updated.length > 0 && updated[updated.length - 1].role === "user") {
+                updated[updated.length - 1] = { ...updated[updated.length - 1], id: userMsgId };
+              }
+              return [...updated, assistantMsg];
+            });
+            lastCompletedTurnRef.current = { convId: targetConvId, at: Date.now() };
+            finishLocalStream(true);
+            inputRef.current?.focus();
+            getConversations()
+              .then((updatedList) => {
+                setConversations(updatedList);
+                // For a newly initialized conversation thread, automatically generate a concise topic title with AI
+                if (isNewConv && targetConvId) {
+                  autoGenerateConversationTitle(targetConvId)
+                    .then((titleRes) => {
+                      if (titleRes.title) {
+                        setConversations((prev) =>
+                          prev.map((c) =>
+                            c.id === targetConvId ? { ...c, title: titleRes.title! } : c
+                          )
+                        );
+                      }
+                    })
+                    .catch((err) =>
+                      console.error("Failed to auto-generate title on first turn:", err)
+                    );
+                }
+              })
+              .catch(() => {});
+            refreshBoard(targetConvId);
+          },
+          onSyncRequired: () => {
+            setActiveRunIds((prev) => prev.filter((id) => id !== targetConvId));
+            if (activeStreamConvIdRef.current !== targetConvId) return;
+            reconcileHistoryFromServer().catch(() => finishLocalStream(true));
+          },
+          onError: async (errorMessage) => {
+            // Guard against applying errors if user switched away to a different conversation
+            if (activeStreamConvIdRef.current !== targetConvId) return;
+
+            // Step 1: Probe backend run status (retrying briefly across transient restarts/network blips)
+            let activeStatus: ActiveRunStatus | null = null;
+            for (let probe = 0; probe < 3; probe++) {
+              try {
+                activeStatus = await getActiveRunStatus(targetConvId);
+                break;
+              } catch {
+                if (probe < 2) {
+                  await new Promise((resolve) => setTimeout(resolve, 1500));
+                  if (activeStreamConvIdRef.current !== targetConvId) return;
+                }
+              }
+            }
+
+            if (activeStreamConvIdRef.current !== targetConvId) return;
+            if (activeStatus?.active && attempt < 12) {
+              const backoffMs = Math.min(5000, Math.round(1000 * Math.pow(1.4, attempt)));
+              await new Promise((resolve) => setTimeout(resolve, backoffMs));
+              if (activeStreamConvIdRef.current !== targetConvId) return;
+              // Reset and replay clean server backlog so re-attached steps have zero gaps or duplicates
+              setLiveTrace([]);
+              liveTraceRef.current = [];
+              lastSseActivityAtRef.current = Date.now();
+              const reattachAbort = attachBrainStream(
+                targetConvId,
+                buildCallbacks(attempt + 1, {
+                  ...attemptOptions,
+                  fallbackModelTier: activeStatus.model_tier ?? attemptOptions?.fallbackModelTier,
+                  fallbackModelName: activeStatus.model_name ?? attemptOptions?.fallbackModelName,
+                })
+              );
+              if (activeStreamConvIdRef.current !== targetConvId) {
+                reattachAbort();
+                return;
+              }
+              abortRef.current = reattachAbort;
+              return;
+            }
+
+            setActiveRunIds((prev) => prev.filter((id) => id !== targetConvId));
+
+            // Step 2: Check if the backend finished and logged a new assistant response to chats.db
+            try {
+              const history = await getChatHistory(targetConvId);
+              if (activeStreamConvIdRef.current !== targetConvId) return;
+              if (hasCommittedAssistantReply(history)) {
+                setMessages(mapHistoryEntriesToMessages(history));
+                lastCompletedTurnRef.current = { convId: targetConvId, at: Date.now() };
+                finishLocalStream(true);
+                inputRef.current?.focus();
+                getConversations().then(setConversations).catch(() => {});
+                refreshBoard(targetConvId);
+                return;
+              }
+            } catch {
+              // Ignore history check error and fall back to polling
+            }
+
+            // Step 3: Poll up to 5 times (every 2s) in case the background thread is finishing its DB commit
+            let recovered = false;
+            for (let pollIdx = 0; pollIdx < 5; pollIdx++) {
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              if (activeStreamConvIdRef.current !== targetConvId) return;
+              try {
+                const polled = await getChatHistory(targetConvId);
+                if (activeStreamConvIdRef.current !== targetConvId) return;
+                if (hasCommittedAssistantReply(polled)) {
+                  setMessages(mapHistoryEntriesToMessages(polled));
+                  lastCompletedTurnRef.current = { convId: targetConvId, at: Date.now() };
+                  finishLocalStream(true);
+                  inputRef.current?.focus();
+                  getConversations().then(setConversations).catch(() => {});
+                  refreshBoard(targetConvId);
+                  recovered = true;
+                  break;
+                }
+              } catch {
+                // Continue polling
+              }
+            }
+
+            if (!recovered && activeStreamConvIdRef.current === targetConvId) {
+              const currentOptions = modelOptionsRef.current;
+              const fallbackTier = attemptOptions?.fallbackModelTier ?? selectedModelTierRef.current;
+              const matchedOpt =
+                currentOptions.find((m) => m.id === fallbackTier) ?? currentOptions[0];
+              const errorMsg: Message = {
+                role: "assistant",
+                content: `❌ ${errorMessage}`,
+                timestamp: new Date(),
+                modelTier: attemptOptions?.fallbackModelTier ?? matchedOpt?.tier ?? fallbackTier,
+                modelName: attemptOptions?.fallbackModelName ?? matchedOpt?.model_name ?? null,
+                trace: liveTraceRef.current.length > 0 ? liveTraceRef.current : undefined,
+                hasTrace: liveTraceRef.current.length > 0,
+              };
+              setMessages((msgs) => [...msgs, errorMsg]);
+              finishLocalStream(true);
+              inputRef.current?.focus();
+            }
+          },
+        };
+      };
+
+      return buildCallbacks(options?.reconnectAttempt ?? 0, options);
+    },
+    [refreshBoard]
+  );
+
+  // Loads persisted history for `convId` and seamlessly re-attaches the live Thinking Panel if a background run is active
+  const syncConversation = useCallback(
+    async (
+      convId: string,
+      isCancelled?: () => boolean,
+      options?: { forceReattach?: boolean }
+    ) => {
+      try {
+        // Query active-run status BEFORE history so post-completion SQLite commits are never missed in a race window
+        const fallbackStatus: ActiveRunStatus = { active: false, conversation_id: convId };
+        const [activeStatus, activeListRes] = await Promise.all([
+          getActiveRunStatus(convId).catch(() => fallbackStatus),
+          getActiveRuns().catch(() => null),
+        ]);
+        if (isCancelled?.() || activeConvIdRef.current !== convId) return;
+
+        if (activeListRes) {
+          setActiveRunIds(activeListRes.active_runs.map((r) => r.conversation_id));
+        }
+
+        const history = await getChatHistory(convId);
+        if (isCancelled?.() || activeConvIdRef.current !== convId) return;
+
+        if (!historyMatchesMessages(history, messagesRef.current)) {
+          setMessages(mapHistoryEntriesToMessages(history));
+        }
+
+        // Guard against the sub-millisecond case where the run persisted its assistant reply right before history read
+        const alreadyCommittedAssistant =
+          activeStatus.active &&
+          typeof activeStatus.user_message_id === "number" &&
+          history.some(
+            (m) =>
+              m.role === "assistant" &&
+              typeof m.id === "number" &&
+              m.id > activeStatus.user_message_id!
+          );
+
+        if (activeStatus.active && !alreadyCommittedAssistant) {
+          // Guard against racing with an already healthy stream on this same conversation unless caller requested stale recovery
+          if (activeStreamConvIdRef.current === convId) {
+            if (!options?.forceReattach) return;
+            abortRef.current?.();
+            abortRef.current = null;
+            activeStreamConvIdRef.current = null;
+          }
+
+          activeStreamConvIdRef.current = convId;
+          lastSseActivityAtRef.current = Date.now();
+          delete missingRunSinceRef.current[convId];
+          setActiveRunModel({
+            tier: activeStatus.model_tier ?? null,
+            name: activeStatus.model_name ?? null,
+            label: activeStatus.model_label ?? null,
+          });
+          setLiveTrace([]);
+          liveTraceRef.current = [];
+          setLoading(true);
+
+          const abort = attachBrainStream(
+            convId,
+            createStreamCallbacks(convId, {
+              fallbackModelTier: activeStatus.model_tier ?? null,
+              fallbackModelName: activeStatus.model_name ?? null,
+              minReplyHistoryLength: history.length + 1,
+            })
+          );
+          if (isCancelled?.() || activeConvIdRef.current !== convId) {
+            abort();
+            return;
+          }
+          abortRef.current = abort;
+        } else {
+          // Ensure any hung/orphaned stream state for this conversation clears cleanly now that server run is done
+          if (activeStreamConvIdRef.current === convId) {
+            abortRef.current?.();
+            abortRef.current = null;
+            activeStreamConvIdRef.current = null;
+          }
+          delete missingRunSinceRef.current[convId];
+          setLiveTrace([]);
+          liveTraceRef.current = [];
+          setActiveRunModel(null);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (!isCancelled?.()) {
+          console.error("Failed to load chat history:", err);
+          setLoading(false);
+        }
+      }
+    },
+    [createStreamCallbacks]
+  );
+
+  // Fetch messages, sync Blackboard bulletins, and re-attach any live run when active conversation changes
   useEffect(() => {
     if (!activeConvId) {
       queueMicrotask(() => {
         setMessages([]);
         setBulletins([]);
+        setActiveRunModel(null);
       });
       return;
     }
     // Sync thread-isolated blackboard bulletins for this conversation
-    getBoardBulletins(25, activeConvId)
-      .then((res) => setBulletins(res.bulletins || []))
-      .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
+    refreshBoard(activeConvId);
 
-    // If an SSE agent response stream is actively in-flight for this thread,
+    // If an SSE agent response stream is actively in-flight for this thread (e.g. just initiated in handleSubmit),
     // do not let initial history fetch wipe out live streaming messages or reset loading state
     if (activeStreamConvIdRef.current === activeConvId) {
       return;
     }
 
     let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setLoading(true);
-    });
-    getChatHistory(activeConvId)
-      .then((history) => {
-        if (cancelled) return;
-        setMessages(mapHistoryEntriesToMessages(history));
-      })
-      .catch((err) => console.error("Failed to load chat history:", err))
-      .finally(() => {
-        if (!cancelled && activeStreamConvIdRef.current !== activeConvId) {
-          setLoading(false);
-        }
-      });
+    void syncConversation(activeConvId, () => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [activeConvId]);
+  }, [activeConvId, refreshBoard, syncConversation]);
 
   // Auto-focus input when switching conversations
   useEffect(() => {
@@ -323,25 +760,159 @@ export default function ChatPage() {
     }
   }, [activeConvId]);
 
-  // Auto-refresh conversation history when returning to the tab from another window/tab
+  // Watchdog polling `/api/agents/ask/active` whenever runs are in flight or local state is loading,
+  // syncing finished turns automatically if a background/stalled/cross-device SSE stream missed `done`
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (
-        document.visibilityState === "visible" &&
-        activeConvId &&
-        !loading &&
-        activeStreamConvIdRef.current === null
-      ) {
-        getChatHistory(activeConvId)
-          .then((history) => {
-            setMessages(mapHistoryEntriesToMessages(history));
-          })
-          .catch((err) => console.error("Failed to sync chat history on tab focus:", err));
+    if (activeRunIds.length === 0 && !loading) return;
+
+    let cancelled = false;
+    const pollActiveRuns = async () => {
+      try {
+        const res = await getActiveRuns();
+        if (cancelled) return;
+
+        const nextIds = res.active_runs.map((r) => r.conversation_id);
+        const prevIds = activeRunIdsRef.current;
+        const finishedIds = prevIds.filter((id) => !nextIds.includes(id));
+
+        const idsChanged =
+          prevIds.length !== nextIds.length ||
+          prevIds.some((id) => !nextIds.includes(id)) ||
+          nextIds.some((id) => !prevIds.includes(id));
+        if (idsChanged) {
+          setActiveRunIds(nextIds);
+        }
+        if (finishedIds.length > 0) {
+          getConversations().then(setConversations).catch(() => {});
+        }
+
+        const convId = activeConvIdRef.current;
+        if (!convId) return;
+
+        if (nextIds.includes(convId)) {
+          delete missingRunSinceRef.current[convId];
+          // Attach automatically if this thread started executing from another client (e.g. phone/Telegram)
+          if (!loadingRef.current && activeStreamConvIdRef.current !== convId) {
+            void syncConversation(convId);
+            return;
+          }
+          // Self-heal if our open SSE socket missed 2+ backend 10s keepalives while run is still active
+          if (
+            loadingRef.current &&
+            activeStreamConvIdRef.current === convId &&
+            lastSseActivityAtRef.current > 0 &&
+            Date.now() - lastSseActivityAtRef.current > 20_000
+          ) {
+            void syncConversation(convId, undefined, { forceReattach: true });
+          }
+          return;
+        }
+
+        // `convId` is not active on the server; reconcile if UI is still loading or missed a remote completion
+        const justDoneViaSse =
+          lastCompletedTurnRef.current?.convId === convId &&
+          Date.now() - lastCompletedTurnRef.current.at < 15_000;
+
+        if (loadingRef.current || (finishedIds.includes(convId) && !justDoneViaSse)) {
+          const now = Date.now();
+          const firstMissing = missingRunSinceRef.current[convId] ?? now;
+          missingRunSinceRef.current[convId] = firstMissing;
+
+          const socketWentSilent =
+            lastSseActivityAtRef.current > 0 && now - lastSseActivityAtRef.current >= 15_000;
+          // Allow ~2.5s grace for initial POST registration or same-tick 'done' frames before forcing DB sync
+          if (now - firstMissing >= 2500 || socketWentSilent || activeStreamConvIdRef.current !== convId) {
+            delete missingRunSinceRef.current[convId];
+            void syncConversation(convId, undefined, { forceReattach: true });
+            refreshBoard(convId);
+          }
+        }
+      } catch {
+        // Ignore transient network failures during background active-run checks
       }
     };
+
+    const timer = setInterval(() => {
+      void pollActiveRuns();
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeRunIds.length, loading, refreshBoard, syncConversation]);
+
+  // Recover stalled/completed conversations when the tab becomes visible, window regains focus, or network comes online
+  useEffect(() => {
+    const recoverActiveView = async () => {
+      const now = Date.now();
+      if (now - lastFocusSyncAtRef.current < 800) return;
+      lastFocusSyncAtRef.current = now;
+
+      // Refresh global active indicators and sidebar list cleanly
+      getActiveRuns()
+        .then((res) => {
+          const nextIds = res.active_runs.map((r) => r.conversation_id);
+          const prevIds = activeRunIdsRef.current;
+          if (prevIds.some((id) => !nextIds.includes(id))) {
+            getConversations().then(setConversations).catch(() => {});
+          }
+          setActiveRunIds(nextIds);
+        })
+        .catch(() => {});
+
+      const convId = activeConvIdRef.current;
+      if (!convId) return;
+
+      try {
+        const status = await getActiveRunStatus(convId);
+        if (activeConvIdRef.current !== convId) return;
+
+        if (!status.active) {
+          if (loadingRef.current || activeStreamConvIdRef.current === convId) {
+            if (abortRef.current) {
+              abortRef.current();
+              abortRef.current = null;
+            }
+            activeStreamConvIdRef.current = null;
+          }
+          await syncConversation(convId);
+          refreshBoard(convId);
+          getConversations().then(setConversations).catch(() => {});
+        } else {
+          // Run is still executing on server: attach if unattached, or re-attach if the socket froze while away
+          const socketStale =
+            lastSseActivityAtRef.current > 0 && Date.now() - lastSseActivityAtRef.current > 15_000;
+          if (!loadingRef.current || activeStreamConvIdRef.current !== convId) {
+            await syncConversation(convId);
+          } else if (socketStale) {
+            await syncConversation(convId, undefined, { forceReattach: true });
+          }
+        }
+      } catch {
+        // Ignore transient status failures on focus
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void recoverActiveView();
+      }
+    };
+    const handleWindowResume = () => {
+      if (document.visibilityState === "visible") {
+        void recoverActiveView();
+      }
+    };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [activeConvId, loading]);
+    window.addEventListener("focus", handleWindowResume);
+    window.addEventListener("online", handleWindowResume);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowResume);
+      window.removeEventListener("online", handleWindowResume);
+    };
+  }, [refreshBoard, syncConversation]);
 
   // Clean up SSE stream abort and flush any pending debounced draft writes on unmount or tab unload
   useEffect(() => {
@@ -392,7 +963,7 @@ export default function ChatPage() {
     (newConvId: string) => {
       if (newConvId === activeConvId) return;
 
-      // Cleanly abort in-flight SSE stream if switching away from an actively generating thread
+      // Cleanly detach local SSE stream listener (backend run keeps executing so returning re-attaches)
       if (abortRef.current) {
         abortRef.current();
         abortRef.current = null;
@@ -400,6 +971,7 @@ export default function ChatPage() {
       setLoading(false);
       setLiveTrace([]);
       liveTraceRef.current = [];
+      setActiveRunModel(null);
       activeStreamConvIdRef.current = null;
 
       if (draftPersistTimerRef.current) {
@@ -426,6 +998,7 @@ export default function ChatPage() {
       setPendingImages([]);
 
       // 3. Switch active thread and persist selection
+      activeConvIdRef.current = newConvId;
       setActiveConvId(newConvId);
       try {
         localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, newConvId);
@@ -449,7 +1022,7 @@ export default function ChatPage() {
         return;
       }
 
-      // Cleanly abort in-flight SSE stream if opening a new chat while a turn was streaming
+      // Cleanly detach local SSE stream listener if opening a new chat while a turn was streaming
       if (abortRef.current) {
         abortRef.current();
         abortRef.current = null;
@@ -457,6 +1030,7 @@ export default function ChatPage() {
       setLoading(false);
       setLiveTrace([]);
       liveTraceRef.current = [];
+      setActiveRunModel(null);
       activeStreamConvIdRef.current = null;
 
       if (draftPersistTimerRef.current) {
@@ -483,6 +1057,7 @@ export default function ChatPage() {
       setPendingImages([]);
 
       // 3. Reset active thread to null and persist new chat indicator
+      activeConvIdRef.current = null;
       setActiveConvId(null);
       setMessages([]);
       try {
@@ -508,8 +1083,10 @@ export default function ChatPage() {
         setLoading(false);
         setLiveTrace([]);
         liveTraceRef.current = [];
+        setActiveRunModel(null);
         activeStreamConvIdRef.current = null;
       }
+      setActiveRunIds((prev) => prev.filter((cid) => cid !== id));
 
       await deleteConversation(id);
       const updatedConvs = conversations.filter((c) => c.id !== id);
@@ -529,6 +1106,7 @@ export default function ChatPage() {
 
       if (activeConvId === id) {
         const nextId = updatedConvs.length > 0 ? updatedConvs[0].id : null;
+        activeConvIdRef.current = nextId;
         setActiveConvId(nextId);
         const nextDraft = (nextId ? updatedDrafts[nextId] : updatedDrafts[DRAFT_NEW_KEY]) ?? "";
         setProgrammaticInput(nextDraft);
@@ -605,6 +1183,7 @@ export default function ChatPage() {
         targetConvId = res.conversation_id;
         // Mark active stream thread BEFORE updating activeConvId so useEffect([activeConvId]) doesn't clobber live state
         activeStreamConvIdRef.current = targetConvId;
+        activeConvIdRef.current = targetConvId;
         setActiveConvId(targetConvId);
         try {
           localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, targetConvId);
@@ -619,6 +1198,7 @@ export default function ChatPage() {
 
       const turnModelOption =
         modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
+      const expectedReplyMinLength = messagesRef.current.length + 2;
       const userMsg: Message = {
         role: "user",
         content: query,
@@ -640,6 +1220,17 @@ export default function ChatPage() {
       draftsRef.current = updatedDrafts;
       setDrafts(updatedDrafts);
       persistDrafts(updatedDrafts);
+      if (lastCompletedTurnRef.current?.convId === targetConvId) {
+        lastCompletedTurnRef.current = null;
+      }
+      delete missingRunSinceRef.current[targetConvId];
+      lastSseActivityAtRef.current = Date.now();
+      setActiveRunModel({
+        tier: turnModelOption?.tier ?? selectedModelTier,
+        name: turnModelOption?.model_name ?? null,
+        label: turnModelOption?.label ?? selectedModelTier,
+      });
+      setActiveRunIds((prev) => (prev.includes(targetConvId) ? prev : [...prev, targetConvId]));
       setLoading(true);
       setLiveTrace([]);
       liveTraceRef.current = [];
@@ -647,168 +1238,19 @@ export default function ChatPage() {
       const abort = askBrainStream(
         query || "Analyze the attached image(s).",
         targetConvId,
-        {
-          onTrace: (event) => {
-            // Guard against stale stream callbacks if the user switched conversations
-            if (activeStreamConvIdRef.current !== targetConvId) return;
-
-            setLiveTrace((prev) => {
-              // Deduplicate events by id to protect against re-deliveries or duplicate stream packets
-              if (event.id && prev.some((e) => e.id === event.id)) {
-                return prev;
-              }
-              const newTrace = [...prev, event];
-              liveTraceRef.current = newTrace;
-              return newTrace;
-            });
-            // Live-refresh the Blackboard whenever a subagent posts a bulletin or completes
-            if (
-              event.message?.includes("Blackboard") ||
-              event.data?.tool === "post_to_board" ||
-              (event.agent === "Subagent" && event.type === "agent_end")
-            ) {
-              refreshBoard();
-            }
-          },
-          onDone: (event) => {
-            // Guard against applying final response if user switched away to a different conversation
-            if (activeStreamConvIdRef.current !== targetConvId) return;
-
-            // Build the final message with the full trace and executed model metadata attached
-            const doneEvt = event as unknown as Record<string, unknown>;
-            const { modelTier, modelName } = extractTurnModelInfo(
-              liveTraceRef.current,
-              (doneEvt.model_tier as string | null) ?? null,
-              (doneEvt.model_name as string | null) ?? null
-            );
-            const costUsd =
-              (typeof doneEvt.cost_usd === "number" ? doneEvt.cost_usd : null) ??
-              extractTurnCost(liveTraceRef.current, null, modelName, modelTier);
-            const userMsgId = typeof doneEvt.user_message_id === "number" ? doneEvt.user_message_id : undefined;
-            const assistantMsgId = typeof doneEvt.assistant_message_id === "number" ? doneEvt.assistant_message_id : undefined;
-            const assistantMsg: Message = {
-              id: assistantMsgId,
-              role: "assistant",
-              content: event.response ?? "",
-              timestamp: new Date(event.timestamp),
-              agent: doneEvt.agent as string | undefined,
-              domain: (doneEvt.domain as string | null) ?? null,
-              confidence: (doneEvt.confidence as number | null) ?? null,
-              modelTier: modelTier ?? turnModelOption?.tier ?? selectedModelTier,
-              modelName: modelName ?? turnModelOption?.model_name ?? null,
-              costUsd,
-              trace: liveTraceRef.current,
-            };
-            setMessages((msgs) => {
-              const updated = [...msgs];
-              // Attach the SQLite `user_message_id` to the user prompt that initiated this turn
-              if (userMsgId !== undefined && updated.length > 0 && updated[updated.length - 1].role === "user") {
-                updated[updated.length - 1] = { ...updated[updated.length - 1], id: userMsgId };
-              }
-              return [...updated, assistantMsg];
-            });
-            setLiveTrace([]);
-            liveTraceRef.current = [];
-            setLoading(false);
-            activeStreamConvIdRef.current = null;
-            abortRef.current = null;
-            inputRef.current?.focus();
-            getConversations().then((updatedList) => {
-              setConversations(updatedList);
-              // For a newly initialized conversation thread, automatically generate a concise topic title with AI
-              if (isNewConv && targetConvId) {
-                autoGenerateConversationTitle(targetConvId)
-                  .then((titleRes) => {
-                    if (titleRes.title) {
-                      setConversations((prev) =>
-                        prev.map((c) =>
-                          c.id === targetConvId ? { ...c, title: titleRes.title! } : c
-                        )
-                      );
-                    }
-                  })
-                  .catch((err) =>
-                    console.error("Failed to auto-generate title on first turn:", err)
-                  );
-              }
-            });
-            refreshBoard();
-          },
-          onError: async (errorMessage) => {
-            // Guard against applying errors if user switched away to a different conversation
-            if (activeStreamConvIdRef.current !== targetConvId) return;
-            // First check if the backend actually finished and logged the assistant response to chats.db
-            try {
-              const history = await getChatHistory(targetConvId);
-              const lastEntry = history[history.length - 1];
-              if (lastEntry && lastEntry.role === "assistant") {
-                // Ground truth: backend succeeded and logged to chats.db; reconcile state seamlessly
-                setMessages(mapHistoryEntriesToMessages(history));
-                setLiveTrace([]);
-                liveTraceRef.current = [];
-                setLoading(false);
-                activeStreamConvIdRef.current = null;
-                abortRef.current = null;
-                inputRef.current?.focus();
-                getConversations().then(setConversations);
-                refreshBoard();
-                return;
-              }
-            } catch {
-              // Ignore history check error and fall back to polling
-            }
-
-            // If not found in chats.db yet, poll up to 5 times (every 2s) in case the background thread is still writing
-            let recovered = false;
-            for (let attempt = 0; attempt < 5; attempt++) {
-              await new Promise((resolve) => setTimeout(resolve, 2000));
-              try {
-                const polled = await getChatHistory(targetConvId);
-                const lastPolled = polled[polled.length - 1];
-                if (lastPolled && lastPolled.role === "assistant") {
-                  setMessages(mapHistoryEntriesToMessages(polled));
-                  setLiveTrace([]);
-                  liveTraceRef.current = [];
-                  setLoading(false);
-                  activeStreamConvIdRef.current = null;
-                  abortRef.current = null;
-                  inputRef.current?.focus();
-                  getConversations().then(setConversations);
-                  refreshBoard();
-                  recovered = true;
-                  break;
-                }
-              } catch {
-                // Continue polling
-              }
-            }
-
-            if (!recovered) {
-              const errorMsg: Message = {
-                role: "assistant",
-                content: `❌ ${errorMessage}`,
-                timestamp: new Date(),
-                modelTier: turnModelOption?.tier ?? selectedModelTier,
-                modelName: turnModelOption?.model_name ?? null,
-                trace: liveTraceRef.current.length > 0 ? liveTraceRef.current : undefined,
-              };
-              setMessages((msgs) => [...msgs, errorMsg]);
-              setLiveTrace([]);
-              liveTraceRef.current = [];
-              setLoading(false);
-              activeStreamConvIdRef.current = null;
-              abortRef.current = null;
-              inputRef.current?.focus();
-            }
-          },
-        },
+        createStreamCallbacks(targetConvId, {
+          isNewConv,
+          fallbackModelTier: turnModelOption?.tier ?? selectedModelTier,
+          fallbackModelName: turnModelOption?.model_name ?? null,
+          minReplyHistoryLength: expectedReplyMinLength,
+        }),
         selectedModelTier,
         imagesToSend.length > 0 ? imagesToSend : undefined
       );
 
       abortRef.current = abort;
     },
-    [loading, activeConvId, selectedModelTier, modelOptions, pendingImages, refreshBoard, setProgrammaticInput]
+    [loading, activeConvId, selectedModelTier, modelOptions, pendingImages, createStreamCallbacks, setProgrammaticInput]
   );
 
   // handleStopAndRevert: aborts active stream, halts backend graph execution, purges unapproved HITL mutations,
@@ -822,10 +1264,13 @@ export default function ChatPage() {
       abortRef.current = null;
     }
 
+    delete missingRunSinceRef.current[activeConvId];
     setLoading(false);
     setLiveTrace([]);
     liveTraceRef.current = [];
+    setActiveRunModel(null);
     activeStreamConvIdRef.current = null;
+    setActiveRunIds((prev) => prev.filter((id) => id !== activeConvId));
 
     try {
       // 2. Halt backend execution thread, cancel pending HITL mutations, rollback checkpoints & chats.db
@@ -844,7 +1289,7 @@ export default function ChatPage() {
       setMessages(mapHistoryEntriesToMessages(history));
 
       // 5. Refresh blackboard bulletins and conversations list
-      refreshBoard();
+      refreshBoard(activeConvId);
       getConversations().then(setConversations);
     } catch (err) {
       console.error("Failed to stop and revert turn:", err);
@@ -1007,6 +1452,16 @@ export default function ChatPage() {
   const activeModelOption =
     modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
   const activeModelLabel = activeModelOption?.label ?? selectedModelTier;
+  // Use the running turn's model metadata in the live Thinking Panel banner so switching threads preserves accuracy
+  const liveStatusModelLabel = useMemo(() => {
+    if (!activeRunModel) return activeModelLabel;
+    const matched = modelOptions.find(
+      (m) =>
+        (activeRunModel.name && m.model_name === activeRunModel.name) ||
+        (activeRunModel.tier && m.id === activeRunModel.tier)
+    );
+    return matched?.label ?? activeRunModel.label ?? activeRunModel.name ?? activeModelLabel;
+  }, [activeRunModel, modelOptions, activeModelLabel]);
 
   return (
     <div className="flex h-[calc(100dvh-4rem)] md:h-full md:max-h-screen relative overflow-hidden">
@@ -1019,6 +1474,7 @@ export default function ChatPage() {
         modelOptions={modelOptions}
         selectedModelTier={selectedModelTier}
         drafts={drafts}
+        activeRunConvIds={activeRunIds}
         onToggleCollapse={handleToggleSidebarCollapse}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         onSelectConversation={handleSelectConversation}
@@ -1053,7 +1509,7 @@ export default function ChatPage() {
           messages={messages}
           loading={loading}
           liveTrace={liveTrace}
-          activeModelLabel={activeModelLabel}
+          activeModelLabel={liveStatusModelLabel}
           childBranchesByMessageId={childBranchesByMessageId}
           branchingMessageIndex={branchingMessageIndex}
           onSelectPromptSuggestion={handleSelectPromptSuggestion}
