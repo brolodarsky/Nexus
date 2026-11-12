@@ -7,7 +7,7 @@ voice notes) to the universal `NexusAgent` via an asynchronous store-and-forward
      text, voice notes (`.ogg` Opus), and photos in the cloud. When the laptop wakes and connects to Wi-Fi,
      the poller drains queued messages in chronological order with zero port forwarding or public IP needed.
   2. Dual-Input Voice Support: Accepts both on-device transcribed text (Pixel Gboard STT) and raw Telegram
-     microphone voice memos (`message.voice` / `message.audio`), transcribing audio via Gemini Flash multimodal
+     microphone voice memos (`message.voice` / `message.audio`), transcribing audio via Gemini multimodal
      input (with OpenAI Whisper fallback).
   3. Conversation Continuity (`chats.db`): Each new top-level mobile message spawns a fresh conversation thread
      (`📱 <Title>`) visible in the Control Panel sidebar. Swiping-to-reply on any bot message (or prefixing with
@@ -438,8 +438,8 @@ def transcribe_audio_bytes(
       1. Primary (OpenAI Whisper API): When `OPENAI_API_KEY` is configured, transcribes via OpenAI's
          `whisper-1` endpoint. Whisper is specialized for speech-to-text, returning high-accuracy
          transcripts in ~1-2 seconds with near-zero hallucination on silence or accents.
-      2. Secondary / Fallback (Gemini Flash Multimodal Audio): When `GEMINI_API_KEY` is configured,
-         sends base64-encoded audio directly to the low-tier Gemini Flash model (`gemini-3.8-flash`),
+      2. Secondary / Fallback (Gemini Hydrogen Multimodal Audio): When `GEMINI_API_KEY` is configured,
+         sends base64-encoded audio directly to the low-tier Gemini model (`gemini-4-hydrogen`),
          which natively decodes audio/ogg, audio/mp3, audio/wav, and audio/flac.
     """
     if not audio_bytes:
@@ -484,7 +484,7 @@ def transcribe_audio_bytes(
         except Exception as exc:
             errors.append(f"OpenAI Whisper transcription failed: {exc}")
 
-    # 2. Secondary Path: Gemini Flash native multimodal audio transcription
+    # 2. Secondary Path: Gemini Hydrogen native multimodal audio transcription
     if gemini_key:
         try:
             from nexus.agent.graph import extract_message_text

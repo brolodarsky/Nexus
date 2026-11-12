@@ -185,7 +185,7 @@ def test_audio_document_detection(monkeypatch: pytest.MonkeyPatch):
             "domain": None,
             "confidence": 1.0,
             "model_tier": "low",
-            "model_name": "gemini-3.8-flash",
+            "model_name": "gemini-4-hydrogen",
         }
         doc_msg = {
             "message_id": 105,
@@ -237,7 +237,7 @@ def test_process_telegram_voice_and_swipe_reply_continuity(monkeypatch: pytest.M
             "confidence": 1.0,
             "reasoning": "Test",
             "model_tier": "low",
-            "model_name": "gemini-3.8-flash",
+            "model_name": "gemini-4-hydrogen",
             "tool_calls": [],
         }
 

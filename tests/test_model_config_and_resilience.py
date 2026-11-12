@@ -111,12 +111,28 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
     catalog = get_available_models()
     assert catalog["provider"] == "gemini"
     assert any(m["id"] == "strong" for m in catalog["models"])
-    assert any(m["id"] == "low" for m in catalog["models"])
+    low_entry = next(m for m in catalog["models"] if m["id"] == "low")
+    assert low_entry["model_name"] == "gemini-4-hydrogen"
+    assert "Hydrogen" in low_entry["description"]
     assert any(m["id"] == "claude-opus-5-5" and m["tier"] == "strong" and m["provider"] == "anthropic" for m in catalog["models"])
     assert any(m["id"] == "claude-sonnet-4-5" and m["tier"] == "low" and m["provider"] == "anthropic" for m in catalog["models"])
 
     low_cfg = resolve_model_config("low")
     assert low_cfg["tier"] == "low"
+    assert low_cfg["model_name"] == "gemini-4-hydrogen"
+
+    med_cfg = resolve_model_config("medium")
+    assert med_cfg["tier"] == "medium"
+    assert med_cfg["model_name"] == "gemini-4-hydrogen"
+
+    hydrogen_cfg = resolve_model_config("gemini-4-hydrogen")
+    assert hydrogen_cfg["tier"] == "low"
+    assert hydrogen_cfg["provider"] == "gemini"
+    assert hydrogen_cfg["model_name"] == "gemini-4-hydrogen"
+
+    hydrogen_alias_cfg = resolve_model_config("hydrogen")
+    assert hydrogen_alias_cfg["tier"] == "low"
+    assert hydrogen_alias_cfg["provider"] == "gemini"
 
     opus_cfg = resolve_model_config("claude-opus-5-5")
     assert opus_cfg["tier"] == "strong"
@@ -203,7 +219,7 @@ def test_is_rate_limit_error_classification():
     """Verify _is_rate_limit_error identifies 429 status codes, RESOURCE_EXHAUSTED, and quota keywords."""
     # Google AI Studio / gRPC 429 errors
     assert _is_rate_limit_error(Exception("429 RESOURCE_EXHAUSTED. Quota exceeded for metric..."))
-    assert _is_rate_limit_error(Exception("Error calling model 'gemini-3.8-flash' (RESOURCE_EXHAUSTED)"))
+    assert _is_rate_limit_error(Exception("Error calling model 'gemini-4-hydrogen' (RESOURCE_EXHAUSTED)"))
     assert _is_rate_limit_error(Exception("Rate limit reached for requests per minute"))
 
     # Object with status_code attribute
@@ -322,7 +338,7 @@ def test_invoke_llm_with_resilience_retries_and_succeeds(monkeypatch: pytest.Mon
         messages=[HumanMessage(content="Hello")],
         tracer=mock_tracer,
         thread_ids=["test_thread"],
-        model_name="gemini-3.8-flash",
+        model_name="gemini-4-hydrogen",
         tier="low",
         max_retries=3,
     )
@@ -350,7 +366,7 @@ def test_invoke_llm_with_resilience_exhaustion(monkeypatch: pytest.MonkeyPatch):
             messages=[HumanMessage(content="Hello")],
             tracer=mock_tracer,
             thread_ids=["test_thread"],
-            model_name="gemini-3.8-flash",
+            model_name="gemini-4-hydrogen",
             tier="low",
             max_retries=2,
         )
@@ -363,7 +379,7 @@ def test_run_nexus_agent_with_trace_429_diagnostic_message(monkeypatch: pytest.M
     """Verify run_nexus_agent_with_trace translates 429 RESOURCE_EXHAUSTED into clear user guidance."""
     mock_graph = MagicMock()
     mock_graph.invoke.side_effect = Exception(
-        "Error calling model 'gemini-3.8-flash' (RESOURCE_EXHAUSTED): 429 RESOURCE_EXHAUSTED. Quota exceeded for metric..."
+        "Error calling model 'gemini-4-hydrogen' (RESOURCE_EXHAUSTED): 429 RESOURCE_EXHAUSTED. Quota exceeded for metric..."
     )
     monkeypatch.setattr("nexus.agent.api.nexus_graph", mock_graph)
 

@@ -183,7 +183,7 @@ def test_ask_brain_stream_mocked(client, temp_conv):
         "confidence": 0.95,
         "reasoning": "Mock test routing",
         "model_tier": "low",
-        "model_name": "gemini-3.8-flash",
+        "model_name": "gemini-4-hydrogen",
     }
     with patch("nexus.agent.api.run_nexus_agent_with_trace", return_value=mock_result):
         with client.stream(

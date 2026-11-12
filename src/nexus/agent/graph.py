@@ -560,7 +560,7 @@ def _cooperative_sleep(seconds: float, thread_ids: Sequence[Optional[str]]) -> N
 # `messages: list[BaseMessage]` is the message history submitted to `.invoke()`.
 # `tracer: AgentTracer` is the telemetry tracer emitting structured events to terminal and SSE stream.
 # `thread_ids: Sequence[Optional[str]]` contains thread and conversation IDs for cooperative cancellation checks.
-# `model_name: str` is the active model identifier (e.g. `'gemini-3.8-flash'`) displayed in telemetry.
+# `model_name: str` is the active model identifier (e.g. `'gemini-4-hydrogen'`) displayed in telemetry.
 # `tier: str` is the capability tier (e.g. `'low'`, `'strong'`).
 # `max_retries: int = 3` maximum number of rate-limit backoff retry attempts before re-raising.
 # `-> BaseMessage` returns the model output (`AIMessage`).
@@ -712,7 +712,7 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
     sub_sys_content = (
         inject_root_instructions()
         + "\n\n# Subagent Execution Mode\n"
-        + f"You are an isolated Flash subagent (Subagent #{serial}) spawned by the parent NexusAgent (Astra) to execute the specific task below. "
+        + f"You are an isolated fast-tier subagent (Subagent #{serial}) spawned by the parent NexusAgent (Astra) to execute the specific task below. "
         + "Read any relevant `Section Instructions.md` and Vault notes needed, execute the task thoroughly, "
         + "and return a concise, high-signal, grounded synthesis to the parent agent. "
         + "Your final synthesis will automatically be published to the Shared Agent Blackboard (`blackboard.db`), "
@@ -868,7 +868,7 @@ TOOLS = CORE_TOOLS + [spawn_subagent]
 # and returns an error ToolMessage to the model so the agent can gracefully recover, retry, or report to the user.
 tool_node = ToolNode(TOOLS, handle_tool_errors=True)
 
-# Primary reasoning model resolved via `get_chat_model` (uses Gemini 3.8 Flash when GEMINI_API_KEY is set, else OpenAI tier)
+# Primary reasoning model resolved via `get_chat_model` (uses Gemini 4 Argon/Hydrogen when GEMINI_API_KEY is set, else OpenAI tier)
 _primary_tier: ModelTier = (
     settings.nexus_primary_tier if settings.nexus_primary_tier in ("low", "medium", "strong") else "medium"
 )
@@ -989,7 +989,7 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
             for token in ("504", "deadline_exceeded", "timeout", "timed out")
         )
         # Resilient Tier Fallback: If the active strong/medium model hits a deadline timeout, fallback to the high-throughput
-        # low-latency tier (`gemini-3.8-flash` / `claude-sonnet-4-5` / `low`) to preserve the user's conversation session without crashing.
+        # low-latency tier (`gemini-4-hydrogen` / `claude-sonnet-4-5` / `low`) to preserve the user's conversation session without crashing.
         if is_deadline_or_timeout and effective_tier != "low":
             fallback_tier_arg = "anthropic:low" if active_provider == "anthropic" else "low"
             fallback_resolved = resolve_model_config(fallback_tier_arg)

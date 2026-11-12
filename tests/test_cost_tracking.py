@@ -20,6 +20,12 @@ from nexus.core.run_logger import get_run, list_runs, log_run
 def test_resolve_model_pricing():
     """Verifies exact, fuzzy, and tier-fallback pricing resolution."""
     # Exact matches
+    hydrogen_rates = resolve_model_pricing("gemini-4-hydrogen")
+    assert hydrogen_rates["input"] == 1.50
+    assert hydrogen_rates["cached"] == 0.075
+    assert hydrogen_rates["output"] == 7.50
+
+    # Legacy Gemini 3.8 Flash rates preserved for retrospective run audits
     flash_rates = resolve_model_pricing("gemini-3.8-flash")
     assert flash_rates["input"] == 0.10
     assert flash_rates["cached"] == 0.025
@@ -59,12 +65,16 @@ def test_resolve_model_pricing():
     assert resolve_model_pricing("claude-sonnet-4-5", tier="low", input_tokens=160_000) == sonnet_rates
 
     # Fuzzy matches
+    fuzzy_hydrogen = resolve_model_pricing("models/gemini-4-hydrogen-exp")
+    assert fuzzy_hydrogen == hydrogen_rates
+
     fuzzy_flash = resolve_model_pricing("models/gemini-3.8-flash-exp")
     assert fuzzy_flash == flash_rates
 
-    # Tier fallbacks
+    # Tier fallbacks ("low" defaults to Gemini 4 Hydrogen)
     low_rates = resolve_model_pricing(tier="low")
     assert low_rates == TIER_FALLBACK_PRICING["low"]
+    assert low_rates == hydrogen_rates
 
     strong_rates = resolve_model_pricing(tier="strong")
     assert strong_rates == TIER_FALLBACK_PRICING["strong"]
@@ -84,7 +94,15 @@ def test_context_stepup_pricing_threshold():
     assert stepup_rates["cached"] == 0.625
     assert stepup_rates["output"] == 10.00
 
-    # Flash models do NOT double above 128k context (flat rate across entire window)
+    # Gemini 4 Hydrogen and Flash models do NOT double above 128k context (flat rate across entire 1M window)
+    hydrogen_stepup_low = resolve_model_pricing("gemini-4-hydrogen", tier="low", input_tokens=500_000)
+    assert hydrogen_stepup_low["input"] == 1.50
+    assert hydrogen_stepup_low["cached"] == 0.075
+    assert hydrogen_stepup_low["output"] == 7.50
+
+    hydrogen_stepup_med = resolve_model_pricing("gemini-4-hydrogen", tier="medium", input_tokens=500_000)
+    assert hydrogen_stepup_med == hydrogen_stepup_low
+
     flash_stepup = resolve_model_pricing("gemini-3.8-flash", input_tokens=150_000)
     assert flash_stepup["input"] == 0.10
     assert flash_stepup["cached"] == 0.025
@@ -120,8 +138,29 @@ def test_calculate_token_cost_uncached():
 
 
 def test_calculate_token_cost_with_caching_discount():
-    """Verifies that cached tokens receive the 75% prompt caching discount."""
-    # 1,000,000 input tokens total, where 800,000 are cached on Flash:
+    """Verifies that cached tokens receive provider prompt caching discounts."""
+    # 1,000,000 input tokens total, where 800,000 are cached on Gemini 4 Hydrogen (95% discount):
+    # Uncached: 200,000 * $1.50 / 1M = $0.300
+    # Cached:   800,000 * $0.075 / 1M = $0.060
+    # Output:   100,000 * $7.50 / 1M = $0.750
+    # Expected: $1.110
+    hydrogen_cost = calculate_token_cost(
+        input_tokens=1_000_000,
+        output_tokens=100_000,
+        cached_tokens=800_000,
+        model_name="gemini-4-hydrogen",
+    )
+    assert hydrogen_cost == 1.11
+
+    # Savings calculation: 800k * ($1.50 - $0.075) / 1M = 800k * 1.425 / 1M = $1.14
+    hydrogen_savings = calculate_cache_savings(
+        input_tokens=1_000_000,
+        cached_tokens=800_000,
+        model_name="gemini-4-hydrogen",
+    )
+    assert hydrogen_savings == 1.14
+
+    # 1,000,000 input tokens total, where 800,000 are cached on legacy Flash (75% discount):
     # Uncached: 200,000 * $0.10 / 1M = $0.020
     # Cached:   800,000 * $0.025 / 1M = $0.020
     # Output:   100,000 * $0.40 / 1M = $0.040

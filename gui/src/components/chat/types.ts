@@ -13,7 +13,7 @@ import type { ChatHistoryEntry, ModelOption, TraceEvent } from "@/lib/api";
 // - domain: optional classified knowledge domain returned by the orchestrator
 // - confidence: optional router confidence score (0.0 to 1.0)
 // - modelTier: capability tier executed for this turn ("strong", "medium", "low")
-// - modelName: concrete LLM identifier (e.g., "gemini-4-argon", "gemini-3.8-flash")
+// - modelName: concrete LLM identifier (e.g., "gemini-4-argon", "gemini-4-hydrogen")
 // - costUsd: estimated USD inference cost for this execution turn
 // - trace: optional array of lossless SSE TraceEvent payloads for ThinkingPanel inspection
 // - hasTrace: whether this message has execution traces stored in message_traces (enables lazy on-demand load)
@@ -145,10 +145,10 @@ export const FALLBACK_MODELS: ModelOption[] = [
     id: "low",
     tier: "low",
     provider: "gemini",
-    model_name: "gemini-3.8-flash",
-    label: "Fast (gemini-3.8-flash)",
+    model_name: "gemini-4-hydrogen",
+    label: "Fast (gemini-4-hydrogen)",
     short_label: "Fast",
-    description: "High-speed, low-cost execution — Flash (gemini-3.8-flash)",
+    description: "High-speed execution — Hydrogen (gemini-4-hydrogen)",
   },
   {
     id: "claude-opus-5-5",
@@ -262,12 +262,14 @@ export function extractTurnCost(
     const isOpus45 = lowerName.includes("opus-4") || lowerName.includes("opus 4");
     const isOpus = lowerName.includes("opus");
     const isSonnet = lowerName.includes("sonnet");
-    const isLow = (modelTier === "low") || lowerName.includes("flash") || isSonnet;
+    // Preserve legacy Flash pricing ($0.10/$0.025/$0.40) for historical traces while defaulting active "low" tier to Gemini 4 Hydrogen ($1.50/$0.075/$7.50)
+    const isFlash = lowerName.includes("flash");
+    const isHydrogen = lowerName.includes("hydrogen") || (modelTier === "low" && !isFlash && !isSonnet && !isOpus);
 
     // Resolve per-million-token pricing across Anthropic Claude (Opus 5.5: $4/$0.20/$20, Opus 4.5: $5/$0.50/$25, Sonnet: $3/$0.30/$15) and Google Gemini model families
-    const inRate = isOpus45 ? 5.00 : isOpus ? 4.00 : isSonnet ? 3.00 : isLow ? 0.10 : 1.25;
-    const cachedRate = isOpus45 ? 0.50 : isOpus ? 0.20 : isSonnet ? 0.30 : isLow ? 0.025 : 0.3125;
-    const outRate = isOpus45 ? 25.00 : isOpus ? 20.00 : isSonnet ? 15.00 : isLow ? 0.40 : 5.00;
+    const inRate = isOpus45 ? 5.00 : isOpus ? 4.00 : isSonnet ? 3.00 : isFlash ? 0.10 : isHydrogen ? 1.50 : 1.25;
+    const cachedRate = isOpus45 ? 0.50 : isOpus ? 0.20 : isSonnet ? 0.30 : isFlash ? 0.025 : isHydrogen ? 0.075 : 0.3125;
+    const outRate = isOpus45 ? 25.00 : isOpus ? 20.00 : isSonnet ? 15.00 : isFlash ? 0.40 : isHydrogen ? 7.50 : 5.00;
 
     const uncachedIn = Math.max(0, totalIn - totalCached);
     const cost = ((uncachedIn * inRate) + (totalCached * cachedRate) + (totalOut * outRate)) / 1000000;

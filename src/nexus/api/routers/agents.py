@@ -81,7 +81,7 @@ class AskResponse(BaseModel):
     confidence: float | None = None     # Router confidence score (0.0 to 1.0)
     reasoning: str | None = None        # Router explanation for domain selection
     model_tier: str | None = None       # Effective model tier used for this turn ("strong", "medium", "low")
-    model_name: str | None = None       # Concrete provider model identifier (e.g., "gemini-4-argon", "gemini-3.8-flash")
+    model_name: str | None = None       # Concrete provider model identifier (e.g., "gemini-4-argon", "gemini-4-hydrogen")
     cost_usd: float | None = None       # Estimated USD inference cost for this execution turn
     timestamp: str                      # ISO-8601 UTC timestamp
 
@@ -338,7 +338,7 @@ async def auto_generate_conversation_title(conversation_id: str):
     Summarizes the opening turn of a conversation into a concise 3-6 word title using the fast low-tier model.
     - conversation_id: UUID primary key identifying the conversation
     - Reads first user query and optional assistant excerpt from SQLite `messages` table
-    - Invokes fast `tier="low"` LLM (`gemini-3.8-flash` or `claude-sonnet-4-5`) with low temperature
+    - Invokes fast `tier="low"` LLM (`gemini-4-hydrogen` or `claude-sonnet-4-5`) with low temperature
     - Falls back gracefully to a prompt excerpt if the model call times out or encounters an error
     """
     conv = get_conversation(conversation_id)
@@ -364,7 +364,7 @@ async def auto_generate_conversation_title(conversation_id: str):
     try:
         from nexus.core.constants import get_chat_model
         from nexus.agent.graph import extract_message_text
-        # Use low-tier model (Flash / Sonnet) for sub-second, ultra-low-cost title summarization
+        # Use low-tier model (Hydrogen / Sonnet) for sub-second, ultra-low-cost title summarization
         chat_model = get_chat_model(tier="low", temperature=0.2)
         
         prompt = (

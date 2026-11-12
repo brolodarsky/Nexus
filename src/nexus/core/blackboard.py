@@ -2,7 +2,7 @@
 blackboard.py — Shared Inter-Agent Blackboard / Message Board (`blackboard.db`).
 
 Provides a persistent, zero-contention SQLite bulletin board where the primary orchestrator (`NexusAgent` / Astra)
-and parallel Flash subagents (`spawn_subagent` on `gemini-3.8-flash`) can post and read structured situational
+and parallel fast-tier subagents (`spawn_subagent` on `gemini-4-hydrogen`) can post and read structured situational
 findings (e.g. Gmail sweeps, Google Calendar audits, Vault file inspections, and mission status updates).
 
 Why a Shared Blackboard?

@@ -128,13 +128,13 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
         effective_tier = lower_choice
         model_name = active_map[effective_tier]
     else:
-        # Caller passed an explicit model name (e.g. `"gemini-3.8-flash"`, `"claude-opus-5-5"`, `"claude-sonnet-4-5"`):
+        # Caller passed an explicit model name (e.g. `"gemini-4-hydrogen"`, `"claude-opus-5-5"`, `"claude-sonnet-4-5"`):
         # 1. Detect provider from explicit model identifier if not explicitly overridden
         if any(tok in lower_choice for tok in ("claude", "opus", "sonnet", "haiku")):
             active_provider = "anthropic"
             raw_choice = _normalize_anthropic_model_name(raw_choice)
             lower_choice = raw_choice.lower()
-        elif any(tok in lower_choice for tok in ("gemini", "argon")):
+        elif any(tok in lower_choice for tok in ("gemini", "argon", "hydrogen")):
             active_provider = "gemini"
         elif any(tok in lower_choice for tok in ("gpt", "o1", "o3")):
             active_provider = "openai"
@@ -142,7 +142,7 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
         active_map = provider_maps.get(active_provider, active_map)
         # 2. Reverse-lookup its tier if it matches a configured tier, else classify `"low"` vs `"strong"` by family name
         matched_tier = next((t for t, m in active_map.items() if m.lower() == lower_choice), None)
-        is_fast_family = any(tok in lower_choice for tok in ("flash", "mini", "sonnet", "haiku"))
+        is_fast_family = any(tok in lower_choice for tok in ("flash", "hydrogen", "mini", "sonnet", "haiku"))
         effective_tier = matched_tier or ("low" if is_fast_family else "strong")
         model_name = raw_choice
 
@@ -187,7 +187,10 @@ def get_available_models() -> dict[str, Any]:
             "model_name": low_cfg["model_name"],
             "label": f"Fast ({low_cfg['model_name']})",
             "short_label": "Fast",
-            "description": f"High-speed, low-cost execution — Flash ({low_cfg['model_name']})",
+            "description": (
+                f"High-speed execution — {'Hydrogen' if 'hydrogen' in low_cfg['model_name'].lower() else 'Flash'} "
+                f"({low_cfg['model_name']})"
+            ),
         },
     ]
 

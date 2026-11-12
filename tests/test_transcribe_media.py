@@ -93,7 +93,7 @@ def test_transcribe_media_file_success(
     """Verifies end-to-end transcription: upload -> generate -> cleanup -> note write."""
     mock_settings.gemini_api_key = "fake_gemini_key"
     mock_settings.google_api_key = None
-    mock_settings.gemini_model_low = "gemini-3.8-flash"
+    mock_settings.gemini_model_low = "gemini-4-hydrogen"
 
     # Mock client and file upload
     mock_client = MagicMock()
@@ -134,7 +134,7 @@ def test_transcribe_media_file_success(
     # 3. Assert generate_content was called with prompt and uploaded file
     mock_client.models.generate_content.assert_called_once()
     gen_args = mock_client.models.generate_content.call_args
-    assert gen_args.kwargs["model"] == "models/gemini-3.8-flash"
+    assert gen_args.kwargs["model"] == "models/gemini-4-hydrogen"
     assert gen_args.kwargs["contents"][0] == mock_file
     assert "VERBATIM" in gen_args.kwargs["contents"][1]
 
@@ -164,7 +164,7 @@ def test_transcribe_media_processing_poll(
     """Verifies that transcribe_media_file polls files.get while state is PROCESSING until ACTIVE."""
     mock_settings.gemini_api_key = "fake_gemini_key"
     mock_settings.google_api_key = None
-    mock_settings.gemini_model_low = "gemini-3.8-flash"
+    mock_settings.gemini_model_low = "gemini-4-hydrogen"
 
     mock_client = MagicMock()
     mock_client_class.return_value = mock_client
@@ -208,7 +208,7 @@ def test_transcribe_media_failed_state(
     """Verifies RuntimeError is raised if server-side processing fails."""
     mock_settings.gemini_api_key = "fake_gemini_key"
     mock_settings.google_api_key = None
-    mock_settings.gemini_model_low = "gemini-3.8-flash"
+    mock_settings.gemini_model_low = "gemini-4-hydrogen"
 
     mock_client = MagicMock()
     mock_client_class.return_value = mock_client
@@ -283,7 +283,7 @@ def test_cli_main_success(mock_transcribe: MagicMock, capsys: pytest.CaptureFixt
             "--no-timestamps",
             "--no-save",
             "--model",
-            "gemini-3.8-flash",
+            "gemini-4-hydrogen",
         ],
     ):
         main()
@@ -295,6 +295,6 @@ def test_cli_main_success(mock_transcribe: MagicMock, capsys: pytest.CaptureFixt
         output_note_path=None,
         include_timestamps=False,
         save_to_vault=False,
-        model="gemini-3.8-flash",
+        model="gemini-4-hydrogen",
         custom_prompt=None,
     )

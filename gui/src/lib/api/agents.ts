@@ -14,7 +14,7 @@ export interface AskResponse {
   confidence: number | null;  // Router confidence score between 0.0 and 1.0
   reasoning: string | null;   // Explanation of why the router selected this agent
   model_tier?: string | null; // Effective model tier used for this turn ("strong", "medium", "low")
-  model_name?: string | null; // Concrete provider model identifier (e.g. "gemini-4-argon", "gemini-3.8-flash")
+  model_name?: string | null; // Concrete provider model identifier (e.g. "gemini-4-argon", "gemini-4-hydrogen")
   cost_usd?: number | null;   // Estimated USD inference cost for this execution turn
   timestamp: string;          // ISO-8601 timestamp of response generation
 }
@@ -211,7 +211,7 @@ export async function updateConversationTitle(
   );
 }
 
-// Automatically generates a concise 3-6 word topic title using the low-tier model (Flash / Sonnet)
+// Automatically generates a concise 3-6 word topic title using the low-tier model (Hydrogen / Sonnet)
 // - conversationId: target conversation thread to summarize and update in SQLite chats.db
 // Promise settles with `{ status: "updated", conversation_id, title }`
 export async function autoGenerateConversationTitle(

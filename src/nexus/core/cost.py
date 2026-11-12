@@ -26,7 +26,13 @@ CONTEXT_STEPUP_MULTIPLIER: float = 2.0
 # Base pricing per 1M tokens (for context <= 128k tokens)
 MODEL_PRICING: Dict[str, Dict[str, float]] = {
     # ── Google Gemini Family ──────────────────────────────────────────────────
-    # Fast / Low-Latency Tier: Gemini Flash family
+    # Fast / High-Efficiency Workhorse Tier: Gemini 4 Hydrogen (flat rate across entire 1M context window)
+    "gemini-4-hydrogen": {
+        "input": 1.50,      # $1.50 / 1M prompt tokens
+        "cached": 0.075,    # $0.075 / 1M cached tokens (95% implicit caching discount)
+        "output": 7.50,     # $7.50 / 1M completion & reasoning tokens
+    },
+    # Legacy Fast / Low-Latency Tier: Gemini Flash family (retained for retrospective audit accuracy)
     "gemini-3.8-flash": {
         "input": 0.10,      # $0.10 / 1M prompt tokens
         "cached": 0.025,    # $0.025 / 1M cached tokens (75% discount)
@@ -137,7 +143,7 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
 
 # Fallback baseline pricing by standardized tier when model name is unmapped
 TIER_FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
-    "low": MODEL_PRICING["gemini-3.8-flash"],
+    "low": MODEL_PRICING["gemini-4-hydrogen"],
     "medium": MODEL_PRICING["gemini-2.5-pro"],
     "strong": MODEL_PRICING["gemini-4-argon"],
 }
@@ -179,7 +185,9 @@ def resolve_model_pricing(
 
         # 3. Model family heuristic patterns
         if base_rates is None:
-            if "flash" in clean_model:
+            if "hydrogen" in clean_model:
+                base_rates = MODEL_PRICING["gemini-4-hydrogen"]
+            elif "flash" in clean_model:
                 base_rates = MODEL_PRICING["gemini-3.8-flash"]
             elif "mini" in clean_model:
                 base_rates = MODEL_PRICING["gpt-5.4-mini"]
@@ -204,7 +212,7 @@ def resolve_model_pricing(
 
     # 6. Apply context-length tier step-up (2x pricing above 128k tokens for Gemini Pro / Argon family)
     # Google AI Studio and Gemini API double prompt and output rates when the prompt context window exceeds 128k tokens.
-    # Anthropic Claude and OpenAI models maintain flat pricing across their standard 200k/128k context windows.
+    # Gemini 4 Hydrogen, Gemini Flash, Anthropic Claude, and OpenAI models maintain flat pricing across their context windows.
     is_non_gemini_provider = any(
         tok in clean_model for tok in ("claude", "opus", "sonnet", "haiku", "gpt", "o1", "o3")
     )
@@ -212,7 +220,12 @@ def resolve_model_pricing(
         clean_model in ("gemini-4-argon", "gemini-2.5-pro", "gemini-1.5-pro")
         or "argon" in clean_model
         or "pro" in clean_model
-        or (clean_tier in ("strong", "medium") and "flash" not in clean_model and "mini" not in clean_model)
+        or (
+            clean_tier in ("strong", "medium")
+            and "flash" not in clean_model
+            and "hydrogen" not in clean_model
+            and "mini" not in clean_model
+        )
     )
     if input_tokens > CONTEXT_STEPUP_THRESHOLD and is_stepup_eligible:
         return {
