@@ -675,12 +675,16 @@ def get_calendar_schedule(days_ahead: int = 1, days_back: int = 0) -> str:
     end_offset = max(-days_back, days_ahead - 1)
     end_dt = datetime.combine(now_local.date() + timedelta(days=end_offset), time.max).astimezone()
 
-    events = list_events(start_iso=start_dt.isoformat(), end_iso=end_dt.isoformat())
-    if start_dt.date() == end_dt.date():
-        title = f"Schedule ({start_dt.strftime('%A, %b %d')})"
-    else:
-        title = f"Schedule ({start_dt.strftime('%a, %b %d')} – {end_dt.strftime('%a, %b %d')})"
-    return format_events_as_markdown(events, title=title)
+    # Execute Google Calendar API query within defensive try/except wrapper
+    try:
+        events = list_events(start_iso=start_dt.isoformat(), end_iso=end_dt.isoformat())
+        if start_dt.date() == end_dt.date():
+            title = f"Schedule ({start_dt.strftime('%A, %b %d')})"
+        else:
+            title = f"Schedule ({start_dt.strftime('%a, %b %d')} – {end_dt.strftime('%a, %b %d')})"
+        return format_events_as_markdown(events, title=title)
+    except Exception as exc:
+        return f"❌ Failed to query calendar schedule: {exc}"
 
 
 @tool
@@ -702,14 +706,20 @@ def create_calendar_event(
     """
     from nexus.shared_tools.calendar_engine import create_event
 
-    res = create_event(
-        summary=summary,
-        start_iso=start_iso,
-        end_iso=end_iso,
-        description=description,
-        location=location,
-    )
-    return f"✅ Event created: '{res.get('summary')}' (ID: {res.get('id')}) from {res.get('start')} to {res.get('end')}."
+    # Call calendar creation service with defensive error handling
+    try:
+        res = create_event(
+            summary=summary,
+            start_iso=start_iso,
+            end_iso=end_iso,
+            description=description,
+            location=location,
+        )
+        if res.get("status") == "error":
+            return f"❌ Failed to create calendar event '{summary}': {res.get('error')}"
+        return f"✅ Event created: '{res.get('summary')}' (ID: {res.get('id')}) from {res.get('start')} to {res.get('end')}."
+    except Exception as exc:
+        return f"❌ Failed to create calendar event '{summary}': {exc}"
 
 
 @tool
@@ -724,7 +734,7 @@ def update_calendar_event(
     """Update or reschedule an existing event on Google Calendar.
 
     Args:
-        event_id: The unique Google Calendar event ID.
+        event_id: The unique Google Calendar event ID (as returned by `get_calendar_schedule`).
         summary: New event title (leave empty to keep unchanged).
         start_iso: New start time in RFC3339 format (leave empty to keep unchanged).
         end_iso: New end time in RFC3339 format (leave empty to keep unchanged).
@@ -733,15 +743,40 @@ def update_calendar_event(
     """
     from nexus.shared_tools.calendar_engine import update_event
 
-    res = update_event(
-        event_id=event_id,
-        summary=summary or None,
-        start_iso=start_iso or None,
-        end_iso=end_iso or None,
-        description=description or None,
-        location=location or None,
-    )
-    return f"✅ Event updated: '{res.get('summary')}' (ID: {res.get('id')})."
+    # Defensively intercept HttpError (e.g. 404 Not Found) so invalid event IDs emit actionable strings rather than crashing the turn
+    try:
+        res = update_event(
+            event_id=event_id,
+            summary=summary or None,
+            start_iso=start_iso or None,
+            end_iso=end_iso or None,
+            description=description or None,
+            location=location or None,
+        )
+        if res.get("status") == "error":
+            return f"❌ Failed to update calendar event '{event_id}': {res.get('error')}. Verify event ID with get_calendar_schedule()."
+        return f"✅ Event updated: '{res.get('summary')}' (ID: {res.get('id')})."
+    except Exception as exc:
+        return f"❌ Failed to update calendar event '{event_id}': {exc}"
+
+
+@tool
+def delete_calendar_event(event_id: str) -> str:
+    """Delete an event from Google Calendar by its unique ID.
+
+    Args:
+        event_id: The unique Google Calendar event ID (as returned by `get_calendar_schedule`).
+    """
+    from nexus.shared_tools.calendar_engine import delete_event
+
+    # Delete calendar event defensively; returns clean status string back to LLM
+    try:
+        ok = delete_event(event_id=event_id)
+        if ok:
+            return f"✅ Event deleted: ID '{event_id}'."
+        return f"❌ Failed to delete event '{event_id}': Event not found or deletion failed on Google Calendar."
+    except Exception as exc:
+        return f"❌ Failed to delete event '{event_id}': {exc}"
 
 
 # ── 5. Live Web Search & On-Demand Shared CLI Tool Runner ────────────────────

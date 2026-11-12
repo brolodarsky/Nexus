@@ -374,3 +374,91 @@ def test_run_nexus_agent_with_trace_429_diagnostic_message(monkeypatch: pytest.M
     assert res["confidence"] == 0.0
 
 
+def test_tool_node_handle_tool_errors_interception():
+    """Verify that ToolNode with handle_tool_errors=True catches unexpected tool exceptions and returns ToolMessage."""
+    from langgraph.graph import StateGraph, MessagesState, START, END
+    from langgraph.prebuilt import ToolNode
+
+    @tool
+    def exploding_tool(query: str) -> str:
+        """A tool that raises an unexpected exception."""
+        raise RuntimeError(f"Database crash during query: {query}")
+
+    workflow = StateGraph(MessagesState)
+    workflow.add_node("tools", ToolNode([exploding_tool], handle_tool_errors=True))
+    workflow.add_edge(START, "tools")
+    workflow.add_edge("tools", END)
+    app = workflow.compile()
+
+    ai_msg = AIMessage(
+        content="",
+        tool_calls=[{"name": "exploding_tool", "args": {"query": "SELECT *"}, "id": "call_err_1"}],
+    )
+    res = app.invoke({"messages": [ai_msg]})
+    assert len(res["messages"]) == 2
+    tool_msg = res["messages"][-1]
+    assert tool_msg.status == "error"
+    assert "Database crash during query" in tool_msg.content
+
+
+def test_format_events_as_markdown_includes_event_ids():
+    """Verify format_events_as_markdown embeds event IDs so agents can extract event_id for updates/deletions."""
+    from nexus.shared_tools.calendar_engine import format_events_as_markdown
+
+    sample_events = [
+        {
+            "id": "event_abc_123",
+            "summary": "Deep Work Block",
+            "start": "2026-11-12T13:30:00-05:00",
+            "end": "2026-11-12T16:30:00-05:00",
+            "description": "Focus on Nexus Engine",
+        }
+    ]
+    md = format_events_as_markdown(sample_events, title="Today's Schedule")
+    assert "event_abc_123" in md
+    assert "(id: `event_abc_123`)" in md
+    assert "Deep Work Block" in md
+
+
+def test_update_calendar_event_handles_not_found_defensively(monkeypatch: pytest.MonkeyPatch):
+    """Verify update_calendar_event intercepts 404 HttpError cleanly instead of bubbling uncaught."""
+    from googleapiclient.errors import HttpError
+    import httplib2
+    from nexus.shared_tools.shared import update_calendar_event
+
+    resp = httplib2.Response({"status": 404, "reason": "Not Found"})
+    http_err = HttpError(resp, b"Not Found")
+
+    # Mock service.events().patch().execute to simulate Google 404 Not Found
+    mock_service = MagicMock()
+    mock_service.events().patch().execute.side_effect = http_err
+    monkeypatch.setattr("nexus.shared_tools.calendar_engine.get_calendar_service", lambda: mock_service)
+
+    result = update_calendar_event.invoke({
+        "event_id": "test",
+        "summary": "Shifted Morning Block",
+        "start_iso": "2026-11-12T12:45:00-05:00",
+        "end_iso": "2026-11-12T13:30:00-05:00",
+    })
+    assert "❌ Failed to update calendar event 'test'" in result
+    assert "404" in result
+    assert "Verify event ID" in result
+
+
+def test_delete_calendar_event_handles_errors_defensively(monkeypatch: pytest.MonkeyPatch):
+    """Verify delete_calendar_event returns a clear status message on failure rather than crashing."""
+    from googleapiclient.errors import HttpError
+    import httplib2
+    from nexus.shared_tools.shared import delete_calendar_event
+
+    resp = httplib2.Response({"status": 404, "reason": "Not Found"})
+    http_err = HttpError(resp, b"Not Found")
+
+    mock_service = MagicMock()
+    mock_service.events().delete().execute.side_effect = http_err
+    monkeypatch.setattr("nexus.shared_tools.calendar_engine.get_calendar_service", lambda: mock_service)
+
+    result = delete_calendar_event.invoke({"event_id": "nonexistent_event_id"})
+    assert "❌ Failed to delete event 'nonexistent_event_id'" in result
+
+

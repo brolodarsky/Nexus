@@ -101,6 +101,7 @@ from nexus.shared_tools.shared import (
     send_telegram_notification,
     transcribe_media,
     update_calendar_event,
+    delete_calendar_event,
 )
 
 # ── Agent Tracers & Subagent Serial Counter ──────────────────────────────────
@@ -387,6 +388,7 @@ CORE_TOOLS = [
     get_calendar_schedule,
     create_calendar_event,
     update_calendar_event,
+    delete_calendar_event,
     post_to_board,
     read_board,
     send_telegram_notification,
@@ -702,7 +704,10 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
     # Build an ephemeral, stateless subagent client (no checkpointer needed; lives only for this subtask)
     sub_base_llm = get_chat_model(tier=sub_tier_arg, temperature=0.0)
     sub_llm = sub_base_llm.bind_tools(CORE_TOOLS)
-    sub_tool_node = ToolNode(CORE_TOOLS)
+    # handle_tool_errors=True: Prebuilt LangGraph handler that intercepts unhandled tool exceptions
+    # (e.g. HttpError 404/500, network disconnects, file locks) and wraps them into a ToolMessage(status="error")
+    # rather than raising through ToolNode.invoke() and terminating the subagent turn mid-flight.
+    sub_tool_node = ToolNode(CORE_TOOLS, handle_tool_errors=True)
 
     sub_sys_content = (
         inject_root_instructions()
@@ -859,7 +864,9 @@ def _invoke_tool_node_resilient(node: ToolNode, state_or_input: dict[str, Any]) 
 
 # The parent NexusAgent gets all core tools plus `spawn_subagent`
 TOOLS = CORE_TOOLS + [spawn_subagent]
-tool_node = ToolNode(TOOLS)
+# handle_tool_errors=True catches unhandled tool exceptions across all parent tools (including spawn_subagent)
+# and returns an error ToolMessage to the model so the agent can gracefully recover, retry, or report to the user.
+tool_node = ToolNode(TOOLS, handle_tool_errors=True)
 
 # Primary reasoning model resolved via `get_chat_model` (uses Gemini 3.8 Flash when GEMINI_API_KEY is set, else OpenAI tier)
 _primary_tier: ModelTier = (

@@ -16,6 +16,7 @@ import argparse
 from datetime import datetime, time, timedelta
 from typing import Any, Optional
 from googleapiclient.discovery import build, Resource
+from googleapiclient.errors import HttpError
 
 # Reconfigure stdout/stderr to UTF-8 on Windows to safely print emoji-laden calendar events
 if sys.platform == "win32" and sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -158,14 +159,25 @@ def create_event(
         "end": end_body,
     }
 
-    created = service.events().insert(calendarId=calendar_id, body=event_body).execute()
-    return {
-        "id": created.get("id"),
-        "summary": created.get("summary"),
-        "start": created.get("start"),
-        "end": created.get("end"),
-        "htmlLink": created.get("htmlLink"),
-    }
+    # Execute calendar event insertion with defensive HttpError interception
+    try:
+        created = service.events().insert(calendarId=calendar_id, body=event_body).execute()
+        return {
+            "id": created.get("id"),
+            "summary": created.get("summary"),
+            "start": created.get("start"),
+            "end": created.get("end"),
+            "htmlLink": created.get("htmlLink"),
+            "status": "success",
+        }
+    except HttpError as err:
+        return {
+            "id": "",
+            "summary": summary,
+            "status": "error",
+            "error_code": err.resp.status,
+            "error": f"Google Calendar API HttpError {err.resp.status}: {err._get_reason()}",
+        }
 
 
 def update_event(
@@ -190,7 +202,7 @@ def update_event(
         calendar_id: Target calendar ('primary').
 
     Returns:
-        dict: The updated event resource.
+        dict: The updated event resource or error dictionary if not found.
     """
     service = get_calendar_service()
     patch_body: dict[str, Any] = {}
@@ -210,14 +222,25 @@ def update_event(
         is_date_only = len(end_iso) == 10 and "T" not in end_iso
         patch_body["end"] = {"date": end_iso} if is_date_only else {"dateTime": end_iso}
 
-    updated = service.events().patch(calendarId=calendar_id, eventId=event_id, body=patch_body).execute()
-    return {
-        "id": updated.get("id"),
-        "summary": updated.get("summary"),
-        "start": updated.get("start"),
-        "end": updated.get("end"),
-        "htmlLink": updated.get("htmlLink"),
-    }
+    # Execute patch request; intercept 404 (event not found) or permission errors gracefully
+    try:
+        updated = service.events().patch(calendarId=calendar_id, eventId=event_id, body=patch_body).execute()
+        return {
+            "id": updated.get("id"),
+            "summary": updated.get("summary"),
+            "start": updated.get("start"),
+            "end": updated.get("end"),
+            "htmlLink": updated.get("htmlLink"),
+            "status": "success",
+        }
+    except HttpError as err:
+        return {
+            "id": event_id,
+            "summary": summary or "",
+            "status": "error",
+            "error_code": err.resp.status,
+            "error": f"Google Calendar API HttpError {err.resp.status}: {err._get_reason()}",
+        }
 
 
 def delete_event(event_id: str, calendar_id: str = "primary") -> bool:
@@ -229,11 +252,14 @@ def delete_event(event_id: str, calendar_id: str = "primary") -> bool:
         calendar_id: Target calendar ('primary').
 
     Returns:
-        bool: True if deletion succeeded.
+        bool: True if deletion succeeded, False if event was not found or deletion failed.
     """
     service = get_calendar_service()
-    service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
-    return True
+    try:
+        service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+        return True
+    except HttpError:
+        return False
 
 
 def clean_html_description(raw_desc: str) -> str:
@@ -276,9 +302,11 @@ def format_events_as_markdown(events: list[dict[str, Any]], title: str = "Today'
             time_display = "All Day"
 
         summary = ev["summary"]
+        event_id = ev.get("id")
+        id_suffix = f" (id: `{event_id}`)" if event_id else ""
         cleaned_desc = clean_html_description(ev.get("description", ""))
         desc_block = f"\n  - *Notes:* {cleaned_desc}" if cleaned_desc else ""
-        lines.append(f"- **{time_display}**: {summary}{desc_block}")
+        lines.append(f"- **{time_display}**: {summary}{id_suffix}{desc_block}")
 
     return "\n".join(lines)
 
@@ -292,12 +320,14 @@ def main():
             "Examples:\n"
             "  python src/nexus/shared_tools/calendar_engine.py --auth\n"
             "  python src/nexus/shared_tools/calendar_engine.py --today\n"
+            "  python src/nexus/shared_tools/calendar_engine.py --today --json\n"
             "  python src/nexus/shared_tools/calendar_engine.py --create 'Deep Work' '2026-09-29T16:00:00-04:00' '2026-09-29T17:30:00-04:00'\n"
         ),
     )
     parser.add_argument("--auth", action="store_true", help="Perform initial OAuth browser authorization")
     parser.add_argument("--today", action="store_true", help="List all events for today")
     parser.add_argument("--days", type=int, default=1, help="Number of days ahead to list (default: 1)")
+    parser.add_argument("--json", action="store_true", help="Output raw JSON array of events")
     parser.add_argument("--create", nargs=3, metavar=("TITLE", "START_ISO", "END_ISO"), help="Create a new event")
     parser.add_argument("--delete", metavar="EVENT_ID", help="Delete an event by ID")
 
@@ -326,6 +356,12 @@ def main():
     end_dt = datetime.combine(now_local.date() + timedelta(days=args.days - 1), time.max).astimezone()
 
     events = list_events(start_iso=start_dt.isoformat(), end_iso=end_dt.isoformat())
+
+    if args.json:
+        import json
+        print(json.dumps(events, indent=2))
+        return
+
     md = format_events_as_markdown(events, title=f"Schedule ({start_dt.strftime('%A, %b %d')})")
     print(md)
 
