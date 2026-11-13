@@ -131,7 +131,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 
 ### 3.1.1. Market Research & Future of Work
 - **[[Concept - AI Superagency & The Future of Work]]**
-- **[[Employer Skill Requirements]]:** Desired skills from job descriptions.
+- **[[Common Employer Skill Requirements]]:** Desired skills from job descriptions.
 - **📁 Saved Articles:** AI and Job Market research (Linked within [[Concept - AI Superagency & The Future of Work#5. "No-Regret" Strategies for Professionals & Graduates|AI Superagency Synthesis]]).
 - **📁 Saved Job Listings**
 
