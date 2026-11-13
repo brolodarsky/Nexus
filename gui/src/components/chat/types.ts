@@ -127,9 +127,6 @@ export const MAX_CHAT_SIDEBAR_WIDTH = 640;
 // LocalStorage key for persisting whether the bottom message input bar is collapsed across page navigation
 export const CHAT_INPUT_COLLAPSED_KEY = "nexus_chat_input_collapsed";
 
-// LocalStorage key for persisting whether the right Subagent Blackboard drawer is open across page navigation
-export const CHAT_BOARD_OPEN_KEY = "nexus_chat_board_open";
-
 // Immediate fallback catalog rendered before GET /api/agents/models resolves
 export const FALLBACK_MODELS: ModelOption[] = [
   {
@@ -145,10 +142,19 @@ export const FALLBACK_MODELS: ModelOption[] = [
     id: "low",
     tier: "low",
     provider: "gemini",
-    model_name: "gemini-4-hydrogen",
-    label: "Fast (gemini-4-hydrogen)",
+    model_name: "gemini-3.8-flash",
+    label: "Fast (gemini-3.8-flash)",
     short_label: "Fast",
-    description: "High-speed execution — Hydrogen (gemini-4-hydrogen)",
+    description: "High-speed, ultra-low-cost execution — Flash (gemini-3.8-flash)",
+  },
+  {
+    id: "gemini-4-hydrogen",
+    tier: "low",
+    provider: "gemini",
+    model_name: "gemini-4-hydrogen",
+    label: "Hydrogen (gemini-4-hydrogen)",
+    short_label: "Hydrogen",
+    description: "High-efficiency 1M-context workhorse — Hydrogen (gemini-4-hydrogen)",
   },
   {
     id: "claude-opus-5-5",
@@ -262,9 +268,9 @@ export function extractTurnCost(
     const isOpus45 = lowerName.includes("opus-4") || lowerName.includes("opus 4");
     const isOpus = lowerName.includes("opus");
     const isSonnet = lowerName.includes("sonnet");
-    // Preserve legacy Flash pricing ($0.10/$0.025/$0.40) for historical traces while defaulting active "low" tier to Gemini 4 Hydrogen ($1.50/$0.075/$7.50)
-    const isFlash = lowerName.includes("flash");
-    const isHydrogen = lowerName.includes("hydrogen") || (modelTier === "low" && !isFlash && !isSonnet && !isOpus);
+    // Default active "low" tier to Gemini 3.8 Flash ($0.10/$0.025/$0.40) while preserving explicit Hydrogen pricing ($1.50/$0.075/$7.50)
+    const isHydrogen = lowerName.includes("hydrogen");
+    const isFlash = lowerName.includes("flash") || (modelTier === "low" && !isHydrogen && !isSonnet && !isOpus);
 
     // Resolve per-million-token pricing across Anthropic Claude (Opus 5.5: $4/$0.20/$20, Opus 4.5: $5/$0.50/$25, Sonnet: $3/$0.30/$15) and Google Gemini model families
     const inRate = isOpus45 ? 5.00 : isOpus ? 4.00 : isSonnet ? 3.00 : isFlash ? 0.10 : isHydrogen ? 1.50 : 1.25;

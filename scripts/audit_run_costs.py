@@ -101,7 +101,7 @@ def audit_runs(backfill: bool = False, top_n: int = 5) -> Dict[str, Any]:
             model_name = raw_model_name or "gemini-3.8-flash"
             model_tier = raw_model_tier or "low"
         elif "low" in reasoning_str:
-            model_name = raw_model_name or "gemini-4-hydrogen"
+            model_name = raw_model_name or "gemini-3.8-flash"
             model_tier = raw_model_tier or "low"
         elif "gemini-2.5-pro" in reasoning_str or "medium" in reasoning_str:
             model_name = raw_model_name or "gemini-2.5-pro"

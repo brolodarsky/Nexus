@@ -143,7 +143,7 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
 
 # Fallback baseline pricing by standardized tier when model name is unmapped
 TIER_FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
-    "low": MODEL_PRICING["gemini-4-hydrogen"],
+    "low": MODEL_PRICING["gemini-3.8-flash"],
     "medium": MODEL_PRICING["gemini-2.5-pro"],
     "strong": MODEL_PRICING["gemini-4-argon"],
 }

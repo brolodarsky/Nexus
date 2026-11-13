@@ -12,8 +12,9 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
-from nexus.agent.api import run_nexus_agent_with_trace
+from nexus.agent.api import prepend_current_time_to_prompt, run_nexus_agent_with_trace
 from nexus.agent.graph import (
+    _build_system_message,
     _cooperative_sleep,
     _extract_retry_delay,
     _invoke_llm_with_resilience,
@@ -23,6 +24,7 @@ from nexus.agent.graph import (
 )
 from nexus.core.config import EngineSettings
 from nexus.core.constants import get_available_models, get_chat_model, resolve_model_config
+from nexus.core.engine_constitution import inject_root_instructions
 
 
 def test_engine_settings_timeout_and_retries_defaults(monkeypatch: pytest.MonkeyPatch):
@@ -112,18 +114,21 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
     assert catalog["provider"] == "gemini"
     assert any(m["id"] == "strong" for m in catalog["models"])
     low_entry = next(m for m in catalog["models"] if m["id"] == "low")
-    assert low_entry["model_name"] == "gemini-4-hydrogen"
-    assert "Hydrogen" in low_entry["description"]
+    assert low_entry["model_name"] == "gemini-3.8-flash"
+    assert "Flash" in low_entry["description"]
+    hydrogen_entry = next(m for m in catalog["models"] if m["id"] == "gemini-4-hydrogen")
+    assert hydrogen_entry["model_name"] == "gemini-4-hydrogen"
+    assert hydrogen_entry["provider"] == "gemini"
     assert any(m["id"] == "claude-opus-5-5" and m["tier"] == "strong" and m["provider"] == "anthropic" for m in catalog["models"])
     assert any(m["id"] == "claude-sonnet-4-5" and m["tier"] == "low" and m["provider"] == "anthropic" for m in catalog["models"])
 
     low_cfg = resolve_model_config("low")
     assert low_cfg["tier"] == "low"
-    assert low_cfg["model_name"] == "gemini-4-hydrogen"
+    assert low_cfg["model_name"] == "gemini-3.8-flash"
 
     med_cfg = resolve_model_config("medium")
     assert med_cfg["tier"] == "medium"
-    assert med_cfg["model_name"] == "gemini-4-hydrogen"
+    assert med_cfg["model_name"] == "gemini-3.8-flash"
 
     hydrogen_cfg = resolve_model_config("gemini-4-hydrogen")
     assert hydrogen_cfg["tier"] == "low"
@@ -149,9 +154,11 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
     anthropic_llm = get_chat_model(tier="claude-opus-5-5")
     assert getattr(anthropic_llm, "model", None) == "claude-opus-5-5"
     assert getattr(anthropic_llm, "temperature", None) is None
+    assert getattr(anthropic_llm, "model_kwargs", None) == {"cache_control": {"type": "ephemeral"}}
 
     sonnet_llm = get_chat_model(tier="claude-sonnet-4-5")
     assert getattr(sonnet_llm, "temperature", None) == 0.0
+    assert getattr(sonnet_llm, "model_kwargs", None) == {"cache_control": {"type": "ephemeral"}}
 
     recorded_tiers: list[str | None] = []
     mock_llm = MagicMock()
@@ -476,5 +483,69 @@ def test_delete_calendar_event_handles_errors_defensively(monkeypatch: pytest.Mo
 
     result = delete_calendar_event.invoke({"event_id": "nonexistent_event_id"})
     assert "❌ Failed to delete event 'nonexistent_event_id'" in result
+
+
+def test_anthropic_prompt_caching_system_message(monkeypatch: pytest.MonkeyPatch):
+    """Verify Anthropic turns receive ephemeral cache_control on SystemMessage while Gemini receives plain text."""
+    anth_sys = _build_system_message("System constitution", "anthropic")
+    assert isinstance(anth_sys.content, list)
+    assert anth_sys.content[0]["type"] == "text"
+    assert anth_sys.content[0]["text"] == "System constitution"
+    assert anth_sys.content[0]["cache_control"] == {"type": "ephemeral"}
+
+    gem_sys = _build_system_message("System constitution", "gemini")
+    assert gem_sys.content == "System constitution"
+
+    captured_messages = []
+    mock_llm = MagicMock()
+    mock_bound = MagicMock()
+    mock_llm.bind_tools.return_value = mock_bound
+
+    def fake_invoke(msgs):
+        captured_messages.extend(msgs)
+        return AIMessage(content="Cached Claude reply")
+
+    mock_bound.invoke.side_effect = fake_invoke
+    monkeypatch.setattr("nexus.agent.graph.get_chat_model", lambda tier=None, temperature=0.0: mock_llm)
+
+    call_model(
+        {"messages": [HumanMessage(content="[Current Time: 2026-11-12 23:00]\n\nHello")]},
+        config={"configurable": {"thread_id": "cache_test", "model_tier": "claude-opus-5-5"}},
+    )
+    assert len(captured_messages) >= 2
+    sys_msg = captured_messages[0]
+    assert isinstance(sys_msg.content, list)
+    assert sys_msg.content[0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_system_prompt_static_and_user_message_timestamp_injection(monkeypatch: pytest.MonkeyPatch):
+    """Verify inject_root_instructions() omits dynamic timestamps and new user messages receive [Current Time: ...]."""
+    inst1 = inject_root_instructions()
+    inst2 = inject_root_instructions(cache_stable=False)
+    assert inst1 == inst2
+    assert "- Current Time:" not in inst1
+    assert "{current_time}" not in inst1
+
+    stamped = prepend_current_time_to_prompt("Review my Gameplan")
+    assert stamped.startswith("[Current Time: ")
+    assert stamped.endswith("]\n\nReview my Gameplan")
+    # Idempotency check
+    assert prepend_current_time_to_prompt(stamped) == stamped
+
+    captured_state = {}
+    mock_graph = MagicMock()
+
+    def fake_invoke(state, config=None):
+        captured_state.update(state)
+        return {"messages": list(state["messages"]) + [AIMessage(content="Done")]}
+
+    mock_graph.invoke.side_effect = fake_invoke
+    monkeypatch.setattr("nexus.agent.api.nexus_graph", mock_graph)
+
+    run_nexus_agent_with_trace(query="Check my calendar", thread_id="ts_test_thread")
+    sent_human = captured_state["messages"][0]
+    assert isinstance(sent_human, HumanMessage)
+    assert sent_human.content.startswith("[Current Time: ")
+    assert sent_human.content.endswith("]\n\nCheck my calendar")
 
 

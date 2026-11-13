@@ -312,7 +312,7 @@ class AgentTracer:
                     {"target": target_agent})
 
     def info(self, message: str, data: Optional[dict[str, Any]] = None):
-        """Traces general operational status information (e.g. token usage, blackboard bulletins)."""
+        """Traces general operational status information (e.g. token usage, cache hits, retries)."""
         self._print("ℹ️", message)
         self._emit("info", message, data)
 

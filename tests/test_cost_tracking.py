@@ -71,10 +71,10 @@ def test_resolve_model_pricing():
     fuzzy_flash = resolve_model_pricing("models/gemini-3.8-flash-exp")
     assert fuzzy_flash == flash_rates
 
-    # Tier fallbacks ("low" defaults to Gemini 4 Hydrogen)
+    # Tier fallbacks ("low" defaults to Gemini 3.8 Flash)
     low_rates = resolve_model_pricing(tier="low")
     assert low_rates == TIER_FALLBACK_PRICING["low"]
-    assert low_rates == hydrogen_rates
+    assert low_rates == flash_rates
 
     strong_rates = resolve_model_pricing(tier="strong")
     assert strong_rates == TIER_FALLBACK_PRICING["strong"]

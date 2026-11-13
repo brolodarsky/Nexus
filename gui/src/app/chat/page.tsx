@@ -2,9 +2,9 @@
 
 /**
  * page.tsx (`/chat`) — Route orchestrator for the Nexus Chat workspace.
- * Coordinates conversation thread state, SSE streaming (`askBrainStream`), per-turn model tier
- * selection, unsubmitted draft persistence, and Shared Agent Blackboard synchronization,
- * delegating all UI presentation to modular subcomponents in `@/components/chat`.
+ * Coordinates conversation thread state, SSE streaming (`askBrainStream`), per-turn model
+ * selection, and unsubmitted draft persistence, delegating all UI presentation to
+ * modular subcomponents in `@/components/chat`.
  */
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
@@ -20,16 +20,12 @@ import {
   deleteConversation,
   updateConversationTitle,
   autoGenerateConversationTitle,
-  getBoardBulletins,
-  clearBoardBulletins,
-  deleteBoardBulletin,
   stopAndRevertTurn,
   type ActiveRunStatus,
   type BrainStreamCallbacks,
   type ChatHistoryEntry,
   type Conversation,
   type TraceEvent,
-  type BoardBulletin,
   type ModelOption,
 } from "@/lib/api";
 import {
@@ -38,13 +34,11 @@ import {
   BranchLineageBar,
   ChatMessageThread,
   ChatInputBar,
-  BlackboardDrawer,
   useChatBranching,
   FALLBACK_MODELS,
   MODEL_STORAGE_KEY,
   ACTIVE_CONV_STORAGE_KEY,
   CHAT_SIDEBAR_COLLAPSED_KEY,
-  CHAT_BOARD_OPEN_KEY,
   CHAT_INPUT_COLLAPSED_KEY,
   DRAFT_NEW_KEY,
   loadPersistedDrafts,
@@ -81,9 +75,6 @@ export default function ChatPage() {
   const [drafts, setDrafts] = useState<ChatDraftMap>({});
   const [loading, setLoading] = useState(false);
   const [liveTrace, setLiveTrace] = useState<TraceEvent[]>([]);
-  // Shared Agent Blackboard state: live bulletins posted by Flash subagents and Astra
-  const [bulletins, setBulletins] = useState<BoardBulletin[]>([]);
-  const [showBoard, setShowBoard] = useState<boolean>(true);
   // isSidebarCollapsed: toggles the left conversation history menu between full width (w-64) and compact rail (w-14)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   // isMobileSidebarOpen: controls whether the mobile (< 768px) slide-over conversation drawer overlay is open
@@ -178,22 +169,6 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Fetches recent bulletins from `/api/board` scoped to the target (or currently active) conversation
-  const refreshBoard = useCallback((targetConvId?: string | null) => {
-    const convId = targetConvId !== undefined ? targetConvId : activeConvIdRef.current;
-    if (!convId) {
-      setBulletins([]);
-      return;
-    }
-    getBoardBulletins(25, convId)
-      .then((res) => {
-        if (activeConvIdRef.current === convId) {
-          setBulletins(res.bulletins || []);
-        }
-      })
-      .catch((err) => console.error("Failed to load Blackboard bulletins:", err));
-  }, []);
-
   // Appends newly uploaded image URLs to the staged attachments list
   const handleAddImages = useCallback((urls: string[]) => {
     setPendingImages((prev) => [...prev, ...urls]);
@@ -204,7 +179,7 @@ export default function ChatPage() {
     setPendingImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  // Fetch conversations, selectable model catalog, initial Blackboard bulletins, and restore draft state on mount
+  // Fetch conversations, selectable model catalog, and restore draft state on mount
   useEffect(() => {
     queueMicrotask(() => {
       try {
@@ -243,21 +218,6 @@ export default function ChatPage() {
         }
       } catch {
         // Gracefully fall back to default expanded state if storage is inaccessible
-      }
-
-      // Restore right Subagent Blackboard drawer visibility from localStorage so drawer choice survives tab navigation
-      // On mobile screens (< 768px), default to closed so the chat message thread gets 100% of the viewport width on load
-      try {
-        if (window.innerWidth < 768) {
-          setShowBoard(false);
-        } else {
-          const savedBoardOpen = localStorage.getItem(CHAT_BOARD_OPEN_KEY);
-          if (savedBoardOpen !== null) {
-            setShowBoard(savedBoardOpen === "true");
-          }
-        }
-      } catch {
-        // Gracefully fall back to default open drawer if storage is inaccessible
       }
 
       // Restore bottom message bar collapse state from localStorage so panel choice survives tab navigation
@@ -388,7 +348,6 @@ export default function ChatPage() {
           finishLocalStream(true);
           inputRef.current?.focus();
           getConversations().then(setConversations).catch(() => {});
-          refreshBoard(targetConvId);
         };
 
         return {
@@ -411,14 +370,6 @@ export default function ChatPage() {
               liveTraceRef.current = newTrace;
               return newTrace;
             });
-            // Live-refresh the Blackboard whenever a subagent posts a bulletin or completes
-            if (
-              event.message?.includes("Blackboard") ||
-              event.data?.tool === "post_to_board" ||
-              (event.agent === "Subagent" && event.type === "agent_end")
-            ) {
-              refreshBoard(targetConvId);
-            }
           },
           onDone: (event) => {
             setActiveRunIds((prev) => prev.filter((id) => id !== targetConvId));
@@ -500,7 +451,6 @@ export default function ChatPage() {
                 }
               })
               .catch(() => {});
-            refreshBoard(targetConvId);
           },
           onSyncRequired: () => {
             setActiveRunIds((prev) => prev.filter((id) => id !== targetConvId));
@@ -562,7 +512,6 @@ export default function ChatPage() {
                 finishLocalStream(true);
                 inputRef.current?.focus();
                 getConversations().then(setConversations).catch(() => {});
-                refreshBoard(targetConvId);
                 return;
               }
             } catch {
@@ -583,7 +532,6 @@ export default function ChatPage() {
                   finishLocalStream(true);
                   inputRef.current?.focus();
                   getConversations().then(setConversations).catch(() => {});
-                  refreshBoard(targetConvId);
                   recovered = true;
                   break;
                 }
@@ -616,7 +564,7 @@ export default function ChatPage() {
 
       return buildCallbacks(options?.reconnectAttempt ?? 0, options);
     },
-    [refreshBoard]
+    []
   );
 
   // Loads persisted history for `convId` and seamlessly re-attaches the live Thinking Panel if a background run is active
@@ -714,18 +662,15 @@ export default function ChatPage() {
     [createStreamCallbacks]
   );
 
-  // Fetch messages, sync Blackboard bulletins, and re-attach any live run when active conversation changes
+  // Fetch messages and re-attach any live run when active conversation changes
   useEffect(() => {
     if (!activeConvId) {
       queueMicrotask(() => {
         setMessages([]);
-        setBulletins([]);
         setActiveRunModel(null);
       });
       return;
     }
-    // Sync thread-isolated blackboard bulletins for this conversation
-    refreshBoard(activeConvId);
 
     // If an SSE agent response stream is actively in-flight for this thread (e.g. just initiated in handleSubmit),
     // do not let initial history fetch wipe out live streaming messages or reset loading state
@@ -738,7 +683,7 @@ export default function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeConvId, refreshBoard, syncConversation]);
+  }, [activeConvId, syncConversation]);
 
   // Auto-focus input when switching conversations
   useEffect(() => {
@@ -824,7 +769,6 @@ export default function ChatPage() {
           if (now - firstMissing >= 2500 || socketWentSilent || activeStreamConvIdRef.current !== convId) {
             delete missingRunSinceRef.current[convId];
             void syncConversation(convId, undefined, { forceReattach: true });
-            refreshBoard(convId);
           }
         }
       } catch {
@@ -839,7 +783,7 @@ export default function ChatPage() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [activeRunIds.length, loading, refreshBoard, syncConversation]);
+  }, [activeRunIds.length, loading, syncConversation]);
 
   // Recover stalled/completed conversations when the tab becomes visible, window regains focus, or network comes online
   useEffect(() => {
@@ -876,7 +820,6 @@ export default function ChatPage() {
             activeStreamConvIdRef.current = null;
           }
           await syncConversation(convId);
-          refreshBoard(convId);
           getConversations().then(setConversations).catch(() => {});
         } else {
           // Run is still executing on server: attach if unattached, or re-attach if the socket froze while away
@@ -912,7 +855,7 @@ export default function ChatPage() {
       window.removeEventListener("focus", handleWindowResume);
       window.removeEventListener("online", handleWindowResume);
     };
-  }, [refreshBoard, syncConversation]);
+  }, [syncConversation]);
 
   // Clean up SSE stream abort and flush any pending debounced draft writes on unmount or tab unload
   useEffect(() => {
@@ -1288,28 +1231,14 @@ export default function ChatPage() {
       const history = await getChatHistory(activeConvId);
       setMessages(mapHistoryEntriesToMessages(history));
 
-      // 5. Refresh blackboard bulletins and conversations list
-      refreshBoard(activeConvId);
+      // 5. Refresh conversations list
       getConversations().then(setConversations);
     } catch (err) {
       console.error("Failed to stop and revert turn:", err);
     } finally {
       inputRef.current?.focus();
     }
-  }, [activeConvId, refreshBoard, setProgrammaticInput]);
-
-  const handleClearBoard = useCallback(async () => {
-    await clearBoardBulletins(activeConvId);
-    refreshBoard();
-  }, [activeConvId, refreshBoard]);
-
-  const handleDismissBulletin = useCallback(
-    async (id: number) => {
-      await deleteBoardBulletin(id);
-      refreshBoard();
-    },
-    [refreshBoard]
-  );
+  }, [activeConvId, setProgrammaticInput]);
 
   // handleToggleSidebarCollapse: memoized handler to toggle left conversation history menu and persist choice
   const handleToggleSidebarCollapse = useCallback((collapsed: boolean) => {
@@ -1403,29 +1332,6 @@ export default function ChatPage() {
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
   }, [loading, handleStopAndRevert]);
 
-  // handleToggleBoard: memoized handler to toggle right Subagent Blackboard drawer and persist choice
-  const handleToggleBoard = useCallback(() => {
-    setShowBoard((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(CHAT_BOARD_OPEN_KEY, String(next));
-      } catch {
-        // Ignore quota/privacy errors in restricted browser contexts
-      }
-      return next;
-    });
-  }, []);
-
-  // handleCloseBoard: memoized handler to collapse/close right Subagent Blackboard drawer and persist choice
-  const handleCloseBoard = useCallback(() => {
-    setShowBoard(false);
-    try {
-      localStorage.setItem(CHAT_BOARD_OPEN_KEY, "false");
-    } catch {
-      // Ignore quota/privacy errors in restricted browser contexts
-    }
-  }, []);
-
   const handleRefreshConversations = useCallback(async () => {
     const list = await getConversations();
     setConversations(list);
@@ -1486,9 +1392,6 @@ export default function ChatPage() {
         <ChatHeader
           title={activeConv?.title}
           activeConvId={activeConvId}
-          showBoard={showBoard}
-          bulletinCount={bulletins.length}
-          onToggleBoard={handleToggleBoard}
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
           onUpdateTitle={handleUpdateTitle}
           onAutoGenerateTitle={handleAutoGenerateTitle}
@@ -1538,18 +1441,6 @@ export default function ChatPage() {
           onSubmit={handleSubmit}
         />
       </div>
-
-      {/* ── Right Drawer: Shared Subagent Blackboard (`blackboard.db`) ───────── */}
-      {showBoard && (
-        <BlackboardDrawer
-          bulletins={bulletins}
-          threadId={activeConvId}
-          onRefresh={refreshBoard}
-          onClear={handleClearBoard}
-          onDismiss={handleDismissBulletin}
-          onClose={handleCloseBoard}
-        />
-      )}
     </div>
   );
 }

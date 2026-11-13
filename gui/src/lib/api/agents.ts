@@ -295,8 +295,7 @@ export interface StopAndRevertResponse {
  *   2. Cancels all unapproved pending HITL transactions (file creations, edits, moves, deletions).
  *   3. Rolls back LangGraph checkpointer SQLite database (`memory.sqlite`) to pre-turn state.
  *   4. Purges the turn's user and assistant messages from SQLite `chats.db`.
- *   5. Cleans up thread-scoped blackboard bulletins posted during the aborted turn.
- *   6. Restores the user's prompt text and attached images for immediate composer recovery.
+ *   5. Restores the user's prompt text and attached images for immediate composer recovery.
  *
  * @param conversationId The UUID of the conversation thread to stop and revert.
  * @returns A promise resolving to the StopAndRevertResponse payload.

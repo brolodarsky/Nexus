@@ -4,7 +4,7 @@ graph.py — Universal NexusAgent LangGraph Implementation.
 Rather than partitioning intelligence across rigid domain packages (router/, career/, librarian/)
 or restricting directory access, Nexus runs ONE universal agent design (`NexusAgent`) that:
   1. Injects `Vault/Master Instructions.md` (`inject_root_instructions()`) dynamically before every LLM call
-     (pre-hydrated with `{vault_structure}`, `{shared_tools}`, `{current_time}`, and `{user_name}`).
+     (pre-hydrated with `{vault_structure}`, `{shared_tools}`, and `{user_name}`).
   2. Navigates any Vault section directly (`get_directory_structure`, `read_file`, `search_vault`,
      `get_recent_modifications`) and reads `<Section>/Section Instructions.md` on demand.
   3. Surgically modifies existing Vault notes via `modify_file(file_path, target, replacement, reasoning)`,
@@ -65,7 +65,6 @@ from nexus.core.constants import (
     resolve_model_config,
 )
 # inject_root_instructions: Dynamically loads and hydrates `Vault/Master Instructions.md` (<1ms disk read)
-from nexus.core.blackboard import post_bulletin
 from nexus.core.engine_constitution import inject_root_instructions
 from nexus.core.hitl_queue import (
     get_hitl_execution_context,
@@ -91,8 +90,6 @@ from nexus.shared_tools.shared import (
     list_browser_tabs,
     modify_file,
     move_file,
-    post_to_board,
-    read_board,
     read_browser_tabs,
     read_file,
     run_shared_tool_cli,
@@ -369,8 +366,7 @@ class NexusAgentState(TypedDict):
 # ── Core Tool Set (Shared by Parent NexusAgent and Subagents) ────────────────
 
 # Most-used deterministic tools bound directly so the agent can navigate, read, surgically edit,
-# check recent modifications, search the live web, inspect emails/calendar, post/read bulletins on the
-# Shared Blackboard, or invoke any other `[CLI]` tool on demand.
+# check recent modifications, search the live web, inspect emails/calendar, or invoke any other `[CLI]` tool on demand.
 CORE_TOOLS = [
     read_file,
     modify_file,
@@ -389,12 +385,36 @@ CORE_TOOLS = [
     create_calendar_event,
     update_calendar_event,
     delete_calendar_event,
-    post_to_board,
-    read_board,
     send_telegram_notification,
     transcribe_media,
     run_shared_tool_cli,
 ]
+
+
+# ── Helper: Provider-Aware SystemMessage Builder for Prompt Caching ──────────
+
+# `content: str` is the hydrated markdown system instructions from `inject_root_instructions()`.
+# `provider: str` is the normalized provider key (`"gemini"`, `"anthropic"`, `"openai"`).
+# `-> SystemMessage` returns a SystemMessage with an explicit ephemeral cache breakpoint when targeting Anthropic,
+# or a clean plain-string SystemMessage for Gemini/OpenAI automatic prefix caching.
+def _build_system_message(content: str, provider: str) -> SystemMessage:
+    """Construct a SystemMessage configured for optimal provider KV prompt caching.
+
+    For Anthropic Claude models, wraps the static constitutional prompt in a content block with
+    `cache_control: {"type": "ephemeral"}` so the large root instructions block is cached cleanly across
+    distinct threads and parallel subagent invocations (90-95% input cost savings on hits).
+    """
+    if provider == "anthropic":
+        return SystemMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        )
+    return SystemMessage(content=content)
 
 
 # ── Helper: Telemetry & Structured Content Block Text Extraction ─────────────
@@ -709,22 +729,22 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
     # rather than raising through ToolNode.invoke() and terminating the subagent turn mid-flight.
     sub_tool_node = ToolNode(CORE_TOOLS, handle_tool_errors=True)
 
+    # Static subagent system prefix (no per-subagent serial numbers) so parallel and sequential subagents
+    # share the exact same byte-identical prefix for Turn-1 KV prompt caching across Gemini and Anthropic.
     sub_sys_content = (
-        inject_root_instructions()
-        + "\n\n# Subagent Execution Mode\n"
-        + f"You are an isolated fast-tier subagent (Subagent #{serial}) spawned by the parent NexusAgent (Astra) to execute the specific task below. "
-        + "Read any relevant `Section Instructions.md` and Vault notes needed, execute the task thoroughly, "
-        + "and return a concise, high-signal, grounded synthesis to the parent agent. "
-        + "Your final synthesis will automatically be published to the Shared Agent Blackboard (`blackboard.db`), "
-        + "or you may explicitly call `post_to_board(title, content, author)` to post structured bulletins."
+        f"{inject_root_instructions()}\n\n"
+        "### SUBAGENT EXECUTION PROTOCOL\n"
+        "You are an ephemeral, isolated Subagent worker spawned by the Supervisor (NexusAgent).\n"
+        "1. Read any relevant `Section Instructions.md` and Vault notes needed to execute your assigned task thoroughly.\n"
+        "2. Return a concise, high-signal, grounded synthesis of your findings in your final response "
+        "so the Supervisor can integrate your work directly."
     )
 
     # Run ReAct loop until the subagent finishes tool calls and returns its synthesis
     sub_messages: list[BaseMessage] = [
-        SystemMessage(content=sub_sys_content),
+        _build_system_message(sub_sys_content, sub_resolved["provider"]),
         HumanMessage(content=task_prompt),
     ]
-    posted_to_board = False
     turn_idx = 0
 
     sub_thread_id = f"{parent_thread}:{sub_id}" if parent_thread else sub_id
@@ -758,19 +778,6 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
             if not getattr(ai_msg, "tool_calls", None):
                 final_text = extract_message_text(ai_msg)
                 elapsed_sub = round(time.time() - t0, 2)
-                # Automatically publish the subagent's distilled report onto the Shared Blackboard if not already posted
-                if final_text.strip() and not posted_to_board:
-                    first_line = task_prompt.strip().splitlines()[0][:120]
-                    bulletin_id = post_bulletin(
-                        author=f"Subagent #{serial} ({effective_tier})",
-                        title=first_line,
-                        content=final_text,
-                        thread_id=parent_convo,
-                    )
-                    local_tracer.info(
-                        f"📋 Posted Bulletin #{bulletin_id} to Blackboard",
-                        data={"bulletin_id": bulletin_id, "title": first_line},
-                    )
                 local_tracer.llm_response(final_text, metadata={"turn": turn_idx, "latency_seconds": elapsed_sub})
                 local_tracer.agent_end(f"Completed in {elapsed_sub:.1f}s")
                 return final_text
@@ -783,8 +790,6 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
             for tc in ai_msg.tool_calls:
                 tc_name = tc.get("name", "unknown")
                 tc_id = tc.get("id")
-                if tc_name == "post_to_board":
-                    posted_to_board = True
                 local_tracer.tool_call(tc_name, tc.get("args", {}), call_id=tc_id)
 
             tool_res = _invoke_tool_node_resilient(sub_tool_node, {"messages": sub_messages})
@@ -938,15 +943,7 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     raw_messages = state.get("messages", [])
     cleaned_messages = _sanitize_messages(raw_messages)
 
-    # 1. Inject fresh root instructions (`Vault/Master Instructions.md` + `{vault_structure}` + `{shared_tools}`)
-    # Never mutate `SystemMessage` with rolling summaries so Message #0 and the entire conversation prefix remain
-    # byte-identical for automatic provider KV prompt caching across turns.
-    system_prompt_content = inject_root_instructions()
-
-    ephemeral_sys_msg = SystemMessage(content=system_prompt_content)
-    messages_for_llm: list[BaseMessage] = [ephemeral_sys_msg] + cleaned_messages
-
-    # 2. Extract optional per-turn `model_tier` override from LangGraph `RunnableConfig` (`configurable.model_tier`).
+    # 1. Extract optional per-turn `model_tier` override from LangGraph `RunnableConfig` (`configurable.model_tier`).
     # Keeping `model_tier` in `RunnableConfig` rather than `messages` preserves 100% KV prompt-cache prefix stability.
     configurable = (config or {}).get("configurable") or {}
     active_thread_id = str(configurable.get("thread_id") or "nexus_primary")
@@ -961,6 +958,13 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     effective_tier = resolved_model["tier"]
     active_model_name = resolved_model["model_name"]
     active_provider = resolved_model["provider"]
+
+    # 2. Inject fresh static root instructions (`Vault/Master Instructions.md` + `{vault_structure}` + `{shared_tools}`)
+    # Never mutate `SystemMessage` with rolling summaries or timestamps so Message #0 and the entire conversation prefix
+    # remain byte-identical for automatic provider KV prompt caching across turns (with explicit cache_control on Anthropic).
+    system_prompt_content = inject_root_instructions()
+    ephemeral_sys_msg = _build_system_message(system_prompt_content, active_provider)
+    messages_for_llm: list[BaseMessage] = [ephemeral_sys_msg] + cleaned_messages
 
     # Record active provider scoped to active_convo_id so parallel subagents match their exact turn's provider family
     set_active_turn_provider(active_provider, thread_id=active_convo_id)

@@ -1,7 +1,7 @@
 """
 test_sqlite_concurrency.py — Unit and integration tests for SQLite WAL mode, busy timeouts, and concurrent multi-agent access.
 
-Validates that all core SQLite databases (`chats.db`, `blackboard.db`, `hitl.db`, `memory.sqlite`):
+Validates that all core SQLite databases (`chats.db`, `hitl.db`, `memory.sqlite`):
   1. Operate with Write-Ahead Logging (`PRAGMA journal_mode = WAL`) enabled.
   2. Set a 30,000ms engine-level busy timeout (`PRAGMA busy_timeout = 30000`).
   3. Execute concurrent reads and writes across multiple worker threads without `sqlite3.OperationalError: database is locked`.
@@ -13,8 +13,6 @@ import pytest
 from pathlib import Path
 
 from nexus.agent.graph import MEMORY_DB_PATH, get_latest_checkpoint_id
-import nexus.core.blackboard as blackboard
-from nexus.core.blackboard import get_board_connection, get_bulletins, init_board_db, post_bulletin
 import nexus.core.chats_db as chats_db
 from nexus.core.chats_db import _get_conn as get_chats_conn, create_conversation, log_message, get_chat_history
 from nexus.core.hitl_queue import get_db_connection as get_hitl_conn, add_transaction, get_pending_transactions
@@ -23,15 +21,6 @@ from nexus.core.hitl_queue import get_db_connection as get_hitl_conn, add_transa
 def test_chats_db_wal_mode_and_busy_timeout():
     """Verify chats.db initializes with WAL mode and 30s busy timeout."""
     with get_chats_conn() as conn:
-        journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0].upper()
-        busy_timeout = conn.execute("PRAGMA busy_timeout;").fetchone()[0]
-        assert journal_mode == "WAL"
-        assert busy_timeout == 30000
-
-
-def test_blackboard_db_wal_mode_and_busy_timeout():
-    """Verify blackboard.db initializes with WAL mode and 30s busy timeout."""
-    with get_board_connection() as conn:
         journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0].upper()
         busy_timeout = conn.execute("PRAGMA busy_timeout;").fetchone()[0]
         assert journal_mode == "WAL"
@@ -84,28 +73,3 @@ def test_concurrent_chat_logging_without_lock(tmp_path: Path, monkeypatch: pytes
 
     history = get_chat_history(conv_id)
     assert len(history) == worker_count * messages_per_worker
-
-
-def test_concurrent_blackboard_bulletin_posting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Verify multiple parallel subagents posting to blackboard.db succeed concurrently under WAL mode."""
-    # Isolate BOARD_DB_PATH to tmp_path so test bulletins never pollute live blackboard.db
-    monkeypatch.setattr(blackboard, "BOARD_DB_PATH", tmp_path / "test_blackboard.db")
-    init_board_db()
-    test_thread = "concurrency_test_thread"
-    worker_count = 8
-
-    def _worker_bulletin(worker_idx: int):
-        post_bulletin(
-            title=f"Bulletin from Worker #{worker_idx}",
-            content=f"Findings payload from worker #{worker_idx}",
-            author=f"Subagent #{worker_idx}",
-            thread_id=test_thread,
-        )
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-        futures = [executor.submit(_worker_bulletin, i) for i in range(worker_count)]
-        for f in concurrent.futures.as_completed(futures):
-            f.result()
-
-    bulletins = get_bulletins(thread_id=test_thread)
-    assert len(bulletins) >= worker_count

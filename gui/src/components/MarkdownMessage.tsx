@@ -31,7 +31,7 @@ export interface WikiLinkConfig {
 // WikiLinkContext: Supplies optional in-place selection callback or navigation options to Vault note pills.
 // Supports both a raw callback function `(target: string) => void` (legacy pattern) and a structured `WikiLinkConfig` object.
 // If an in-place callback is provided (e.g. inside /vault), clicking a pill switches the active note in-place.
-// If omitted (e.g. in /chat, /hitl, or blackboard feeds), clicking navigates to `/vault?note=${target}` in a new tab.
+// If omitted (e.g. in /chat or /hitl), clicking navigates to `/vault?note=${target}` in a new tab.
 export const WikiLinkContext = createContext<WikiLinkConfig | ((target: string) => void) | undefined>(undefined);
 
 // ── Obsidian Wiki-Link & LaTeX Preprocessor & Rich Markdown Renderer ─

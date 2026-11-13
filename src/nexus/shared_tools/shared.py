@@ -937,64 +937,7 @@ def run_shared_tool_cli(module: str, cli_args: Optional[List[str]] = None) -> st
         return f"Error running `{clean_mod}`: {e}"
 
 
-# ── 6. Shared Inter-Agent Blackboard / Message Board Tools ───────────────────
-
-@tool
-def post_to_board(
-    title: str,
-    content: str,
-    author: str = "Subagent",
-    pinned: bool = False,
-    thread_id: Optional[str] = None,
-) -> str:
-    """Post a structured situational bulletin onto the Shared Agent Blackboard (`blackboard.db`).
-
-    Use this tool in subagents and multi-step missions to broadcast distilled findings
-    (e.g. Gmail inbox sweep takeaways, Google Calendar schedule audits, Vault status discoveries,
-    or mission progress) so the primary orchestrator (`NexusAgent` / Astra), peer subagents,
-    and the GUI Bulletin Feed have live shared situational awareness without redundant API sweeps.
-    Bulletins are automatically scoped to the active conversation thread via ambient execution context.
-
-    Args:
-        title: Concise headline for the bulletin (e.g. "Oct 22 Multi-Inbox Gmail Triage" or "Wed Oct 21 Calendar Audit").
-        content: Markdown summary of findings, actionable items, and key metadata.
-        author: Identifier for the agent posting (e.g. "Flash: Gmail Sweep", "Flash: Calendar Audit", "Astra").
-        pinned: Set True to pin high-priority standing bulletins to the top of the board.
-        thread_id: Optional explicit conversation/thread UUID override. If omitted, uses active thread context.
-    """
-    from nexus.core.blackboard import post_bulletin
-
-    bulletin_id = post_bulletin(
-        author=author,
-        title=title,
-        content=content,
-        pinned=pinned,
-        thread_id=thread_id,
-    )
-    return f"📋 Bulletin #{bulletin_id} posted to Shared Blackboard: '{title}'."
-
-
-@tool
-def read_board(
-    limit: int = 12,
-    thread_id: Optional[str] = None,
-) -> str:
-    """Read recent bulletins from the Shared Agent Blackboard (`blackboard.db`).
-
-    Call this to inspect recent findings already gathered by Flash subagents
-    before launching duplicate external API sweeps. Automatically scopes to
-    the active conversation thread via ambient execution context.
-
-    Args:
-        limit: Maximum number of recent bulletins to return (default: 12).
-        thread_id: Optional explicit conversation/thread UUID override to inspect a specific session.
-    """
-    from nexus.core.blackboard import format_board_digest
-
-    return format_board_digest(limit=limit, thread_id=thread_id)
-
-
-# ── 7. Mobile Push Notification Tool (Telegram Bridge) ───────────────────────
+# ── 6. Mobile Push Notification Tool (Telegram Bridge) ───────────────────────
 
 # `message: str` is the Markdown or plain-text notification body to push to the user's phone.
 @tool

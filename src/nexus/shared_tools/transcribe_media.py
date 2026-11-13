@@ -1,7 +1,7 @@
 """
 transcribe_media.py — Agentic multimodal audio and video transcription tool for Nexus.
 
-Uses Google GenAI SDK (`google.genai`) and the Gemini File API (`gemini-4-hydrogen`)
+Uses Google GenAI SDK (`google.genai`) and the Gemini File API (configured low-tier model e.g. `gemini-3.8-flash` or `gemini-4-hydrogen`)
 to transcribe arbitrary audio (.mp3, .wav, .m4a, .aac, .flac, .ogg, .opus, .webm)
 and video (.mp4, .mov, .mkv, .avi, .webm) files verbatim into properly punctuated,
 timestamped text. Supports automatic note saving into the Obsidian Vault.
@@ -122,7 +122,7 @@ def resolve_media_file(file_path: Union[str, Path]) -> Tuple[Path, str, str]:
 # `output_note_path: Optional[str]` optional relative path in Vault to save Markdown transcript note.
 # `include_timestamps: bool` whether to format transcript with [MM:SS] timestamps at speaker turns.
 # `save_to_vault: bool` whether to persist the formatted transcript note into the Obsidian Vault.
-# `model: Optional[str]` Gemini model override (defaults to configured `gemini_model_low` e.g. `gemini-4-hydrogen`).
+# `model: Optional[str]` Gemini model override (defaults to configured `gemini_model_low` e.g. `gemini-3.8-flash`).
 # `custom_prompt: Optional[str]` optional specialized instructions for the Gemini transcription model.
 # `-> str` returns the complete verbatim transcript text.
 def transcribe_media_file(
@@ -151,8 +151,8 @@ def transcribe_media_file(
     file_size_bytes = resolved_file.stat().st_size
     file_size_mb = round(file_size_bytes / (1024 * 1024), 2)
 
-    # 3. Resolve active model identifier (defaults to fast low-tier model e.g. gemini-4-hydrogen)
-    effective_model = model or settings.gemini_model_low or "gemini-4-hydrogen"
+    # 3. Resolve active model identifier (defaults to fast low-tier model e.g. gemini-3.8-flash)
+    effective_model = model or settings.gemini_model_low or "gemini-3.8-flash"
     if not effective_model.startswith("models/"):
         effective_model = f"models/{effective_model}"
 

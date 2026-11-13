@@ -2,8 +2,7 @@
 
 /**
  * ChatHeader.tsx — Top header bar for the Nexus Chat workspace.
- * Displays the active conversation title (with inline click-to-rename and AI auto-generation),
- * orchestrator subtitle, and Shared Blackboard toggle button.
+ * Displays the active conversation title (with inline click-to-rename and AI auto-generation).
  */
 
 // memo: Prevents header re-renders when sibling chat components or drafts mutate
@@ -13,9 +12,6 @@ import { useState, useRef, useEffect, memo } from "react";
 // ChatHeaderProps: defines the display state and callbacks for the Chat workspace header
 // - title: active conversation title string (falls back to "Chat" when starting a fresh session)
 // - activeConvId: UUID of the active conversation thread (or null/undefined if in a draft state)
-// - showBoard: boolean indicating whether the right-hand Subagent Blackboard drawer is open
-// - bulletinCount: number of active bulletins currently on the Blackboard
-// - onToggleBoard: callback invoked when the user clicks the Subagent Board toggle button
 // - onOpenMobileSidebar: optional callback invoked on mobile (< 768px) to open the slide-over conversation drawer
 // - onUpdateTitle: optional async callback invoked when committing an edited conversation title
 // - onAutoGenerateTitle: optional async callback invoked to generate a smart AI title via fast low-tier model
@@ -23,9 +19,6 @@ import { useState, useRef, useEffect, memo } from "react";
 export interface ChatHeaderProps {
   title?: string;
   activeConvId?: string | null;
-  showBoard: boolean;
-  bulletinCount: number;
-  onToggleBoard: () => void;
   onOpenMobileSidebar?: () => void;
   onUpdateTitle?: (id: string, newTitle: string) => Promise<void> | void;
   onAutoGenerateTitle?: (id: string) => Promise<void> | void;
@@ -35,9 +28,6 @@ export interface ChatHeaderProps {
 const ChatHeader = memo(function ChatHeader({
   title,
   activeConvId,
-  showBoard,
-  bulletinCount,
-  onToggleBoard,
   onOpenMobileSidebar,
   onUpdateTitle,
   onAutoGenerateTitle,
@@ -292,24 +282,6 @@ const ChatHeader = memo(function ChatHeader({
             )}
           </div>
         )}
-      </div>
-
-      <div className="flex items-center gap-2 shrink-0">
-        <button
-          onClick={onToggleBoard}
-          className={`text-xs px-2.5 md:px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 ${showBoard
-            ? "bg-accent-cyan/15 border-accent-cyan/30 text-accent-cyan"
-            : "bg-bg-tertiary border-border-subtle text-text-secondary hover:text-text-primary"
-            }`}
-          title="Toggle Agent Blackboard"
-        >
-          <span>
-            <span className="hidden sm:inline">Subagent </span>Board
-          </span>
-          <span className="px-1.5 py-0.2 rounded-full bg-bg-primary/60 text-[0.65rem] font-mono">
-            {bulletinCount}
-          </span>
-        </button>
       </div>
     </header>
   );

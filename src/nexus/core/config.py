@@ -22,15 +22,17 @@ class EngineSettings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     ai_provider: str = "auto"
     # Default Gemini model identifiers mapped to the 3 capability tiers when running on the Gemini provider
-    gemini_model_low: str = "gemini-4-hydrogen"
-    gemini_model_medium: str = "gemini-4-hydrogen"
+    # `"low"` and `"medium"` default to ultra-low-cost `gemini-3.8-flash` (subagents, titling, fast turns),
+    # while `gemini-4-hydrogen` remains selectable as an explicit model option in the Chat UI.
+    gemini_model_low: str = "gemini-3.8-flash"
+    gemini_model_medium: str = "gemini-3.8-flash"
     gemini_model_strong: str = "gemini-4-argon"
     # Default Anthropic Claude model identifiers mapped to capability tiers (`claude-opus-5-5` for strong, `claude-sonnet-4-5` for low/medium)
     anthropic_model_low: str = "claude-sonnet-4-5"
     anthropic_model_medium: str = "claude-sonnet-4-5"
     anthropic_model_strong: str = "claude-opus-5-5"
     # Default tier selection (`"low"`, `"medium"`, or `"strong"`) for the parent NexusAgent vs. spawned subagents
-    # Primary agent defaults to `"strong"` (Astra / `gemini-4-argon`) while subagents default to `"low"` (`gemini-4-hydrogen`)
+    # Primary agent defaults to `"strong"` (Astra / `gemini-4-argon`) while subagents default to `"low"` (`gemini-3.8-flash`)
     nexus_primary_tier: str = "strong"
     nexus_subagent_tier: str = "low"
     # Provider Request Timeout & Retries:

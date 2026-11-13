@@ -5,6 +5,7 @@ the Next.js + FastAPI Control Panel, direct invocation (`python -m nexus.agent.a
 and the Evaluation Suite (`src/nexus/evals/runner.py`).
 """
 import base64
+from datetime import datetime
 import mimetypes
 import time
 from pathlib import Path
@@ -48,6 +49,20 @@ def resolve_image_to_data_url(image_ref: str) -> str:
     data = file_path.read_bytes()
     encoded = base64.b64encode(data).decode("utf-8")
     return f"data:{mime};base64,{encoded}"
+
+
+# Prepends a localized sent-at timestamp to each incoming HumanMessage (`[Current Time: YYYY-MM-DD HH:MM]`)
+# so historical turns retain their immutable timestamp inside `SqliteSaver` and the static `SystemMessage`
+# remains 100% cache-aligned across hour boundaries without invalidating provider KV prompt caches.
+def prepend_current_time_to_prompt(prompt: str) -> str:
+    """Attach the current local timestamp to an incoming user prompt idempotently."""
+    stripped = prompt.lstrip()
+    if stripped.startswith("[Current Time:"):
+        return prompt
+    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if not prompt:
+        return f"[Current Time: {current_time_str}]"
+    return f"[Current Time: {current_time_str}]\n\n{prompt}"
 
 
 # Optional[dict], Optional[str], and Optional[list[str]] allow callers to omit metadata filters, explicit thread IDs,
@@ -107,6 +122,9 @@ def run_nexus_agent_with_trace(
         filter_str = ", ".join(f"{k}={v}" for k, v in filters.items() if v)
         if filter_str:
             user_prompt = f"[Context Filter Hint: {filter_str}]\n\n{query}"
+
+    # Attach current local timestamp to the new user message rather than SystemMessage to keep SystemMessage 100% cache-stable
+    user_prompt = prepend_current_time_to_prompt(user_prompt)
 
     # Construct HumanMessage: plain text if no images, or structured multimodal content blocks if images are present
     if images:
@@ -284,7 +302,7 @@ def execute_vault_query(
     )
     try:
         return nexus_graph.invoke(
-            {"messages": [HumanMessage(content=query)]},
+            {"messages": [HumanMessage(content=prepend_current_time_to_prompt(query))]},
             config=config,
         )
     finally:

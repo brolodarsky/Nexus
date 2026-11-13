@@ -42,7 +42,6 @@ from nexus.core.chats_db import (
     revert_last_turn,
 )
 from nexus.core.hitl_queue import cancel_pending_transactions_for_conversation
-from nexus.core.blackboard import clear_bulletins
 from nexus.agent.graph import (
     get_latest_checkpoint_id,
     rollback_checkpoints_for_thread,
@@ -473,7 +472,7 @@ async def auto_generate_conversation_title(conversation_id: str):
     Summarizes the opening turn of a conversation into a concise 3-6 word title using the fast low-tier model.
     - conversation_id: UUID primary key identifying the conversation
     - Reads first user query and optional assistant excerpt from SQLite `messages` table
-    - Invokes fast `tier="low"` LLM (`gemini-4-hydrogen` or `claude-sonnet-4-5`) with low temperature
+    - Invokes fast `tier="low"` LLM (`gemini-3.8-flash` or `claude-sonnet-4-5`) with low temperature
     - Falls back gracefully to a prompt excerpt if the model call times out or encounters an error
     """
     conv = get_conversation(conversation_id)
@@ -1035,8 +1034,7 @@ async def stop_and_revert_turn(req: StopAndRevertRequest):
       2. Cancels all unapproved pending HITL transactions (file creations, edits, moves, deletions).
       3. Rolls back LangGraph checkpointer SQLite database (`memory.sqlite`) to pre-turn state.
       4. Deletes the turn's user and assistant messages from SQLite `chats.db`.
-      5. Cleans up any thread-scoped blackboard bulletins posted during the aborted turn.
-      6. Returns the user's prompt text and attached images for immediate composer restoration.
+      5. Returns the user's prompt text and attached images for immediate composer restoration.
     """
     conv_id = req.conversation_id.strip()
     if not conv_id:
@@ -1069,12 +1067,6 @@ async def stop_and_revert_turn(req: StopAndRevertRequest):
     elif active_run:
         restored_query = active_run.query
         restored_images = active_run.images
-
-    # Phase 5: Clean up thread Blackboard bulletins if any were created during this turn
-    try:
-        clear_bulletins(thread_id=conv_id)
-    except Exception:
-        pass
 
     return StopAndRevertResponse(
         status="stopped_and_reverted",

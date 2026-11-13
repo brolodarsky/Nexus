@@ -124,6 +124,11 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
     if not raw_choice or lower_choice in ("default", "auto"):
         effective_tier = default_tier
         model_name = active_map[effective_tier]
+    elif lower_choice in ("gemini-4-hydrogen", "hydrogen"):
+        # Explicit selection of Hydrogen even when `"low"` tier defaults to `gemini-3.8-flash`
+        active_provider = "gemini"
+        model_name = "gemini-4-hydrogen"
+        effective_tier = "low"
     elif lower_choice in ("low", "medium", "strong"):
         effective_tier = lower_choice
         model_name = active_map[effective_tier]
@@ -213,8 +218,26 @@ def get_available_models() -> dict[str, Any]:
             },
         )
 
+    # Include `"gemini-4-hydrogen"` explicitly alongside `"strong"` (Argon) and `"low"` (Flash)
+    # whenever it is not already bound as the configured `"strong"` or `"low"` Gemini model.
+    if (
+        default_resolved["provider"] != "anthropic"
+        and "gemini-4-hydrogen" not in (strong_cfg["model_name"], low_cfg["model_name"])
+    ):
+        models.append(
+            {
+                "id": "gemini-4-hydrogen",
+                "tier": "low",
+                "provider": "gemini",
+                "model_name": "gemini-4-hydrogen",
+                "label": "Hydrogen (gemini-4-hydrogen)",
+                "short_label": "Hydrogen",
+                "description": "High-efficiency 1M-context workhorse — Hydrogen (gemini-4-hydrogen)",
+            }
+        )
+
     # Append Anthropic Claude options (`claude-opus-5-5` for Strong, `claude-sonnet-4-5` for Low/Fast)
-    # when the primary provider is not already Anthropic so all 4 options appear side-by-side in the Chat UI.
+    # when the primary provider is not already Anthropic so all selectable models appear together in the Chat UI.
     if default_resolved["provider"] != "anthropic":
         models.extend(
             [
@@ -282,10 +305,15 @@ def get_chat_model(
             tok in lower_name
             for tok in ("opus-5", "opus 5", "opus-4-7", "opus 4.7", "sonnet-5", "sonnet 5")
         )
+        # Enable Anthropic Prompt Caching automatically across the conversation and tool-loop prefix:
+        # Top-level `cache_control={"type": "ephemeral"}` instructs the Anthropic Messages API to place an
+        # automatic ephemeral cache breakpoint (5-minute TTL, 0.1x input rate on hits) on the final cacheable
+        # block in each request payload, eliminating redundant re-processing across multi-turn chats & tool loops.
         anthropic_kwargs: dict[str, Any] = {
             "model": model_name,
             "timeout": timeout,
             "max_retries": max_retries,
+            "model_kwargs": {"cache_control": {"type": "ephemeral"}},
         }
         if not is_temp_deprecated and temperature is not None:
             anthropic_kwargs["temperature"] = temperature
