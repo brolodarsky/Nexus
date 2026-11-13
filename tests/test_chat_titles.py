@@ -194,7 +194,9 @@ def test_ask_brain_stream_mocked(client, temp_conv):
         "model_tier": "low",
         "model_name": "gemini-4-hydrogen",
     }
-    with patch("nexus.agent.api.run_nexus_agent_with_trace", return_value=mock_result):
+    with patch("nexus.agent.api.run_nexus_agent_with_trace", return_value=mock_result), patch(
+        "nexus.api.routers.agents.schedule_auto_title"
+    ) as mock_schedule:
         with client.stream(
             "POST",
             "/api/agents/ask/stream",
@@ -207,4 +209,221 @@ def test_ask_brain_stream_mocked(client, temp_conv):
             assert response.status_code == 200
             lines = [line for line in response.iter_lines() if line]
             assert any("done" in line for line in lines)
+        mock_schedule.assert_called_once_with(temp_conv)
+
+
+def test_stream_triggers_real_background_auto_title(client, temp_conv):
+    """Verify /ask/stream schedules and completes backend Turn-1 auto-titling in SQLite."""
+    import time
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    mock_result = {
+        "response": "Here is the simulated test response.",
+        "domain": "general",
+        "confidence": 0.95,
+        "reasoning": "Mock test routing",
+        "model_tier": "low",
+        "model_name": "gemini-4-hydrogen",
+    }
+    mock_model = MagicMock()
+    mock_model.invoke.return_value = SimpleNamespace(content="Streamed Thread Summary")
+
+    with patch("nexus.agent.api.run_nexus_agent_with_trace", return_value=mock_result), patch(
+        "nexus.core.constants.get_chat_model", return_value=mock_model
+    ):
+        with client.stream(
+            "POST",
+            "/api/agents/ask/stream",
+            json={
+                "query": "How does WAL mode improve SQLite concurrency?",
+                "conversation_id": temp_conv,
+                "model_tier": "low",
+            },
+        ) as response:
+            assert response.status_code == 200
+            lines = [line for line in response.iter_lines() if line]
+            assert any("done" in line for line in lines)
+
+        # Wait briefly for the bounded background executor to persist the generated title
+        deadline = time.monotonic() + 5.0
+        conv = chats_db.get_conversation(temp_conv)
+        while time.monotonic() < deadline and (conv or {}).get("title_source") != "auto":
+            time.sleep(0.05)
+            conv = chats_db.get_conversation(temp_conv)
+
+    assert conv is not None
+    assert conv["title"] == "Streamed Thread Summary"
+    assert conv["title_source"] == "auto"
+    assert mock_model.invoke.call_count == 1
+
+
+def test_concurrent_auto_title_coalesces_single_llm_call(temp_conv):
+    """Verify per-conversation _inflight_titles lock coalesces parallel non-forced requests into one LLM call."""
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    chats_db.log_message("user", "Design a thread-safe SQLite connection wrapper", conversation_id=temp_conv)
+    chats_db.log_message("assistant", "Use contextlib.contextmanager to close handles cleanly.", conversation_id=temp_conv)
+
+    call_count = 0
+    call_lock = threading.Lock()
+    entered_invoke = threading.Event()
+
+    class SlowFakeModel:
+        def invoke(self, _prompt):
+            nonlocal call_count
+            with call_lock:
+                call_count += 1
+            entered_invoke.set()
+            time.sleep(0.15)
+            return SimpleNamespace(content="Thread-Safe SQLite Wrapper")
+
+    from nexus.core.chat_titles import auto_generate_title_sync
+
+    with patch("nexus.core.constants.get_chat_model", return_value=SlowFakeModel()):
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [
+                pool.submit(auto_generate_title_sync, temp_conv, force=False)
+                for _ in range(4)
+            ]
+            assert entered_invoke.wait(timeout=3.0)
+            results = [f.result(timeout=5.0) for f in futures]
+
+    assert call_count == 1
+    assert all(r["title"] == "Thread-Safe SQLite Wrapper" for r in results)
+    conv = chats_db.get_conversation(temp_conv)
+    assert conv["title"] == "Thread-Safe SQLite Wrapper"
+    assert conv["title_source"] == "auto"
+
+
+def test_auto_title_cas_does_not_overwrite_manual_rename_mid_flight(temp_conv):
+    """Verify atomic SQLite CAS refuses to overwrite a manual rename made while LLM titling is in flight."""
+    from types import SimpleNamespace
+
+    chats_db.log_message("user", "Initial placeholder prompt", conversation_id=temp_conv)
+    chats_db.log_message("assistant", "Initial assistant response", conversation_id=temp_conv)
+
+    class RacingFakeModel:
+        def invoke(self, _prompt):
+            # Simulate user manually renaming the thread right before the AI title commits
+            chats_db.update_conversation_title(temp_conv, "User Custom Title", source="manual")
+            return SimpleNamespace(content="Stale AI Title")
+
+    from nexus.core.chat_titles import auto_generate_title_sync
+
+    with patch("nexus.core.constants.get_chat_model", return_value=RacingFakeModel()):
+        res = auto_generate_title_sync(temp_conv, force=False)
+
+    assert res["status"] == "unchanged"
+    assert res.get("skipped_race") is True
+    assert res["title"] == "User Custom Title"
+    conv = chats_db.get_conversation(temp_conv)
+    assert conv["title"] == "User Custom Title"
+    assert conv["title_source"] == "manual"
+
+
+def test_branch_placeholder_auto_title_preserves_prefix_and_skips_brief(temp_conv):
+    """Verify branch placeholder titling skips synthetic branch_context briefs and keeps the branch badge."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from nexus.core.chat_branching import fork_conversation
+
+    root_u = chats_db.log_message("user", "Root question about Kubernetes pods", conversation_id=temp_conv)
+    chats_db.log_message("assistant", "Root answer about pods.", conversation_id=temp_conv)
+
+    branch_res = fork_conversation(
+        parent_conversation_id=temp_conv,
+        parent_message_id=root_u,
+        branch_mode="tangent",
+    )
+    branch_id = branch_res["conversation_id"]
+    branch_conv = chats_db.get_conversation(branch_id)
+    assert branch_conv["title_source"] == "placeholder"
+    assert branch_conv["title"].startswith("🌿 ")
+
+    # Inject a synthetic branch_context brief plus a real branch turn
+    chats_db.log_message(
+        "assistant",
+        "SYNTHETIC_BRANCH_BRIEF_SHOULD_BE_IGNORED",
+        agent="branch_context",
+        conversation_id=branch_id,
+    )
+    chats_db.log_message("user", "Explain atomic compare-and-swap in SQLite", conversation_id=branch_id)
+    chats_db.log_message("assistant", "Use conditional WHERE clauses.", conversation_id=branch_id)
+
+    mock_model = MagicMock()
+    mock_model.invoke.return_value = SimpleNamespace(content="Atomic SQLite CAS")
+
+    from nexus.core.chat_titles import auto_generate_title_sync
+
+    with patch("nexus.core.constants.get_chat_model", return_value=mock_model):
+        res = auto_generate_title_sync(branch_id, force=False)
+
+    sent_prompt = mock_model.invoke.call_args[0][0]
+    assert "SYNTHETIC_BRANCH_BRIEF_SHOULD_BE_IGNORED" not in sent_prompt
+    assert "Explain atomic compare-and-swap" in sent_prompt
+    assert res["title"] == "🌿 Atomic SQLite CAS"
+    updated_branch = chats_db.get_conversation(branch_id)
+    assert updated_branch["title"] == "🌿 Atomic SQLite CAS"
+    assert updated_branch["title_source"] == "auto"
+
+
+def test_force_false_skips_auto_and_legacy_titles_and_conn_closes(client, tmp_path, monkeypatch):
+    """Verify legacy DB migration sets title_source='legacy', ?force=false respects it, and _get_conn closes handles."""
+    import sqlite3
+
+    db_path = tmp_path / "legacy_chats.db"
+    # Pre-seed a legacy conversations table without the new title_source column
+    raw_conn = sqlite3.connect(str(db_path))
+    raw_conn.execute(
+        """
+        CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            title TEXT DEFAULT 'New Chat',
+            created_at TEXT,
+            last_updated TEXT
+        )
+        """
+    )
+    raw_conn.execute("INSERT INTO conversations (id, title) VALUES ('legacy-conv', 'Existing Legacy Title')")
+    raw_conn.commit()
+    raw_conn.close()
+
+    monkeypatch.setattr(chats_db, "DB_PATH", db_path)
+    chats_db.init_db()
+
+    legacy = chats_db.get_conversation("legacy-conv")
+    assert legacy is not None
+    assert legacy["title_source"] == "legacy"
+
+    chats_db.log_message("user", "Legacy user prompt", conversation_id="legacy-conv")
+    # Non-forced auto-title (used by automatic GUI sync) must NOT overwrite legacy titles
+    res_skip = client.post("/api/agents/ask/conversations/legacy-conv/auto-title?force=false")
+    assert res_skip.status_code == 200
+    assert res_skip.json()["status"] == "unchanged"
+    assert res_skip.json()["title"] == "Existing Legacy Title"
+
+    # Forced auto-title (`✨` sparkle button) MUST override and mark as 'auto'
+    from unittest.mock import AsyncMock, MagicMock
+    mock_model = AsyncMock()
+    mock_model.ainvoke.return_value = MagicMock(content="Regenerated Title")
+    with patch("nexus.core.constants.get_chat_model", return_value=mock_model):
+        res_force = client.post("/api/agents/ask/conversations/legacy-conv/auto-title?force=true")
+    assert res_force.status_code == 200
+    assert res_force.json()["title"] == "Regenerated Title"
+    assert chats_db.get_conversation("legacy-conv")["title_source"] == "auto"
+
+    # Subsequent non-forced call skips 'auto' titles too
+    res_skip_auto = client.post("/api/agents/ask/conversations/legacy-conv/auto-title?force=false")
+    assert res_skip_auto.status_code == 200
+    assert res_skip_auto.json()["status"] == "unchanged"
+    assert res_skip_auto.json()["title"] == "Regenerated Title"
+
+    # Verify _get_conn closes file descriptors cleanly (no leaked open handle locking Windows unlink)
+    db_path.unlink()
+    assert not db_path.exists()
+
 

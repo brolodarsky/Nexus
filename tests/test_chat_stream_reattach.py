@@ -110,7 +110,9 @@ def test_active_run_backlog_and_live_reattach(client: TestClient, temp_conv: str
         finally:
             post_done.set()
 
-    with patch("nexus.agent.api.run_nexus_agent_with_trace", side_effect=simulated_agent):
+    with patch("nexus.agent.api.run_nexus_agent_with_trace", side_effect=simulated_agent), patch(
+        "nexus.api.routers.agents.schedule_auto_title"
+    ):
         post_thread = threading.Thread(target=run_initial_post, daemon=True)
         post_thread.start()
 

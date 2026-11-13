@@ -66,6 +66,7 @@ export interface Conversation {
   parent_message_id?: number | null;     // Optional SQLite `messages.id` in the parent where the fork occurred
   branch_mode?: "tangent" | "fork" | string | null; // Branching mode ('tangent' fresh ALU vs 'fork' full clone)
   merged_at?: string | null;             // ISO-8601 timestamp when distilled and merged back to parent
+  title_source?: "placeholder" | "auto" | "manual" | "legacy" | string | null; // Provenance tracking whether AI auto-title ran or user renamed manually
 }
 
 // Interface representing an isolated subagent lifecycle within a structured run snapshot
@@ -213,12 +214,14 @@ export async function updateConversationTitle(
 
 // Automatically generates a concise 3-6 word topic title using the low-tier model (Hydrogen / Sonnet)
 // - conversationId: target conversation thread to summarize and update in SQLite chats.db
-// Promise settles with `{ status: "updated", conversation_id, title }`
+// - force: when true (manual ✨ trigger), regenerates even if already titled; when false, coalesces with backend Turn-1 job
+// Promise settles with `{ status: "updated" | "unchanged", conversation_id, title }`
 export async function autoGenerateConversationTitle(
-  conversationId: string
+  conversationId: string,
+  force = true
 ): Promise<{ status: string; conversation_id?: string; title?: string; fallback?: boolean }> {
   return apiFetch<{ status: string; conversation_id?: string; title?: string; fallback?: boolean }>(
-    `/api/agents/ask/conversations/${conversationId}/auto-title`,
+    `/api/agents/ask/conversations/${conversationId}/auto-title?force=${force ? "true" : "false"}`,
     {
       method: "POST",
     }

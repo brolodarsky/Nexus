@@ -41,6 +41,7 @@ from nexus.core.chats_db import (
     delete_conversation, update_conversation_title,
     revert_last_turn,
 )
+from nexus.core.chat_titles import auto_generate_title_async, schedule_auto_title
 from nexus.core.hitl_queue import cancel_pending_transactions_for_conversation
 from nexus.agent.graph import (
     get_latest_checkpoint_id,
@@ -457,82 +458,27 @@ async def update_conversation(conversation_id: str, req: UpdateTitleRequest):
     if not new_title:
         raise HTTPException(status_code=400, detail="Title cannot be empty.")
     
-    # Verify the target conversation exists in the SQLite store before writing
-    conv = get_conversation(conversation_id)
+    # Verify the target conversation exists in the SQLite store before writing (offloaded off event loop)
+    conv = await asyncio.to_thread(get_conversation, conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' not found.")
     
-    update_conversation_title(conversation_id, new_title)
+    await asyncio.to_thread(update_conversation_title, conversation_id, new_title, source="manual")
     return {"status": "updated", "conversation_id": conversation_id, "title": new_title}
 
 # Automatically generates a concise topic title for an existing conversation using the fast low-tier model
 @router.post("/ask/conversations/{conversation_id}/auto-title")
-async def auto_generate_conversation_title(conversation_id: str):
+async def auto_generate_conversation_title(conversation_id: str, force: bool = True):
     """
-    Summarizes the opening turn of a conversation into a concise 3-6 word title using the fast low-tier model.
+    Summarizes a conversation into a concise 3-6 word title using the fast low-tier model.
     - conversation_id: UUID primary key identifying the conversation
-    - Reads first user query and optional assistant excerpt from SQLite `messages` table
-    - Invokes fast `tier="low"` LLM (`gemini-3.8-flash` or `claude-sonnet-4-5`) with low temperature
-    - Falls back gracefully to a prompt excerpt if the model call times out or encounters an error
+    - force: When True (manual ✨ trigger), regenerates even if already titled; when False (automatic UI sync),
+             coalesces with any active backend Turn-1 job and skips conversations already titled or manually edited.
     """
-    conv = get_conversation(conversation_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' not found.")
-
-    history = get_chat_history(conversation_id=conversation_id, limit=6)
-    if not history:
-        return {"status": "unchanged", "title": conv.get("title", "New Chat")}
-
-    # Locate the first user prompt and first assistant message in chronological history
-    first_user_msg = next((m["content"] for m in history if m.get("role") == "user"), None)
-    first_assistant_msg = next((m["content"] for m in history if m.get("role") == "assistant"), None)
-
-    if not first_user_msg:
-        return {"status": "unchanged", "title": conv.get("title", "New Chat")}
-
-    # Default fallback title in case LLM is unavailable or unconfigured
-    fallback_title = first_user_msg.strip()[:35].strip()
-    if len(first_user_msg.strip()) > 35:
-        fallback_title += "..."
-
     try:
-        from nexus.core.constants import get_chat_model
-        from nexus.agent.graph import extract_message_text
-        # Use low-tier model (Hydrogen / Sonnet) for sub-second, ultra-low-cost title summarization
-        chat_model = get_chat_model(tier="low", temperature=0.2)
-        
-        prompt = (
-            "Generate a concise, high-signal, natural conversation title (maximum 3 to 6 words) "
-            "summarizing the topic of this chat. Do NOT use quotation marks, ending punctuation, "
-            "prefixes like 'Title:', or markdown formatting. Return ONLY the raw title text.\n\n"
-            f"User prompt: {first_user_msg[:400]}"
-        )
-        if first_assistant_msg:
-            prompt += f"\nAssistant excerpt: {first_assistant_msg[:400]}"
-
-        # BaseChatModel.ainvoke: asynchronous coroutine executing the prompt without blocking the event loop
-        resp = await chat_model.ainvoke(prompt)
-        # extract_message_text: cleanly unpacks text across both string and Gemini 3+ block-list formats
-        raw_content = extract_message_text(resp)
-        cleaned_title = raw_content.strip().strip('"\'`').replace("\n", " ").strip()
-        
-        # Strip common LLM preamble prefixes if present
-        for prefix in ("Title:", "title:", "Topic:", "topic:"):
-            if cleaned_title.startswith(prefix):
-                cleaned_title = cleaned_title[len(prefix):].strip()
-        cleaned_title = cleaned_title.strip('"\'`')
-        
-        # Enforce maximum sensible display length for sidebar neatness
-        if len(cleaned_title) > 60:
-            cleaned_title = cleaned_title[:57] + "..."
-            
-        final_title = cleaned_title if cleaned_title else fallback_title
-        update_conversation_title(conversation_id, final_title)
-        return {"status": "updated", "conversation_id": conversation_id, "title": final_title}
-    except Exception as exc:
-        # Fall back gracefully to prompt snippet without failing HTTP response
-        update_conversation_title(conversation_id, fallback_title)
-        return {"status": "updated", "conversation_id": conversation_id, "title": fallback_title, "fallback": True}
+        return await auto_generate_title_async(conversation_id, force=force)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 # Returns message history for a specific conversation
 @router.get("/ask/history")
@@ -643,6 +589,9 @@ async def ask_brain(request: AskRequest):
             model_name=used_model,
             cost_usd=turn_cost_formatted,
         )
+
+        # Schedule backend-driven Turn-1 auto-titling for placeholder conversations (non-blocking)
+        schedule_auto_title(conversation_id)
 
         # Phase 5: Persist structured JSON run snapshot to logs/runs/
         log_run(
@@ -766,6 +715,9 @@ def _run_pipeline(
             model_name=used_model,
             cost_usd=turn_cost_formatted,
         )
+
+        # Trigger background Turn-1 auto-titling directly on the backend so switching/closing tabs never skips titling
+        schedule_auto_title(conversation_id)
 
         # Persist structured JSON run snapshot to logs/runs/
         log_run(

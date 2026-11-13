@@ -339,12 +339,15 @@ def fork_conversation(
         prior_messages = sliced_history[:-1]
 
     branch_title = _derive_branch_title(parent_conv.get("title") or "Chat", focal_messages, explicit_title=title)
+    # Mark explicit user-supplied titles as "manual" so background auto-titling never overwrites them
+    branch_title_source = "manual" if (title and title.strip()) else "placeholder"
 
     child_conv_id = create_branch_conversation(
         title=branch_title,
         parent_conversation_id=parent_conversation_id,
         parent_message_id=resolved_fork_msg_id,
         branch_mode=effective_mode,
+        title_source=branch_title_source,
     )
 
     if effective_mode == "fork" or not prior_messages:

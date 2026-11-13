@@ -37,11 +37,11 @@ from langchain_core.messages import HumanMessage
 
 from nexus.core.chats_db import (
     create_conversation,
-    get_chat_history,
+    get_conversation,
     init_db as init_chats_db,
     log_message,
-    update_conversation_title,
 )
+from nexus.core.chat_titles import auto_generate_title_sync, schedule_auto_title
 from nexus.core.config import EngineSettings
 from nexus.core.constants import PROJECT_ROOT, get_chat_model, resolve_model_config
 from nexus.core.cost import calculate_token_cost
@@ -534,34 +534,21 @@ def _generate_mobile_conversation_title(
     user_query: str,
     assistant_reply: str = "",
 ) -> str:
-    """Summarize the opening mobile turn into a concise `📱 <3-6 Word Title>` in `chats.db`."""
+    """Summarize the opening mobile turn into a concise `📱 <3-6 Word Title>` in `chats.db` via shared thread-safe service."""
     clean_query = user_query.strip().replace("\n", " ")
     fallback = f"📱 {clean_query[:38].strip()}" + ("..." if len(clean_query) > 38 else "")
     try:
-        from nexus.agent.graph import extract_message_text
-
-        chat_model = get_chat_model(tier="low", temperature=0.2)
-        prompt = (
-            "Generate a concise, high-signal conversation title (maximum 3 to 6 words) summarizing this mobile "
-            "voice/text request. Do NOT use quotes, ending punctuation, prefixes, or markdown. Return ONLY the title.\n\n"
-            f"User prompt: {clean_query[:400]}"
+        res = auto_generate_title_sync(
+            conversation_id,
+            force=False,
+            prefix="📱 ",
+            user_query=user_query,
+            assistant_reply=assistant_reply,
         )
-        if assistant_reply:
-            prompt += f"\nAssistant excerpt: {assistant_reply[:300]}"
-        resp = chat_model.invoke(prompt)
-        raw_title = extract_message_text(resp).strip().strip('"\'`').replace("\n", " ").strip()
-        for prefix in ("Title:", "title:", "Topic:", "topic:", "📱"):
-            if raw_title.startswith(prefix):
-                raw_title = raw_title[len(prefix) :].strip()
-        raw_title = raw_title.strip('"\'`')
-        if len(raw_title) > 52:
-            raw_title = raw_title[:49] + "..."
-        final_title = f"📱 {raw_title}" if raw_title else fallback
-    except Exception:
-        final_title = fallback
-
-    update_conversation_title(conversation_id, final_title)
-    return final_title
+        return res.get("title") or fallback
+    except Exception as exc:
+        logger.warning(f"Mobile auto-title failed for {conversation_id}: {exc}")
+        return fallback
 
 
 # `conversation_id: str` is the UUID of the active conversation turn.
@@ -844,6 +831,11 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
             model_tier=requested_tier,
             images=uploaded_images if uploaded_images else None,
         )
+    except Exception:
+        # Ensure failed/aborted first mobile turns still get auto-titled in background instead of sticking as a snippet
+        if is_new_conversation:
+            schedule_auto_title(conversation_id, prefix="📱 ")
+        raise
     finally:
         unsub()
         reset_trace_thread_id(trace_token)
@@ -903,12 +895,15 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
         metadata={"source": "telegram", "model_tier": used_tier, "model_name": used_model},
     )
 
-    # Auto-title new mobile conversation using fast low-tier model
+    # Auto-title new mobile conversation (or recover any prior placeholder mobile thread) using fast low-tier model
     if is_new_conversation:
         final_title = _generate_mobile_conversation_title(conversation_id, effective_query, response_text)
     else:
-        history_convs = get_chat_history(conversation_id=conversation_id, limit=1)
-        final_title = f"📱 Thread ({conversation_id[:8]})"
+        existing_conv = get_conversation(conversation_id)
+        if existing_conv and (existing_conv.get("title_source") or "legacy") == "placeholder":
+            final_title = _generate_mobile_conversation_title(conversation_id, effective_query, response_text)
+        else:
+            final_title = (existing_conv or {}).get("title") or f"📱 Thread ({conversation_id[:8]})"
 
     # ── Phase 6: Inspect Staged HITL Transactions & Assemble Ping-Back ──
     staged_hitl = get_pending_hitl_for_conversation(conversation_id)

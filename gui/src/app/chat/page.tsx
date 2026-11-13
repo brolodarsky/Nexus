@@ -127,6 +127,8 @@ export default function ChatPage() {
   const isInitialLoadDoneRef = useRef<boolean>(false);
   // activeStreamConvIdRef: tracks which conversation thread currently owns an active SSE stream to guard against race conditions
   const activeStreamConvIdRef = useRef<string | null>(null);
+  // autoTitleInFlightRef: deduplicates concurrent client-side title sync requests per conversation UUID
+  const autoTitleInFlightRef = useRef<Set<string>>(new Set());
 
   // Keep mirror refs synchronized with React state after commits
   useEffect(() => {
@@ -302,12 +304,52 @@ export default function ChatPage() {
     inputRef.current?.focus();
   }, []);
 
+  // Refreshes the sidebar conversation list and automatically syncs any newly completed placeholder titles
+  // (`title_source === "placeholder"`) with the backend's Turn-1 auto-title job (`force=false` coalesces without duplicate LLM calls)
+  const refreshConversationsAndSyncTitles = useCallback((candidateIds?: string[]) => {
+    getConversations()
+      .then((updatedList) => {
+        setConversations(updatedList);
+        const targets = updatedList.filter((c) => {
+          if (c.title_source !== "placeholder") return false;
+          if (candidateIds && !candidateIds.includes(c.id)) return false;
+          return !autoTitleInFlightRef.current.has(c.id);
+        });
+        for (const conv of targets) {
+          autoTitleInFlightRef.current.add(conv.id);
+          autoGenerateConversationTitle(conv.id, false)
+            .then((titleRes) => {
+              if (titleRes.title && (titleRes.status === "updated" || titleRes.status === "unchanged")) {
+                setConversations((prev) =>
+                  prev.map((c) =>
+                    c.id === conv.id
+                      ? {
+                          ...c,
+                          title: titleRes.title!,
+                          title_source:
+                            titleRes.status === "updated" && !titleRes.fallback
+                              ? "auto"
+                              : c.title_source,
+                        }
+                      : c
+                  )
+                );
+              }
+            })
+            .catch((err) => console.error("Failed to sync auto-generated conversation title:", err))
+            .finally(() => {
+              autoTitleInFlightRef.current.delete(conv.id);
+            });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Helper building unified SSE stream callbacks shared between fresh submissions and mid-turn re-attachments
   const createStreamCallbacks = useCallback(
     (
       targetConvId: string,
       options?: {
-        isNewConv?: boolean;
         fallbackModelTier?: string | null;
         fallbackModelName?: string | null;
         reconnectAttempt?: number;
@@ -316,7 +358,6 @@ export default function ChatPage() {
     ): BrainStreamCallbacks => {
       // Recursive inner builder avoids self-referencing the outer `useCallback` binding before initialization
       const buildCallbacks = (attempt: number, attemptOptions?: typeof options): BrainStreamCallbacks => {
-        const isNewConv = Boolean(attemptOptions?.isNewConv);
         const minReplyLen = attemptOptions?.minReplyHistoryLength;
 
         const hasCommittedAssistantReply = (history: ChatHistoryEntry[]) => {
@@ -347,7 +388,7 @@ export default function ChatPage() {
           lastCompletedTurnRef.current = { convId: targetConvId, at: Date.now() };
           finishLocalStream(true);
           inputRef.current?.focus();
-          getConversations().then(setConversations).catch(() => {});
+          refreshConversationsAndSyncTitles([targetConvId]);
         };
 
         return {
@@ -430,27 +471,7 @@ export default function ChatPage() {
             lastCompletedTurnRef.current = { convId: targetConvId, at: Date.now() };
             finishLocalStream(true);
             inputRef.current?.focus();
-            getConversations()
-              .then((updatedList) => {
-                setConversations(updatedList);
-                // For a newly initialized conversation thread, automatically generate a concise topic title with AI
-                if (isNewConv && targetConvId) {
-                  autoGenerateConversationTitle(targetConvId)
-                    .then((titleRes) => {
-                      if (titleRes.title) {
-                        setConversations((prev) =>
-                          prev.map((c) =>
-                            c.id === targetConvId ? { ...c, title: titleRes.title! } : c
-                          )
-                        );
-                      }
-                    })
-                    .catch((err) =>
-                      console.error("Failed to auto-generate title on first turn:", err)
-                    );
-                }
-              })
-              .catch(() => {});
+            refreshConversationsAndSyncTitles([targetConvId]);
           },
           onSyncRequired: () => {
             setActiveRunIds((prev) => prev.filter((id) => id !== targetConvId));
@@ -511,7 +532,7 @@ export default function ChatPage() {
                 lastCompletedTurnRef.current = { convId: targetConvId, at: Date.now() };
                 finishLocalStream(true);
                 inputRef.current?.focus();
-                getConversations().then(setConversations).catch(() => {});
+                refreshConversationsAndSyncTitles([targetConvId]);
                 return;
               }
             } catch {
@@ -531,7 +552,7 @@ export default function ChatPage() {
                   lastCompletedTurnRef.current = { convId: targetConvId, at: Date.now() };
                   finishLocalStream(true);
                   inputRef.current?.focus();
-                  getConversations().then(setConversations).catch(() => {});
+                  refreshConversationsAndSyncTitles([targetConvId]);
                   recovered = true;
                   break;
                 }
@@ -564,7 +585,7 @@ export default function ChatPage() {
 
       return buildCallbacks(options?.reconnectAttempt ?? 0, options);
     },
-    []
+    [refreshConversationsAndSyncTitles]
   );
 
   // Loads persisted history for `convId` and seamlessly re-attaches the live Thinking Panel if a background run is active
@@ -728,7 +749,7 @@ export default function ChatPage() {
           setActiveRunIds(nextIds);
         }
         if (finishedIds.length > 0) {
-          getConversations().then(setConversations).catch(() => {});
+          void refreshConversationsAndSyncTitles(finishedIds);
         }
 
         const convId = activeConvIdRef.current;
@@ -783,7 +804,7 @@ export default function ChatPage() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [activeRunIds.length, loading, syncConversation]);
+  }, [activeRunIds.length, loading, syncConversation, refreshConversationsAndSyncTitles]);
 
   // Recover stalled/completed conversations when the tab becomes visible, window regains focus, or network comes online
   useEffect(() => {
@@ -797,8 +818,9 @@ export default function ChatPage() {
         .then((res) => {
           const nextIds = res.active_runs.map((r) => r.conversation_id);
           const prevIds = activeRunIdsRef.current;
-          if (prevIds.some((id) => !nextIds.includes(id))) {
-            getConversations().then(setConversations).catch(() => {});
+          const finishedIds = prevIds.filter((id) => !nextIds.includes(id));
+          if (finishedIds.length > 0) {
+            void refreshConversationsAndSyncTitles(finishedIds);
           }
           setActiveRunIds(nextIds);
         })
@@ -820,7 +842,7 @@ export default function ChatPage() {
             activeStreamConvIdRef.current = null;
           }
           await syncConversation(convId);
-          getConversations().then(setConversations).catch(() => {});
+          void refreshConversationsAndSyncTitles([convId]);
         } else {
           // Run is still executing on server: attach if unattached, or re-attach if the socket froze while away
           const socketStale =
@@ -855,7 +877,7 @@ export default function ChatPage() {
       window.removeEventListener("focus", handleWindowResume);
       window.removeEventListener("online", handleWindowResume);
     };
-  }, [syncConversation]);
+  }, [syncConversation, refreshConversationsAndSyncTitles]);
 
   // Clean up SSE stream abort and flush any pending debounced draft writes on unmount or tab unload
   useEffect(() => {
@@ -1073,26 +1095,26 @@ export default function ChatPage() {
   const handleUpdateTitle = useCallback(async (convId: string, newTitle: string) => {
     const trimmed = newTitle.trim();
     if (!trimmed) return;
-    // Optimistically update conversation title in state for instant UI feedback
+    // Optimistically update conversation title and mark as manual so background auto-titling cannot clobber it
     setConversations((prev) =>
-      prev.map((c) => (c.id === convId ? { ...c, title: trimmed } : c))
+      prev.map((c) => (c.id === convId ? { ...c, title: trimmed, title_source: "manual" } : c))
     );
     try {
       await updateConversationTitle(convId, trimmed);
     } catch (err) {
       console.error("Failed to update conversation title:", err);
       // Reconcile against ground-truth database state on error
-      getConversations().then(setConversations);
+      getConversations().then(setConversations).catch(() => {});
     }
   }, []);
 
-  // Invokes fast AI auto-titling for an existing conversation using the low-tier Flash/Sonnet model
+  // Invokes fast AI auto-titling for an existing conversation using the low-tier Flash/Sonnet model (force=true overrides manual/existing titles)
   const handleAutoGenerateTitle = useCallback(async (convId: string) => {
     try {
-      const res = await autoGenerateConversationTitle(convId);
+      const res = await autoGenerateConversationTitle(convId, true);
       if (res.title) {
         setConversations((prev) =>
-          prev.map((c) => (c.id === convId ? { ...c, title: res.title! } : c))
+          prev.map((c) => (c.id === convId ? { ...c, title: res.title!, title_source: "auto" } : c))
         );
       }
     } catch (err) {
@@ -1137,6 +1159,14 @@ export default function ChatPage() {
         getConversations().then(setConversations);
       } else {
         activeStreamConvIdRef.current = targetConvId;
+        // Optimistically bump `last_updated` and move the active thread to index 0 on Send
+        // so the sidebar updates recency immediately without waiting for `onDone` to refetch SQLite
+        const bumpedIso = new Date().toISOString();
+        setConversations((prev) => {
+          const target = prev.find((c) => c.id === targetConvId);
+          if (!target) return prev;
+          return [{ ...target, last_updated: bumpedIso }, ...prev.filter((c) => c.id !== targetConvId)];
+        });
       }
 
       const turnModelOption =
@@ -1182,7 +1212,6 @@ export default function ChatPage() {
         query || "Analyze the attached image(s).",
         targetConvId,
         createStreamCallbacks(targetConvId, {
-          isNewConv,
           fallbackModelTier: turnModelOption?.tier ?? selectedModelTier,
           fallbackModelName: turnModelOption?.model_name ?? null,
           minReplyHistoryLength: expectedReplyMinLength,

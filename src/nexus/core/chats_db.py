@@ -4,12 +4,16 @@ chats_db.py — Unified UI chat persistence.
 import sqlite3
 import json
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 
 DB_PATH = Path(__file__).parent.parent.parent.parent / "logs" / "chats.db"
 
+# @contextmanager: turns a generator into a `with`-statement resource guard that always closes the SQLite handle
+@contextmanager
 def _get_conn():
+    """Yields a WAL-configured SQLite connection, committing on clean exit and closing deterministically."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     # timeout=30.0: Waits up to 30s for any transient lock to release before raising OperationalError
     # PRAGMA journal_mode=WAL: Enables Write-Ahead Logging so concurrent readers never block active writers
@@ -18,7 +22,18 @@ def _get_conn():
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout=30000;")
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+        # Commit pending writes if a transaction is open (skip when autocommit/VACUUM disabled transactions)
+        if conn.in_transaction:
+            conn.commit()
+    except Exception:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+    finally:
+        # Always close the OS file handle so concurrent threads never leak open descriptors on Windows
+        conn.close()
 
 def init_db():
     migrated_count = 0
@@ -33,7 +48,8 @@ def init_db():
                 parent_conversation_id TEXT,
                 parent_message_id INTEGER,
                 branch_mode TEXT,
-                merged_at TEXT
+                merged_at TEXT,
+                title_source TEXT DEFAULT 'placeholder'
             )
         """)
         conn.execute("""
@@ -135,6 +151,9 @@ def init_db():
             conn.execute("ALTER TABLE conversations ADD COLUMN branch_mode TEXT")
         if "merged_at" not in conv_cols:
             conn.execute("ALTER TABLE conversations ADD COLUMN merged_at TEXT")
+        # Track title provenance ('placeholder' | 'auto' | 'manual' | 'legacy') so background auto-titling never clobbers user edits
+        if "title_source" not in conv_cols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN title_source TEXT DEFAULT 'legacy'")
 
     # If legacy rows were migrated out of the primary messages table, vacuum the database file to reclaim disk space
     if migrated_count > 0:
@@ -145,13 +164,21 @@ def init_db():
 
 init_db()
 
-def create_conversation(title: str = "New Chat") -> str:
+def create_conversation(title: str = "New Chat", title_source: str = "placeholder") -> str:
+    """
+    Creates a new root conversation row in `chats.db`.
+
+    Parameters:
+      title: Initial display title (typically `"New Chat"` or a truncated first-prompt placeholder).
+      title_source: Provenance tag (`"placeholder"`, `"auto"`, or `"manual"`). Defaults to `"placeholder"`
+                    so background Turn-1 auto-titling upgrades it safely without overwriting manual edits.
+    """
     conv_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO conversations (id, title, created_at, last_updated) VALUES (?, ?, ?, ?)",
-            (conv_id, title, now, now)
+            "INSERT INTO conversations (id, title, created_at, last_updated, title_source) VALUES (?, ?, ?, ?, ?)",
+            (conv_id, title, now, now, title_source),
         )
         conn.commit()
     return conv_id
@@ -162,6 +189,7 @@ def create_branch_conversation(
     parent_conversation_id: str,
     parent_message_id: int | None = None,
     branch_mode: str = "tangent",
+    title_source: str = "placeholder",
 ) -> str:
     """
     Creates a new branched child conversation in `chats.db` linked to its parent thread and fork message.
@@ -171,6 +199,7 @@ def create_branch_conversation(
       parent_conversation_id: UUID of the parent conversation from which this branch was spawned.
       parent_message_id: Optional SQLite `messages.id` in the parent conversation where the fork occurred.
       branch_mode: Either `'tangent'` (context-sliced fresh ALU) or `'fork'` (full history clone up to branch point).
+      title_source: Provenance tag (`"placeholder"` for auto-derived branch snippets, `"manual"` for explicit titles).
 
     Returns:
       The newly generated UUID string for the child conversation.
@@ -182,11 +211,11 @@ def create_branch_conversation(
             """
             INSERT INTO conversations (
                 id, title, created_at, last_updated,
-                parent_conversation_id, parent_message_id, branch_mode, merged_at
+                parent_conversation_id, parent_message_id, branch_mode, merged_at, title_source
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
             """,
-            (conv_id, title, now, now, parent_conversation_id, parent_message_id, branch_mode),
+            (conv_id, title, now, now, parent_conversation_id, parent_message_id, branch_mode, title_source),
         )
         conn.commit()
     return conv_id
@@ -238,10 +267,43 @@ def delete_conversation(conversation_id: str):
         conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
         conn.commit()
 
-def update_conversation_title(conversation_id: str, title: str):
+# `*` enforces keyword-only optional guards so legacy positional callers `update_conversation_title(id, title)` remain compatible
+def update_conversation_title(
+    conversation_id: str,
+    title: str,
+    *,
+    source: str = "manual",
+    expected_title: str | None = None,
+    only_if_placeholder: bool = False,
+) -> bool:
+    """
+    Updates a conversation's title and `title_source` atomically in SQLite `chats.db`.
+
+    Parameters:
+      conversation_id: UUID of the target conversation row.
+      title: New display title string.
+      source: Provenance label (`"manual"`, `"auto"`, or `"placeholder"`).
+      expected_title: Optional compare-and-swap (CAS) guard; when set, the UPDATE commits only if the
+                      stored title still matches `expected_title` (preventing stale LLM jobs from clobbering edits).
+      only_if_placeholder: When True, restricts the UPDATE to rows whose `title_source` is still `"placeholder"`.
+
+    Returns:
+      True if the row was updated; False if no matching row met the atomic CAS / provenance conditions.
+    """
+    clauses = ["id = ?"]
+    params: list[str] = [title, source, conversation_id]
+
+    if expected_title is not None:
+        clauses.append("title = ?")
+        params.append(expected_title)
+    if only_if_placeholder:
+        clauses.append("COALESCE(title_source, 'placeholder') = 'placeholder'")
+
+    sql = f"UPDATE conversations SET title = ?, title_source = ? WHERE {' AND '.join(clauses)}"
     with _get_conn() as conn:
-        conn.execute("UPDATE conversations SET title = ? WHERE id = ?", (title, conversation_id))
+        cursor = conn.execute(sql, tuple(params))
         conn.commit()
+        return cursor.rowcount > 0
 
 # `images: list[str] | None` accepts an optional array of image file URLs/paths (e.g. `/api/agents/uploads/<uuid>.png`)
 def log_message(
