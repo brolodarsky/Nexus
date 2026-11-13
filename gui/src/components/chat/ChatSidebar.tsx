@@ -45,6 +45,17 @@ export interface ChatSidebarProps {
   onNewChat: (initialTier?: string) => void;
 }
 
+/**
+ * Parses an ISO-8601 timestamp string into Unix epoch milliseconds for numeric recency comparisons.
+ * - iso: Optional ISO timestamp string (e.g., `last_updated` or `created_at` from SQLite `chats.db`).
+ * - Returns 0 when missing or malformed (`!Number.isFinite`) so invalid rows sink safely to the bottom.
+ */
+function parseTimestampMs(iso?: string | null): number {
+  if (!iso) return 0;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
 const ChatSidebar = memo(function ChatSidebar({
   conversations,
   activeConvId,
@@ -64,13 +75,25 @@ const ChatSidebar = memo(function ChatSidebar({
   // activeRunSet: O(1) lookup set of conversation UUIDs currently executing in the background
   const activeRunSet = useMemo(() => new Set(activeRunConvIds ?? []), [activeRunConvIds]);
 
-  // Flattens `conversations` into a depth-annotated tree list so child branches render nested beneath their parent
+  // Sort a shallow copy descending by `last_updated` (falling back to `created_at`) so the collapsed rail
+  // always reflects true recency even before a background server refresh completes
+  const sortedConversations = useMemo(() => {
+    return [...conversations].sort(
+      (a, b) =>
+        parseTimestampMs(b.last_updated || b.created_at) -
+        parseTimestampMs(a.last_updated || a.created_at)
+    );
+  }, [conversations]);
+
+  // Flattens `sortedConversations` into a depth-annotated tree list so child branches render nested beneath
+  // their parent, while bubbling every parent cluster (and sorting sibling branches) by subtree max recency
   const treeRows = useMemo(() => {
-    const idSet = new Set(conversations.map((c) => c.id));
+    const idSet = new Set(sortedConversations.map((c) => c.id));
+    // Map<string, Conversation[]> groups direct child branches under their `parent_conversation_id`
     const childrenMap = new Map<string, Conversation[]>();
     const roots: Conversation[] = [];
 
-    for (const c of conversations) {
+    for (const c of sortedConversations) {
       if (c.parent_conversation_id && idSet.has(c.parent_conversation_id)) {
         const list = childrenMap.get(c.parent_conversation_id) ?? [];
         list.push(c);
@@ -80,13 +103,57 @@ const ChatSidebar = memo(function ChatSidebar({
       }
     }
 
+    // Memoization cache mapping conversation UUID -> max epoch ms across the node and all of its descendants
+    const subtreeMaxMs = new Map<string, number>();
+
+    // Recursively computes max `last_updated` across a conversation's subtree; `visiting` (`Set<string>`) guards against cycles
+    const getSubtreeMaxMs = (conv: Conversation, visiting: Set<string>): number => {
+      const cached = subtreeMaxMs.get(conv.id);
+      if (cached !== undefined) return cached;
+      // Fallback to own timestamp if a cycle is encountered so recursion always terminates
+      if (visiting.has(conv.id)) return parseTimestampMs(conv.last_updated || conv.created_at);
+
+      visiting.add(conv.id);
+      let maxMs = parseTimestampMs(conv.last_updated || conv.created_at);
+      const kids = childrenMap.get(conv.id) ?? [];
+      for (const child of kids) {
+        const childMax = getSubtreeMaxMs(child, visiting);
+        if (childMax > maxMs) maxMs = childMax;
+      }
+      visiting.delete(conv.id);
+
+      subtreeMaxMs.set(conv.id, maxMs);
+      return maxMs;
+    };
+
+    const visiting = new Set<string>();
+    for (const conv of sortedConversations) {
+      getSubtreeMaxMs(conv, visiting);
+    }
+
+    // Comparator sorting descending by subtree max recency, breaking ties by each node's own timestamp
+    const bySubtreeRecencyDesc = (a: Conversation, b: Conversation): number => {
+      const diff = (subtreeMaxMs.get(b.id) ?? 0) - (subtreeMaxMs.get(a.id) ?? 0);
+      if (diff !== 0) return diff;
+      return (
+        parseTimestampMs(b.last_updated || b.created_at) -
+        parseTimestampMs(a.last_updated || a.created_at)
+      );
+    };
+
+    // Bubble root threads whose child branches were updated more recently, and sort sibling branches the same way
+    roots.sort(bySubtreeRecencyDesc);
+    for (const kids of childrenMap.values()) {
+      kids.sort(bySubtreeRecencyDesc);
+    }
+
     const result: Array<{ conv: Conversation; depth: number; childCount: number; isBranchCollapsed: boolean }> = [];
     const visit = (node: Conversation, depth: number) => {
       const kids = childrenMap.get(node.id) ?? [];
       const isBranchCollapsed = Boolean(collapsedParentIds[node.id]);
       result.push({ conv: node, depth, childCount: kids.length, isBranchCollapsed });
       if (!isBranchCollapsed) {
-        // Render child branches in chronological/recent order beneath the parent
+        // Render child branches in descending subtree-recency order beneath the parent
         for (const child of kids) {
           visit(child, depth + 1);
         }
@@ -97,7 +164,7 @@ const ChatSidebar = memo(function ChatSidebar({
       visit(root, 0);
     }
     return result;
-  }, [conversations, collapsedParentIds]);
+  }, [sortedConversations, collapsedParentIds]);
 
   const toggleParentBranches = (parentId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -364,9 +431,9 @@ const ChatSidebar = memo(function ChatSidebar({
             )}
           </button>
 
-          {/* Conversation history icons for fast switching */}
+          {/* Conversation history icons for fast switching (pure recency order) */}
           <div className="mt-4 flex-1 overflow-y-auto space-y-1.5 w-full px-2 flex flex-col items-center">
-            {conversations.map((conv) => {
+            {sortedConversations.map((conv) => {
               const hasDraft = Boolean(drafts?.[conv.id]?.trim());
               const isRunning = activeRunSet.has(conv.id);
               return (
