@@ -2,8 +2,8 @@
 
 /**
  * ChatSidebar.tsx — Collapsible conversation history menu for the Nexus Chat interface.
- * Renders either a compact 14-unit icon rail or a full 64-unit drawer with quick model preset buttons
- * and nested branch tree views. (Conversation actions are folded into the header three-dots menu).
+ * Renders either a compact 14-unit icon rail or a full 64-unit drawer with quick model preset buttons,
+ * nested branch tree views, and per-row kebab menus for copying Conversation / Thread IDs.
  */
 
 // memo: Isolates the conversation history sidebar from re-rendering during keystroke updates in the composer
@@ -15,6 +15,8 @@ import {
   MIN_CHAT_SIDEBAR_WIDTH,
   MAX_CHAT_SIDEBAR_WIDTH,
   DRAFT_NEW_KEY,
+  copyTextToClipboard,
+  formatShortId,
 } from "./types";
 
 // ChatSidebarProps: defines data and callbacks required by the conversation history sidebar
@@ -175,8 +177,63 @@ const ChatSidebar = memo(function ChatSidebar({
   const [sidebarWidth, setSidebarWidth] = useState<number>(DEFAULT_CHAT_SIDEBAR_WIDTH);
   // isResizing: boolean flag tracking whether the user is actively dragging the right border handle
   const [isResizing, setIsResizing] = useState<boolean>(false);
+  // openMenuTarget: tracks which conversation row's kebab popover is open and in which drawer instance (desktop vs mobile)
+  // Why scope by `isMobile`: desktop `<aside>` stays mounted (via `hidden md:flex`) while mobile overlay is open, so scoping prevents ref collisions
+  const [openMenuTarget, setOpenMenuTarget] = useState<{ convId: string; isMobile: boolean } | null>(null);
+  // copiedKey: transient ID token key (e.g. `conv:<uuid>` or `parent:<uuid>`) currently showing "Copied!" feedback
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   // sidebarRef: DOM reference to the aside element to compute accurate relative mouse drag coordinates
   const sidebarRef = useRef<HTMLElement>(null);
+  // menuContainerRef: DOM reference to the currently open row kebab container for outside-click detection
+  const menuContainerRef = useRef<HTMLDivElement>(null);
+  // copyTimerRef: timeout handle for resetting transient "Copied!" feedback
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear pending copy confirmation timer on unmount
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Dismiss any open sidebar row kebab menu when clicking outside or pressing Escape
+  useEffect(() => {
+    if (!openMenuTarget) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuContainerRef.current && !menuContainerRef.current.contains(e.target as Node)) {
+        setOpenMenuTarget(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpenMenuTarget(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openMenuTarget]);
+
+  // Copies a sidebar conversation, thread, or parent UUID and flashes transient "Copied!" state
+  // - copyIdKey: unique key identifying which menu item triggered the copy (so sibling items stay neutral)
+  // - idValue: full raw UUID string written to clipboard
+  const handleCopyRowId = async (copyIdKey: string, idValue: string) => {
+    const copied = await copyTextToClipboard(idValue);
+    if (!copied) return;
+    setCopiedKey(copyIdKey);
+    if (copyTimerRef.current) {
+      clearTimeout(copyTimerRef.current);
+    }
+    copyTimerRef.current = setTimeout(() => {
+      setCopiedKey(null);
+      copyTimerRef.current = null;
+    }, 1500);
+  };
 
   // Restore persisted sidebar width from localStorage on mount (survives tab switches and reloads)
   useEffect(() => {
@@ -332,9 +389,18 @@ const ChatSidebar = memo(function ChatSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {treeRows.map(({ conv, depth, childCount, isBranchCollapsed }) => {
+        {treeRows.map(({ conv, depth, childCount, isBranchCollapsed }, idx) => {
           const hasDraft = Boolean(drafts?.[conv.id]?.trim());
           const isRunning = activeRunSet.has(conv.id);
+          const isChildBranch = Boolean(conv.parent_conversation_id);
+          const isRowMenuOpen =
+            openMenuTarget?.convId === conv.id && openMenuTarget.isMobile === isMobileDrawer;
+          // Open upward on bottom-most rows when the list is long enough to scroll so the popover stays visible
+          const openUpward = treeRows.length >= 6 && idx >= treeRows.length - 2;
+          const primaryCopyKey = `conv:${conv.id}`;
+          const parentCopyKey = `parent:${conv.id}`;
+          const isPrimaryCopied = copiedKey === primaryCopyKey;
+          const isParentCopied = copiedKey === parentCopyKey;
 
           return (
             <div
@@ -344,7 +410,9 @@ const ChatSidebar = memo(function ChatSidebar({
                 onSelectConversation(conv.id);
                 if (isMobileDrawer) onCloseMobile?.();
               }}
-              className={`group relative flex items-center px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors overflow-hidden ${
+              className={`group relative flex items-center px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
+                isRowMenuOpen ? "z-30 " : ""
+              }${
                 depth > 0 ? "border-l-2 border-emerald-500/30 pl-2.5 text-xs " : ""
               }${
                 activeConvId === conv.id
@@ -353,8 +421,8 @@ const ChatSidebar = memo(function ChatSidebar({
               }`}
               title={`${conv.title}${isRunning ? " (Agent running)" : ""}${conv.merged_at ? " (Merged to parent)" : ""}${hasDraft ? " (Draft saved)" : ""}`}
             >
-              {/* Conversation title: takes full available row width without reserved sibling space; truncates with ellipsis */}
-              <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center">
+              {/* Conversation title: overflow-hidden lives here (not on the outer row) so row kebab popovers are never clipped */}
+              <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center overflow-hidden">
                 <div className="flex items-center gap-1.5 min-w-0">
                   {childCount > 0 && (
                     <button
@@ -390,6 +458,125 @@ const ChatSidebar = memo(function ChatSidebar({
                     </span>
                   )}
                 </div>
+              </div>
+
+              {/* Right-aligned kebab menu: stops row click propagation so inspecting/copying IDs never switches threads */}
+              <div
+                ref={isRowMenuOpen ? menuContainerRef : undefined}
+                className="relative shrink-0 ml-1"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenMenuTarget((prev) =>
+                      prev?.convId === conv.id && prev.isMobile === isMobileDrawer
+                        ? null
+                        : { convId: conv.id, isMobile: isMobileDrawer }
+                    )
+                  }
+                  title="Thread options & IDs"
+                  aria-label="Thread options & IDs"
+                  aria-haspopup="menu"
+                  aria-expanded={isRowMenuOpen}
+                  className={`p-1 rounded-md transition-all flex items-center justify-center ${
+                    isRowMenuOpen
+                      ? "opacity-100 bg-bg-primary/80 text-text-primary border border-border-subtle"
+                      : `${
+                          isMobileDrawer
+                            ? "opacity-100"
+                            : "opacity-0 group-hover:opacity-100 focus:opacity-100"
+                        } text-text-muted hover:text-text-primary hover:bg-bg-primary/60`
+                  }`}
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="5" r="2" />
+                    <circle cx="12" cy="12" r="2" />
+                    <circle cx="12" cy="19" r="2" />
+                  </svg>
+                </button>
+
+                {isRowMenuOpen && (
+                  <div
+                    role="menu"
+                    aria-orientation="vertical"
+                    className={`absolute right-0 ${
+                      openUpward ? "bottom-full mb-1" : "top-full mt-1"
+                    } w-56 rounded-xl bg-bg-secondary/95 backdrop-blur-md border border-border-subtle shadow-xl p-1 z-50 animate-in fade-in zoom-in-95 duration-100`}
+                  >
+                    {/* Primary ID copy action: Thread ID for branched child conversations, Conv ID for root conversations */}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => void handleCopyRowId(primaryCopyKey, conv.id)}
+                      title={`Click to copy ${isChildBranch ? "Thread" : "Conversation"} ID: ${conv.id}`}
+                      className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium transition-colors text-left ${
+                        isPrimaryCopied
+                          ? "text-emerald-300 bg-emerald-500/10"
+                          : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+                      }`}
+                    >
+                      {isPrimaryCopied ? (
+                        <span className="w-3.5 text-center shrink-0 font-bold">✓</span>
+                      ) : (
+                        <svg className="w-3.5 h-3.5 text-text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                        </svg>
+                      )}
+                      <span className="truncate">
+                        {isPrimaryCopied ? (
+                          <>
+                            Copied! (<span className="font-mono">{formatShortId(conv.id)}</span>)
+                          </>
+                        ) : (
+                          <>
+                            {isChildBranch ? "Thread ID:" : "Conv ID:"}{" "}
+                            <span className="font-mono text-text-primary">{formatShortId(conv.id)}</span>
+                          </>
+                        )}
+                      </span>
+                    </button>
+
+                    {/* Parent Conversation ID copy action for child branches */}
+                    {conv.parent_conversation_id && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => void handleCopyRowId(parentCopyKey, conv.parent_conversation_id!)}
+                        title={`Click to copy Parent Conversation ID: ${conv.parent_conversation_id}`}
+                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium transition-colors text-left ${
+                          isParentCopied
+                            ? "text-emerald-300 bg-emerald-500/10"
+                            : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+                        }`}
+                      >
+                        {isParentCopied ? (
+                          <span className="w-3.5 text-center shrink-0 font-bold">✓</span>
+                        ) : (
+                          <svg className="w-3.5 h-3.5 text-text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                          </svg>
+                        )}
+                        <span className="truncate">
+                          {isParentCopied ? (
+                            <>
+                              Copied! (<span className="font-mono">{formatShortId(conv.parent_conversation_id)}</span>)
+                            </>
+                          ) : (
+                            <>
+                              Parent ID:{" "}
+                              <span className="font-mono text-text-primary">
+                                {formatShortId(conv.parent_conversation_id)}
+                              </span>
+                            </>
+                          )}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           );

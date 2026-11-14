@@ -319,5 +319,62 @@ export function mapHistoryEntriesToMessages(history: ChatHistoryEntry[]): Messag
   });
 }
 
+/**
+ * Formats a UUID or numeric database ID for compact display inside menu items.
+ * - id: string | number — Full conversation UUID or numeric SQLite message ID.
+ * - maxLen: number — Maximum character prefix before appending an ellipsis (`…`).
+ * - Returns: Unchanged string if `<= maxLen`, otherwise `<prefix>…`.
+ */
+export function formatShortId(id: string | number, maxLen: number = 8): string {
+  const raw = String(id);
+  return raw.length <= maxLen ? raw : `${raw.slice(0, maxLen)}…`;
+}
+
+/**
+ * Copies text to the system clipboard with a legacy `execCommand` fallback.
+ * Why: `navigator.clipboard` requires a secure context (HTTPS or localhost), so plain HTTP
+ * LAN / Tailscale sessions (`http://192.168.x.x:3000`, `http://100.x.x.x:3000`) fall back to an
+ * offscreen `<textarea>` selection.
+ * - text: string — Exact raw ID or text string to place on the clipboard.
+ * - Returns: `Promise<boolean>` resolving to `true` if either copy strategy succeeded.
+ */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  // Primary path: modern async Clipboard API (`Promise<void>` on secure contexts)
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to offscreen textarea fallback if permissions or origin checks fail
+    }
+  }
+
+  // Fallback path: mount an offscreen textarea outside viewport to copy without layout shift
+  if (typeof document === "undefined") return false;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.left = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+
+  // Preserve previously focused element so keyboard focus is not stolen during copy
+  const activeEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  try {
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+    activeEl?.focus();
+  }
+}
+
+
 
 

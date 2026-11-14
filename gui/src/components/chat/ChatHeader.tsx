@@ -8,6 +8,7 @@
 // memo: Prevents header re-renders when sibling chat components or drafts mutate
 // useEffect: Binds click-outside and keydown listeners to dismiss the conversation options dropdown
 import { useState, useRef, useEffect, memo } from "react";
+import { copyTextToClipboard, formatShortId } from "./types";
 
 // ChatHeaderProps: defines the display state and callbacks for the Chat workspace header
 // - title: active conversation title string (falls back to "Chat" when starting a fresh session)
@@ -41,10 +42,23 @@ const ChatHeader = memo(function ChatHeader({
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   // isMenuOpen: boolean controlling visibility of the folded three-dots options dropdown menu
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
+  // copiedId: transient confirmation flag shown after copying the active conversation UUID
+  const [copiedId, setCopiedId] = useState<boolean>(false);
   // headerInputRef: HTMLInputElement reference used for auto-focus and text selection
   const headerInputRef = useRef<HTMLInputElement>(null);
   // menuRef: HTMLDivElement reference used for detecting outside clicks to dismiss the options dropdown
   const menuRef = useRef<HTMLDivElement>(null);
+  // copyTimerRef: timeout handle for resetting transient "Copied!" badge on unmount or rapid re-copy
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear pending copy feedback timeout if component unmounts early
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
 
   // Close dropdown menu on outside click or Escape key press
   useEffect(() => {
@@ -109,6 +123,22 @@ const ChatHeader = memo(function ChatHeader({
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  // Copies the active conversation UUID to clipboard and shows transient "Copied!" feedback
+  // - async (): returns Promise<void> because Clipboard API writes asynchronously before fallback check
+  const handleCopyConvId = async () => {
+    if (!activeConvId) return;
+    const copied = await copyTextToClipboard(activeConvId);
+    if (!copied) return;
+    setCopiedId(true);
+    if (copyTimerRef.current) {
+      clearTimeout(copyTimerRef.current);
+    }
+    copyTimerRef.current = setTimeout(() => {
+      setCopiedId(false);
+      copyTimerRef.current = null;
+    }, 1500);
   };
 
   // Deletes active conversation thread via parent orchestrator callback
@@ -225,7 +255,7 @@ const ChatHeader = memo(function ChatHeader({
                     <div
                       role="menu"
                       aria-orientation="vertical"
-                      className="absolute left-0 top-full mt-1.5 w-48 rounded-xl bg-bg-secondary/95 backdrop-blur-md border border-border-subtle shadow-xl p-1 z-50 animate-in fade-in zoom-in-95 duration-100"
+                      className="absolute left-0 top-full mt-1.5 w-56 rounded-xl bg-bg-secondary/95 backdrop-blur-md border border-border-subtle shadow-xl p-1 z-50 animate-in fade-in zoom-in-95 duration-100"
                     >
                       {/* Rename action */}
                       <button
@@ -257,6 +287,40 @@ const ChatHeader = memo(function ChatHeader({
                           <span>{isGenerating ? "Generating title..." : "Auto-generate title"}</span>
                         </button>
                       )}
+
+                      {/* Copy active Conversation ID action */}
+                      <div className="my-1 border-t border-border-subtle" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={handleCopyConvId}
+                        title={`Click to copy Conversation ID: ${activeConvId}`}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left ${
+                          copiedId
+                            ? "text-emerald-300 bg-emerald-500/10"
+                            : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+                        }`}
+                      >
+                        {copiedId ? (
+                          <span className="w-3.5 text-center shrink-0 font-bold">✓</span>
+                        ) : (
+                          <svg className="w-3.5 h-3.5 text-text-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                          </svg>
+                        )}
+                        <span className="truncate">
+                          {copiedId ? (
+                            <>
+                              Copied! (<span className="font-mono">{formatShortId(activeConvId)}</span>)
+                            </>
+                          ) : (
+                            <>
+                              Conv ID: <span className="font-mono text-text-primary">{formatShortId(activeConvId)}</span>
+                            </>
+                          )}
+                        </span>
+                      </button>
 
                       {/* Visual separator before destructive action */}
                       {onDeleteChat && <div className="my-1 border-t border-border-subtle" />}

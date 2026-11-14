@@ -12,6 +12,7 @@ export { default as ChatInputBar } from "./ChatInputBar";
 export { useChatBranching } from "./useChatBranching";
 
 export * from "./types";
+export { formatShortId, copyTextToClipboard } from "./types";
 export type { ChatSidebarProps } from "./ChatSidebar";
 export type { ChatHeaderProps } from "./ChatHeader";
 export type { BranchLineageBarProps } from "./BranchLineageBar";

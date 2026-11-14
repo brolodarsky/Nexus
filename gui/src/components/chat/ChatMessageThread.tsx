@@ -218,6 +218,7 @@ const ChatMessageThread = memo(function ChatMessageThread({
           <ChatMessageItem
             key={msg.id ?? i}
             message={msg}
+            conversationId={activeConvId}
             messageIndex={i}
             isLastTurn={i === messages.length - 1}
             spawnedBranches={msg.id != null ? childBranchesByMessageId?.[msg.id] : undefined}
