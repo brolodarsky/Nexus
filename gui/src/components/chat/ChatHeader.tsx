@@ -17,6 +17,8 @@ import { copyTextToClipboard, formatShortId } from "./types";
 // - onUpdateTitle: optional async callback invoked when committing an edited conversation title
 // - onAutoGenerateTitle: optional async callback invoked to generate a smart AI title via fast low-tier model
 // - onDeleteChat: optional async callback invoked to delete the active conversation thread
+// - cacheCount: live number of external captures cached in the active conversation (`0` when empty)
+// - onOpenCache: optional callback invoked when the user clicks the right-side Cache button
 export interface ChatHeaderProps {
   title?: string;
   activeConvId?: string | null;
@@ -24,6 +26,8 @@ export interface ChatHeaderProps {
   onUpdateTitle?: (id: string, newTitle: string) => Promise<void> | void;
   onAutoGenerateTitle?: (id: string) => Promise<void> | void;
   onDeleteChat?: (id: string) => Promise<void> | void;
+  cacheCount?: number;
+  onOpenCache?: () => void;
 }
 
 const ChatHeader = memo(function ChatHeader({
@@ -33,6 +37,8 @@ const ChatHeader = memo(function ChatHeader({
   onUpdateTitle,
   onAutoGenerateTitle,
   onDeleteChat,
+  cacheCount = 0,
+  onOpenCache,
 }: ChatHeaderProps) {
   // isEditing: boolean controlling whether the title text is replaced by an inline edit input
   const [isEditing, setIsEditing] = useState<boolean>(false);
@@ -347,6 +353,37 @@ const ChatHeader = memo(function ChatHeader({
           </div>
         )}
       </div>
+
+      {/* Right-aligned Cache inspector trigger showing live per-conversation capture count */}
+      {activeConvId && onOpenCache && (
+        <button
+          type="button"
+          onClick={onOpenCache}
+          title={`View cached external captures (${cacheCount})`}
+          aria-label={`View conversation cache (${cacheCount})`}
+          className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-colors ${
+            cacheCount > 0
+              ? "border-accent-cyan/40 bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/15"
+              : "border-border-subtle bg-bg-tertiary/60 text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+          }`}
+        >
+          <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <ellipse cx="12" cy="5" rx="9" ry="3" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
+          </svg>
+          <span>Cache</span>
+          <span
+            className={`px-1.5 py-0.5 rounded-full text-[0.65rem] font-mono leading-none ${
+              cacheCount > 0
+                ? "bg-accent-cyan/20 text-accent-cyan"
+                : "bg-bg-surface text-text-muted"
+            }`}
+          >
+            {cacheCount}
+          </span>
+        </button>
+      )}
     </header>
   );
 });

@@ -17,6 +17,7 @@ import {
   getAvailableModels,
   getChatHistory,
   getConversations,
+  getConversationCaptures,
   createConversation,
   deleteConversation,
   updateConversationTitle,
@@ -26,12 +27,14 @@ import {
   type BrainStreamCallbacks,
   type ChatHistoryEntry,
   type Conversation,
+  type ConversationCaptureSummary,
   type TraceEvent,
   type ModelOption,
 } from "@/lib/api";
 import {
   ChatSidebar,
   ChatHeader,
+  ConversationCacheModal,
   BranchLineageBar,
   ChatMessageThread,
   ChatInputBar,
@@ -95,6 +98,10 @@ export default function ChatPage() {
     name?: string | null;
     label?: string | null;
   } | null>(null);
+  // Per-conversation external capture cache state for live ChatHeader count badge and read-only modal
+  const [cacheCaptures, setCacheCaptures] = useState<ConversationCaptureSummary[]>([]);
+  const [isCacheModalOpen, setIsCacheModalOpen] = useState<boolean>(false);
+  const [isCacheLoading, setIsCacheLoading] = useState<boolean>(false);
 
   const liveTraceRef = useRef<TraceEvent[]>([]);
   // activeConvIdRef / messagesRef / loadingRef / activeRunIdsRef: mirror React state for async timers and focus handlers
@@ -132,6 +139,8 @@ export default function ChatPage() {
   const autoTitleInFlightRef = useRef<Set<string>>(new Set());
   // deletedConvIdsRef: Set<string> tracking UUIDs deleted during this session so concurrent polls/syncs skip stale 404s
   const deletedConvIdsRef = useRef<Set<string>>(new Set());
+  // cacheFetchSeqRef: monotonic counter discarding out-of-order capture metadata responses after thread switches
+  const cacheFetchSeqRef = useRef<number>(0);
 
   // Keep mirror refs synchronized with React state after commits
   useEffect(() => {
@@ -381,6 +390,31 @@ export default function ChatPage() {
       .catch(() => {});
   }, [reloadVisibleConversations]);
 
+  // Refreshes lightweight external capture metadata (`cache://...` count & list) for `convId`
+  // Monotonic `cacheFetchSeqRef` discards stale responses if the user switches threads mid-request
+  const refreshConversationCaptures = useCallback(async (convId: string) => {
+    if (!convId || deletedConvIdsRef.current.has(convId)) return;
+    const seq = ++cacheFetchSeqRef.current;
+    setIsCacheLoading(true);
+    try {
+      const res = await getConversationCaptures(convId);
+      if (
+        activeConvIdRef.current !== convId ||
+        cacheFetchSeqRef.current !== seq ||
+        deletedConvIdsRef.current.has(convId)
+      ) {
+        return;
+      }
+      setCacheCaptures(res.captures);
+    } catch (err) {
+      console.error("Failed to fetch conversation captures:", err);
+    } finally {
+      if (cacheFetchSeqRef.current === seq) {
+        setIsCacheLoading(false);
+      }
+    }
+  }, []);
+
   // Helper building unified SSE stream callbacks shared between fresh submissions and mid-turn re-attachments
   const createStreamCallbacks = useCallback(
     (
@@ -425,6 +459,7 @@ export default function ChatPage() {
           finishLocalStream(true);
           inputRef.current?.focus();
           refreshConversationsAndSyncTitles([targetConvId]);
+          void refreshConversationCaptures(targetConvId);
         };
 
         return {
@@ -448,9 +483,19 @@ export default function ChatPage() {
               return newTrace;
             });
 
+            const toolName = event.type === "tool_result" ? String(event.data?.tool ?? "") : "";
             // Immediately surface newly spawned conversations in ChatSidebar & BranchLineageBar while a multi-subagent sweep runs
-            if (event.type === "tool_result" && event.data?.tool === "spawn_conversation") {
+            if (toolName === "spawn_conversation") {
               refreshConversationsAndSyncTitles();
+            }
+            // Refresh live Cache header badge whenever an external capture reader completes mid-turn
+            if (
+              toolName === "read_browser_tabs" ||
+              toolName === "read_webpage" ||
+              toolName === "fetch_emails" ||
+              toolName === "run_shared_tool_cli"
+            ) {
+              void refreshConversationCaptures(targetConvId);
             }
           },
           onDone: (event) => {
@@ -513,6 +558,7 @@ export default function ChatPage() {
             finishLocalStream(true);
             inputRef.current?.focus();
             refreshConversationsAndSyncTitles([targetConvId]);
+            void refreshConversationCaptures(targetConvId);
           },
           onSyncRequired: () => {
             setActiveRunIds((prev) => prev.filter((id) => id !== targetConvId));
@@ -574,6 +620,7 @@ export default function ChatPage() {
                 finishLocalStream(true);
                 inputRef.current?.focus();
                 refreshConversationsAndSyncTitles([targetConvId]);
+                void refreshConversationCaptures(targetConvId);
                 return;
               }
             } catch {
@@ -594,6 +641,7 @@ export default function ChatPage() {
                   finishLocalStream(true);
                   inputRef.current?.focus();
                   refreshConversationsAndSyncTitles([targetConvId]);
+                  void refreshConversationCaptures(targetConvId);
                   recovered = true;
                   break;
                 }
@@ -626,7 +674,7 @@ export default function ChatPage() {
 
       return buildCallbacks(options?.reconnectAttempt ?? 0, options);
     },
-    [refreshConversationsAndSyncTitles]
+    [refreshConversationsAndSyncTitles, refreshConversationCaptures]
   );
 
   // Loads persisted history for `convId` and seamlessly re-attaches the live Thinking Panel if a background run is active
@@ -656,6 +704,7 @@ export default function ChatPage() {
         if (!historyMatchesMessages(history, messagesRef.current)) {
           setMessages(mapHistoryEntriesToMessages(history));
         }
+        void refreshConversationCaptures(convId);
 
         // Guard against the sub-millisecond case where the run persisted its assistant reply right before history read
         const alreadyCommittedAssistant =
@@ -722,8 +771,28 @@ export default function ChatPage() {
         }
       }
     },
-    [createStreamCallbacks]
+    [createStreamCallbacks, refreshConversationCaptures]
   );
+
+  // Reset cache modal & list when switching threads, then load lightweight metadata for the active thread
+  useEffect(() => {
+    let cancelled = false;
+    // Advance sequence token immediately so in-flight responses from prior threads are discarded
+    cacheFetchSeqRef.current += 1;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setIsCacheModalOpen(false);
+      setCacheCaptures([]);
+      if (!activeConvId) {
+        setIsCacheLoading(false);
+        return;
+      }
+      void refreshConversationCaptures(activeConvId);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConvId, refreshConversationCaptures]);
 
   // Fetch messages and re-attach any live run when active conversation changes
   useEffect(() => {
@@ -1304,14 +1373,15 @@ export default function ChatPage() {
       const history = await getChatHistory(activeConvId);
       setMessages(mapHistoryEntriesToMessages(history));
 
-      // 5. Refresh conversations list
+      // 5. Refresh conversations list and external capture cache count
       getConversations().then(setConversations);
+      void refreshConversationCaptures(activeConvId);
     } catch (err) {
       console.error("Failed to stop and revert turn:", err);
     } finally {
       inputRef.current?.focus();
     }
-  }, [activeConvId, setProgrammaticInput]);
+  }, [activeConvId, setProgrammaticInput, refreshConversationCaptures]);
 
   // handleToggleSidebarCollapse: memoized handler to toggle left conversation history menu and persist choice
   const handleToggleSidebarCollapse = useCallback((collapsed: boolean) => {
@@ -1378,6 +1448,11 @@ export default function ChatPage() {
   // - '/' while viewing thread: expands the message bar and focuses the input
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Yield Escape and '/' to the open ConversationCacheModal so Escape never triggers Stop & Revert mid-stream
+      if (isCacheModalOpen) {
+        return;
+      }
+
       // Esc shortcut: stops and reverts active streaming turn immediately
       if (loading && e.key === "Escape") {
         e.preventDefault();
@@ -1403,7 +1478,23 @@ export default function ChatPage() {
     };
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, [loading, handleStopAndRevert]);
+  }, [loading, handleStopAndRevert, isCacheModalOpen]);
+
+  // Opens the read-only Cache modal and refreshes the active conversation's capture metadata
+  const handleOpenCacheModal = useCallback(() => {
+    if (!activeConvId) return;
+    setIsCacheModalOpen(true);
+    void refreshConversationCaptures(activeConvId);
+  }, [activeConvId, refreshConversationCaptures]);
+
+  const handleCloseCacheModal = useCallback(() => {
+    setIsCacheModalOpen(false);
+  }, []);
+
+  const handleRefreshCacheModal = useCallback(() => {
+    if (!activeConvId) return;
+    void refreshConversationCaptures(activeConvId);
+  }, [activeConvId, refreshConversationCaptures]);
 
   const handleRefreshConversations = useCallback(async () => {
     const list = await getConversations();
@@ -1469,6 +1560,8 @@ export default function ChatPage() {
           onUpdateTitle={handleUpdateTitle}
           onAutoGenerateTitle={handleAutoGenerateTitle}
           onDeleteChat={handleDeleteChat}
+          cacheCount={cacheCaptures.length}
+          onOpenCache={handleOpenCacheModal}
         />
 
         <BranchLineageBar
@@ -1514,6 +1607,19 @@ export default function ChatPage() {
           onSubmit={handleSubmit}
         />
       </div>
+
+      {/* ── Read-Only Per-Conversation Capture Cache Modal ───── */}
+      {isCacheModalOpen && activeConvId && (
+        <ConversationCacheModal
+          key={activeConvId}
+          conversationId={activeConvId}
+          conversationTitle={activeConv?.title}
+          captures={cacheCaptures}
+          isRefreshingList={isCacheLoading}
+          onRefreshList={handleRefreshCacheModal}
+          onClose={handleCloseCacheModal}
+        />
+      )}
     </div>
   );
 }

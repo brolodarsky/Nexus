@@ -4,6 +4,7 @@
 
 export { default as ChatSidebar } from "./ChatSidebar";
 export { default as ChatHeader } from "./ChatHeader";
+export { default as ConversationCacheModal } from "./ConversationCacheModal";
 export { default as BranchLineageBar } from "./BranchLineageBar";
 export { default as MessageBranchTrigger } from "./MessageBranchTrigger";
 export { default as ChatMessageItem } from "./ChatMessageItem";
@@ -15,6 +16,7 @@ export * from "./types";
 export { formatShortId, copyTextToClipboard } from "./types";
 export type { ChatSidebarProps } from "./ChatSidebar";
 export type { ChatHeaderProps } from "./ChatHeader";
+export type { ConversationCacheModalProps } from "./ConversationCacheModal";
 export type { BranchLineageBarProps } from "./BranchLineageBar";
 export type { MessageBranchTriggerProps } from "./MessageBranchTrigger";
 export type { ChatMessageItemProps } from "./ChatMessageItem";

@@ -43,6 +43,8 @@ from nexus.core.chats_db import (
     delete_conversation, update_conversation_title,
     revert_last_turn,
 )
+# conversation_cache: Per-conversation SQLite WAL external capture store (`cache://tab/...`, `cache://web/...`, `cache://email/...`)
+from nexus.core.conversation_cache import get_capture, list_captures
 from nexus.core.chat_titles import auto_generate_title_async, schedule_auto_title
 from nexus.core.hitl_queue import cancel_pending_transactions_for_conversation
 from nexus.agent.graph import (
@@ -481,6 +483,37 @@ async def auto_generate_conversation_title(conversation_id: str, force: bool = T
         return await auto_generate_title_async(conversation_id, force=force)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+# Lists lightweight per-conversation external capture metadata (excludes raw `content` bodies)
+# - conversation_id: UUID primary key scoping which thread's cached captures are returned
+# - await asyncio.to_thread(...): offloads blocking SQLite I/O onto a worker thread so FastAPI's event loop stays unblocked
+@router.get("/ask/conversations/{conversation_id}/captures")
+async def list_conversation_captures(conversation_id: str):
+    """Returns read-only metadata summaries for all external captures cached inside `conversation_id`."""
+    captures = await asyncio.to_thread(list_captures, conversation_id)
+    return {
+        "conversation_id": conversation_id,
+        "count": len(captures),
+        "captures": captures,
+    }
+
+# Fetches a single verbatim cached capture (including full `content`) by `cache://...` key or source URL
+# - key: Passed as query param (`?key=...`) rather than a path param because `cache://tab/<slug>` contains `://` and `/`
+#   which ASGI/HTTP proxies split or normalize if embedded directly in the URL path
+@router.get("/ask/conversations/{conversation_id}/captures/item")
+async def get_conversation_capture_item(conversation_id: str, key: str):
+    """Returns full metadata and unabridged `content` for one cached capture in `conversation_id`."""
+    cleaned_key = key.strip()
+    if not cleaned_key:
+        raise HTTPException(status_code=400, detail="Capture key cannot be empty.")
+
+    capture = await asyncio.to_thread(get_capture, conversation_id, cleaned_key)
+    if capture is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Capture '{cleaned_key}' not found in conversation '{conversation_id}'.",
+        )
+    return capture
 
 # Returns message history for a specific conversation
 @router.get("/ask/history")

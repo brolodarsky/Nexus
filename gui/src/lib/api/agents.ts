@@ -337,5 +337,47 @@ export async function getActiveRunStatus(conversationId: string): Promise<Active
   return apiFetch<ActiveRunStatus>(`/api/agents/ask/active/${encodeURIComponent(conversationId)}`);
 }
 
+// Lightweight metadata summary for one cached external capture (`conversation_captures` row minus `content` body)
+export interface ConversationCaptureSummary {
+  cache_key: string;          // Deterministic handle (`cache://tab/<slug>`, `cache://web/<slug>`, `cache://email/<id>`)
+  conversation_id: string;    // Owning conversation thread UUID
+  source_type: string;        // Origin category token ("tab", "web", "email")
+  source_url: string | null;  // Canonicalized origin HTTP(S) URL, or null for non-URL captures (e.g., emails)
+  title: string;              // Human-readable capture title
+  char_count: number;         // Character length of the verbatim stored body
+  created_at: string;         // ISO-8601 UTC timestamp when this capture was last stored or updated
+}
+
+// Full capture payload returned on demand when inspecting one entry in the Cache viewer modal
+export interface ConversationCaptureDetail extends ConversationCaptureSummary {
+  content: string;            // Unabridged verbatim Markdown or plain-text capture body
+}
+
+// Response envelope from GET /api/agents/ask/conversations/{conversation_id}/captures
+export interface ConversationCapturesListResponse {
+  conversation_id: string;              // Thread UUID queried
+  count: number;                        // Total cached captures in this conversation (powers live header count)
+  captures: ConversationCaptureSummary[]; // Ordered newest-first metadata list (omits raw `content`)
+}
+
+// Fetches lightweight capture metadata list for `conversationId` (`Promise` settles with count + summaries)
+export async function getConversationCaptures(
+  conversationId: string
+): Promise<ConversationCapturesListResponse> {
+  return apiFetch<ConversationCapturesListResponse>(
+    `/api/agents/ask/conversations/${encodeURIComponent(conversationId)}/captures`
+  );
+}
+
+// Fetches one capture's full verbatim `content` by `cacheKey` (sent via `?key=` query param because `cache://` contains slashes)
+export async function getConversationCaptureItem(
+  conversationId: string,
+  cacheKey: string
+): Promise<ConversationCaptureDetail> {
+  return apiFetch<ConversationCaptureDetail>(
+    `/api/agents/ask/conversations/${encodeURIComponent(conversationId)}/captures/item?key=${encodeURIComponent(cacheKey)}`
+  );
+}
+
 
 

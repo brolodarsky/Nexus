@@ -15,6 +15,7 @@ Covers:
      non-recursive expansion, multiple placeholders, fail-fast missing key).
   8. Chrome Extension (`background.js`) DOM deduplication verification via Node.js.
   9. KV prompt-cache invariant (`inject_root_instructions()` stays byte-identical across captures).
+  10. Read-only HTTP API routes (`/api/agents/ask/conversations/{id}/captures` and `/captures/item`).
 """
 
 import json
@@ -26,9 +27,11 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
+from fastapi.testclient import TestClient
 import pytest
 from langchain_core.messages import AIMessage
 
+from nexus.api.main import app
 from nexus.core import chat_branching, chats_db, conversation_cache, hitl_queue as hq
 from nexus.core.engine_constitution import inject_root_instructions
 from nexus.core.hitl_queue import reset_hitl_execution_context, set_hitl_execution_context
@@ -670,3 +673,100 @@ def test_spawn_conversation_inherits_manifest_cli_nexus_primary_and_brief_lint(
     cli_child_id = cli_convs[0]["id"]
     assert cli_convs[0]["parent_conversation_id"] is None
     assert conversation_cache.get_capture(cli_child_id, k_cli)["content"] == "CLI verbatim body."
+
+
+# ── 10. Read-Only Capture Cache HTTP API Routes ──────────────────────────────
+
+def test_http_conversation_captures_list_item_isolation_and_validation(
+    isolated_env: dict[str, Path],
+) -> None:
+    """Verify read-only GET capture list and item routes enforce isolation and reject blank/missing keys."""
+    # TestClient: in-process ASGI HTTP client invoking FastAPI routes against isolated temp SQLite DB
+    client = TestClient(app)
+
+    # 1. Empty conversation returns 200 with count 0 and empty list
+    empty_res = client.get("/api/agents/ask/conversations/conv-empty/captures")
+    assert empty_res.status_code == 200
+    assert empty_res.json() == {
+        "conversation_id": "conv-empty",
+        "count": 0,
+        "captures": [],
+    }
+
+    # 2. Populate conv-a with tab, web, and email captures, plus conv-b isolation target
+    key_tab = conversation_cache.put_capture(
+        conversation_id="conv-a",
+        source_type="tab",
+        title="Tab Spec",
+        content="# Tab Spec\n\nVerbatim tab body.",
+        source_url="https://example.com/tab-spec",
+    )
+    key_web = conversation_cache.put_capture(
+        conversation_id="conv-a",
+        source_type="web",
+        title="Web Guide",
+        content="Verbatim web markdown body.",
+        source_url="https://example.com/web-guide",
+    )
+    key_email = conversation_cache.put_capture(
+        conversation_id="conv-a",
+        source_type="email",
+        title="Recruiter Follow-up",
+        content="Verbatim email body.",
+        cache_key="cache://email/msg-42",
+    )
+    key_b = conversation_cache.put_capture(
+        conversation_id="conv-b",
+        source_type="tab",
+        title="Secret Other Thread Tab",
+        content="Strictly isolated from conv-a.",
+        source_url="https://example.com/secret-b",
+    )
+
+    # 3. List endpoint returns lightweight metadata (omitting raw `content`) scoped strictly to conv-a
+    list_res = client.get("/api/agents/ask/conversations/conv-a/captures")
+    assert list_res.status_code == 200
+    list_payload = list_res.json()
+    assert list_payload["conversation_id"] == "conv-a"
+    assert list_payload["count"] == 3
+    returned_keys = {item["cache_key"] for item in list_payload["captures"]}
+    assert returned_keys == {key_tab, key_web, key_email}
+    assert key_b not in returned_keys
+    assert all("content" not in item for item in list_payload["captures"])
+
+    # 4. Item endpoint fetches verbatim content and metadata using `?key=` query param
+    item_res = client.get(
+        "/api/agents/ask/conversations/conv-a/captures/item",
+        params={"key": key_tab},
+    )
+    assert item_res.status_code == 200
+    item_payload = item_res.json()
+    assert item_payload["cache_key"] == key_tab
+    assert item_payload["conversation_id"] == "conv-a"
+    assert item_payload["source_type"] == "tab"
+    assert item_payload["source_url"] == "https://example.com/tab-spec"
+    assert item_payload["title"] == "Tab Spec"
+    assert item_payload["content"] == "# Tab Spec\n\nVerbatim tab body."
+    assert item_payload["char_count"] == len("# Tab Spec\n\nVerbatim tab body.")
+    assert item_payload["created_at"]
+
+    # 5. Cross-conversation isolation: requesting conv-b's key inside conv-a returns 404
+    cross_res = client.get(
+        "/api/agents/ask/conversations/conv-a/captures/item",
+        params={"key": key_b},
+    )
+    assert cross_res.status_code == 404
+
+    # 6. Missing capture key inside conv-a returns 404
+    missing_res = client.get(
+        "/api/agents/ask/conversations/conv-a/captures/item",
+        params={"key": "cache://tab/nonexistent"},
+    )
+    assert missing_res.status_code == 404
+
+    # 7. Blank/whitespace-only key returns 400
+    blank_res = client.get(
+        "/api/agents/ask/conversations/conv-a/captures/item",
+        params={"key": "   "},
+    )
+    assert blank_res.status_code == 400
