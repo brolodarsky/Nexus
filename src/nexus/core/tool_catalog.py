@@ -1,9 +1,11 @@
-"""tool_catalog.py — Deterministic catalog of Nexus shared tools for prompt hydration.
+"""tool_catalog.py — Deterministic catalog of runnable Nexus `[CLI]` shared tools for prompt hydration.
 
-Builds a compact markdown list of every Python module in `src/nexus/shared_tools/`
-(module path, CLI availability, first docstring line) by STATIC parsing with `ast`.
+Builds a compact markdown list of runnable `[CLI]` Python modules in `src/nexus/shared_tools/`
+(module path, `[CLI]` marker, first docstring line) by STATIC parsing with `ast`.
 Nothing is imported, so heavy deps (googleapiclient, langchain) never load and the
-scan stays fast and side-effect free. Injected into `Vault/Master Instructions.md` via `{shared_tools}`.
+scan stays fast and side-effect free. Non-CLI internal library modules (`shared.py`,
+`summarizer.py`, `resume_engine/service.py`) are excluded so `{shared_tools}` in
+`Vault/Master Instructions.md` advertises only directly invocable CLI modules.
 """
 
 import ast
@@ -28,13 +30,15 @@ def _summary_line(docstring: str | None, filename: str) -> str:
     return first
 
 
+# `-> str` returns a newline-delimited Markdown bullet list of `[CLI]` modules ready for `Master Instructions.md`.
 def get_shared_tools_catalog() -> str:
     """
-    Render the shared tools directory as a markdown bullet list.
+    Render runnable `[CLI]` shared tools in `src/nexus/shared_tools/` as a markdown bullet list.
 
     Output line shape:
       - `nexus.shared_tools.gmail_engine` [CLI] — Core Gmail REST API (v1) integration for Nexus Engine.
-    [CLI] means the module has an `if __name__ == "__main__":` entrypoint, so `python -m <module> --help` works.
+    Only modules exposing an `if __name__ == "__main__":` entrypoint are included so agents do not
+    attempt `run_shared_tool_cli` on internal library modules already bound or imported directly.
     """
     lines: list[str] = []
     # sorted(rglob) => stable, alphabetical order every run (deterministic prompt = cache-friendly prompt)
@@ -44,6 +48,12 @@ def get_shared_tools_catalog() -> str:
             continue
 
         source = path.read_text(encoding="utf-8", errors="replace")
+        # Filter strictly to runnable CLI modules (`__main__` guard); library-only modules like `shared.py`
+        # are either bound directly via `bind_tools(...)` or imported internally by the engine.
+        has_cli_entrypoint = '__name__ == "__main__"' in source or "__name__ == '__main__'" in source
+        if not has_cli_entrypoint:
+            continue
+
         try:
             docstring = ast.get_docstring(ast.parse(source))  # Parse-only: reads the module docstring without executing code
         except SyntaxError:
@@ -51,8 +61,7 @@ def get_shared_tools_catalog() -> str:
 
         # Path("resume_engine/render_docx.py") -> "nexus.shared_tools.resume_engine.render_docx"
         module = "nexus.shared_tools." + ".".join(rel.with_suffix("").parts)
-        cli_tag = " [CLI]" if '__name__ == "__main__"' in source or "__name__ == '__main__'" in source else ""
-        lines.append(f"- `{module}`{cli_tag} — {_summary_line(docstring, path.name)}")
+        lines.append(f"- `{module}` [CLI] — {_summary_line(docstring, path.name)}")
 
     return "\n".join(lines) if lines else "(no shared tools found)"
 

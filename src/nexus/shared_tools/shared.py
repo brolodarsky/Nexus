@@ -39,23 +39,6 @@ def get_directory_structure(path: Optional[str] = None) -> str:
     return get_directory_tree(path=path, show_files=show_files)
 
 
-# Keep `get_vault_structure` as a tool alias so existing prompts/instructions referencing either name work identically.
-@tool
-def get_vault_structure(path: Optional[str] = None) -> str:
-    """Browse the Vault's directory tree (alias for `get_directory_structure`).
-
-    - Called with NO path: returns all folders recursively.
-    - Called WITH a folder path: returns folders and files within that section.
-
-    Args:
-        path: Optional relative path from Vault root (e.g. "2. Health/2.2. Medical").
-    """
-    from nexus.shared_tools.vault_reader import get_directory_tree
-
-    show_files = path is not None
-    return get_directory_tree(path=path, show_files=show_files)
-
-
 # ── 2. Vault File Reading & Search Tools ─────────────────────────────────────
 
 # Pure-Python shared helper used by both `@tool read_file` and `spawn_subagent(context_files=...)`
@@ -759,6 +742,8 @@ def fetch_emails(
     For broad sweeps (`count > 20` with `include_body=None`), full message bodies are hydrated only
     for the newest 20 matches and remaining matches return lightweight metadata (`subject`, `sender`,
     `date`, `labels`, `snippet`) to prevent Gmail API quota exhaustion (`HttpError 403 rateLimitExceeded`).
+    When sweeping or triaging inbox mail, read and follow `[[Protocol - Email Triage]]` (or pass
+    `context_files=["Protocol - Email Triage.md"]` to `spawn_subagent`).
 
     Args:
         count: Number of emails to collect (default: 10).
@@ -984,11 +969,6 @@ def search_web(
     Returns a clean Markdown digest containing a synthesized summary and numbered results with exact source URLs
     and snippets. Always cite the exact study, documentation, or article URL returned—never link bare domain homepages.
 
-    CONTEXT HYGIENE DIRECTIVE: Running 1–2 targeted `search_web` queries directly for quick fact verification is fine.
-    However, when conducting broad multi-query web research, company/market scouting, or combining `search_web` with
-    full-page scraping (`nexus.shared_tools.read_webpage`), delegate the research sweep to parallel
-    `spawn_subagent(task_prompt, model_tier="low")` workers so raw web snippets do not bloat your primary context window.
-
     Args:
         query: Search query string (e.g. "Palantir Forward Deployed Software Engineer compensation NYC", "fluoxetine CYP2D6 interaction PubMed").
         max_results: Maximum number of results to return (1-15, default: 5).
@@ -1056,12 +1036,6 @@ def read_browser_tabs(
 
     Reads directly from the user's authenticated Chrome session via the local Nexus Browser Bridge,
     bypassing anti-bot walls (LinkedIn, Workday, Greenhouse, Cloudflare) with zero vision tokens.
-
-    CONTEXT HYGIENE DIRECTIVE: Reading 1–2 tabs directly in the primary thread is fine.
-    However, when inspecting or triaging a Chrome Tab Group or >2 tabs (e.g. evaluating a batch of job
-    descriptions), call `list_browser_tabs` first to get the `tab_id` list, then delegate the reading
-    and evaluation to parallel `spawn_subagent(task_prompt, model_tier="low")` workers (passing 1–2 `tab_ids`
-    per subagent) so raw webpage Markdown does not bloat your primary context window.
 
     Args:
         tab_ids: Optional list of specific integer `tab_id` values to read (e.g. [142, 145]).

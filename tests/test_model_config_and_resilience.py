@@ -549,3 +549,21 @@ def test_system_prompt_static_and_user_message_timestamp_injection(monkeypatch: 
     assert sent_human.content.endswith("]\n\nCheck my calendar")
 
 
+def test_master_instructions_protocol_pointer_and_deduplication() -> None:
+    """Verify Master Instructions points to [[Protocol - Email Triage]] and omits non-CLI modules & duplicate aliases."""
+    from nexus.shared_tools.vault_reader import resolve_vault_note_path
+
+    inst = inject_root_instructions()
+    assert "[[Protocol - Email Triage]]" in inst
+    assert "`nexus.shared_tools.shared`" not in inst
+    assert "get_vault_structure" not in inst
+
+    resolved_path, err = resolve_vault_note_path("Protocol - Email Triage.md")
+    assert err is None
+    assert resolved_path is not None
+    assert resolved_path.as_posix().endswith(
+        "Vault/1. Core/1.2. Personal Knowledge Management (PKM)/Protocol - Email Triage.md"
+    )
+
+
+

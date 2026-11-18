@@ -30,16 +30,23 @@ from nexus.shared_tools.shared import list_browser_tabs, read_browser_tabs
 
 
 def test_browser_bridge_in_tool_catalog() -> None:
-    """Ensure `nexus.shared_tools.browser_bridge [CLI]` is discovered by `tool_catalog.py`."""
+    """Ensure runnable `[CLI]` tools are discovered by `tool_catalog.py` while non-CLI libraries are excluded."""
     catalog = get_shared_tools_catalog()
     assert "`nexus.shared_tools.browser_bridge` [CLI]" in catalog
+    assert "`nexus.shared_tools.gmail_engine` [CLI]" in catalog
+    assert "`nexus.shared_tools.read_webpage` [CLI]" in catalog
+    assert "`nexus.shared_tools.shared`" not in catalog
+    assert "`nexus.shared_tools.summarizer`" not in catalog
+    assert "`nexus.shared_tools.resume_engine.service`" not in catalog
 
 
 def test_browser_tools_bound_in_core_tools() -> None:
-    """Ensure `list_browser_tabs` and `read_browser_tabs` are bound in `NexusAgent` CORE_TOOLS."""
+    """Ensure `list_browser_tabs`, `read_browser_tabs`, and `get_directory_structure` (not duplicate alias) are bound in `CORE_TOOLS`."""
     tool_names = {t.name for t in CORE_TOOLS}
     assert "list_browser_tabs" in tool_names
     assert "read_browser_tabs" in tool_names
+    assert "get_directory_structure" in tool_names
+    assert "get_vault_structure" not in tool_names
 
 
 def test_format_tabs_as_markdown() -> None:

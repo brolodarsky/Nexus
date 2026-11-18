@@ -39,6 +39,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 	- **[[Project - Section 6.2 Library Condensation]]:** Restructuring technical library for AI Engineer focus.
 - **[[Template - New Note or Thought]]**
 - **[[Template - Capture]]** Used for capturing raw content (YouTube transcripts, podcasts, articles, etc.)
+- **[[Protocol - Email Triage]]:** Deterministic 4-bucket Gmail sweep, Vault state integration, and inbox routing workflow.
 - **Toolbox:** Documentation for the Pixel 8 Pro, Obsidian/Logseq workflows, and local LLM setups.
 - **Archive**
 
@@ -369,6 +370,7 @@ _The Content Log & Reference_
 	- **[[Concept - Cognitive Impedance Matching & AI System Coupling]]**
 #### Agent Tool Use & Integration (The "Hands")
 - **[[Function Calling & Structured Outputs]]:** The foundational bridge between LLMs and code execution (JSON schema enforcement).
+- **[[Concept - Tool Context & Instruction Architecture in Nexus]]:** Four-layer separation between bound `@tool` mechanics, `[CLI]` catalog discovery, on-demand autopoietic `Protocol - *.md` playbooks, and `Master`/`Section Instructions`.
 - **Tool Protocols:** **[[Concept - Model Context Protocol (MCP)]]:** Universal open standard for providing models with secure data context and tool access.
 	- **[[Concept - CLI vs MCP for AI Agents]]**
 - **Environment Control:** Sandboxed CLI execution and dynamic workspace management.
