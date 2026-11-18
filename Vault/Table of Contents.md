@@ -106,7 +106,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 
 ## 2.4. Nutrition
-- **[[Protocol - Caffeine Cycling & Tolerance Management]]:** Stepped sine-wave caffeine cycling framework, adenosine receptor resensitization, and daily beverage substitution guide.
+- **[[Protocol - Monthly Biology Reset]]:** Synchronized monthly 3-weeks-on / 1-week-reset cadence combining a 7-day maintenance calorie diet break, adenosine receptor caffeine reset (with 3-day pre-taper), and active gym deload.
 - **The Recipe Vault:** High-protein/low-calorie favorites (Crack Slaw, etc.).    
 - **Feeding Reference:** Bookmarks/Videos on nutrition science and food prep.
 
