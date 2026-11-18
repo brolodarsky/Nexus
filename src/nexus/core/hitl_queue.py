@@ -1,3 +1,4 @@
+import ctypes
 import sqlite3
 import json
 # difflib: Stdlib sequence differ; SequenceMatcher yields line-level edit opcodes used by the 3-way rebase merge
@@ -509,17 +510,96 @@ def _read_disk(path: Path) -> Optional[str]:
         return f"[Binary file ({path.stat().st_size} bytes)]"
 
 
-def _atomic_write(path: Path, text: str) -> None:
+# _WIN_EPOCH_OFFSET_100NS: Number of 100-nanosecond intervals between the Windows FILETIME epoch
+# (1601-01-01T00:00:00Z) and the POSIX Unix epoch (1970-01-01T00:00:00Z) used by Python's `os.stat()`.
+_WIN_EPOCH_OFFSET_100NS = 116_444_736_000_000_000
+
+
+# Signature: `(path: Path) -> Optional[int]` returns the file's original birth/creation timestamp in nanoseconds, or `None` if absent.
+def _get_creation_time_ns(path: Path) -> Optional[int]:
+    """Reads a file's original creation/birth timestamp in nanoseconds before an atomic replace overwrites its MFT entry."""
+    if not path.exists():
+        return None
+    try:
+        st = path.stat()
+        # Python 3.12+ exposes `st_birthtime_ns` on Windows/macOS; fallback to `st_ctime_ns` on older/other platforms.
+        return int(getattr(st, "st_birthtime_ns", st.st_ctime_ns))
+    except OSError:
+        return None
+
+
+# Signature: `(path: Path, ctime_ns: int) -> None` restores Windows NTFS CreationTime after `os.replace` swaps in a fresh temp file.
+def _set_windows_creation_time_ns(path: Path, ctime_ns: int) -> None:
+    """Restores a file's Windows NTFS CreationTime via Win32 `SetFileTime` so edits are not misclassified as newly created files."""
+    if os.name != "nt" or not path.exists():
+        return
+    try:
+        # Import `wintypes` lazily inside the Windows guard so non-Windows platforms never evaluate Win32 ctypes structures.
+        from ctypes import wintypes
+
+        # Convert POSIX nanoseconds to Windows FILETIME ticks (100ns units since 1601-01-01 UTC).
+        ft_ticks = (int(ctime_ns) // 100) + _WIN_EPOCH_OFFSET_100NS
+        if ft_ticks <= 0:
+            return
+        # FILETIME stores a 64-bit unsigned integer split into two 32-bit DWORDs (low 32 bits, high 32 bits).
+        creation_ft = wintypes.FILETIME(ft_ticks & 0xFFFFFFFF, (ft_ticks >> 32) & 0xFFFFFFFF)
+
+        kernel32 = ctypes.windll.kernel32
+        # Bind explicit 64-bit HANDLE/BOOL signatures so pointers do not truncate on 64-bit Windows Python.
+        kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.SetFileTime.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        kernel32.SetFileTime.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        # FILE_WRITE_ATTRIBUTES (0x0100) grants metadata-only timestamp access;
+        # share mode 0x07 (READ|WRITE|DELETE) avoids blocking Obsidian/antivirus; OPEN_EXISTING (3); FILE_FLAG_BACKUP_SEMANTICS (0x02000000).
+        handle = kernel32.CreateFileW(str(path), 0x0100, 0x07, None, 3, 0x02000000, None)
+        invalid_handle = ctypes.c_void_p(-1).value
+        if not handle or handle == invalid_handle:
+            return
+        try:
+            # Pass `&creation_ft` only and `None` for last-access and last-write times so `st_mtime` remains untouched.
+            kernel32.SetFileTime(handle, ctypes.byref(creation_ft), None, None)
+        finally:
+            kernel32.CloseHandle(handle)
+    except OSError:
+        # Never abort an already-committed disk write if an external watcher briefly locks attribute metadata.
+        pass
+
+
+# Signature: `(path: Path, text: str, preserve_from: Optional[Path] = None) -> None` atomically replaces `path` while keeping original birth time.
+def _atomic_write(path: Path, text: str, preserve_from: Optional[Path] = None) -> None:
     """Writes `text` via temp file + `os.replace` so a crash mid-write never leaves a truncated note.
 
     `newline=""` disables Python's Windows `\\n` -> `\\r\\n` translation, so notes keep the exact line
     endings in `text` (LF for agent-authored content, matching Obsidian's default).
+    On Windows, `os.replace` substitutes the newly created temp file's MFT entry and overwrites `st_ctime`;
+    we snapshot and restore the pre-existing file's creation time (or `preserve_from` on moves) afterward.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Snapshot original creation time before `os.replace` replaces `path` with the newly created temp file.
+    orig_ctime_ns = _get_creation_time_ns(preserve_from if preserve_from is not None else path)
     tmp_path = path.with_name(f".{path.name}.hitl-tmp")
     with open(tmp_path, "w", encoding="utf-8", newline="") as f:
         f.write(text)
     os.replace(tmp_path, path)
+    if orig_ctime_ns is not None:
+        _set_windows_creation_time_ns(path, orig_ctime_ns)
 
 
 def _require_pending(tx_id: int) -> Dict[str, Any]:
@@ -634,13 +714,16 @@ def commit_transaction(tx_id: int, root: Path, force: bool = False) -> Dict[str,
             dst_path.parent.mkdir(parents=True, exist_ok=True)
             if is_binary:
                 # Atomically copy and replace binary file bytes without UTF-8 string encoding corruption
+                orig_ctime_ns = _get_creation_time_ns(src_path)
                 tmp_dst = dst_path.with_name(f".{dst_path.name}.hitl-tmp")
                 shutil.copy2(src_path, tmp_dst)
                 os.replace(tmp_dst, dst_path)
+                if orig_ctime_ns is not None:
+                    _set_windows_creation_time_ns(dst_path, orig_ctime_ns)
                 if src_path.exists() and src_path.resolve() != dst_path.resolve():
                     src_path.unlink()
             else:
-                _atomic_write(dst_path, tx["proposed_content"])
+                _atomic_write(dst_path, tx["proposed_content"], preserve_from=src_path)
                 if src_path.exists() and src_path.resolve() != dst_path.resolve():
                     src_path.unlink()
 
@@ -763,9 +846,12 @@ def rollback_transaction(tx_id: int, root: Path, force: bool = False) -> Dict[st
                 src_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(dst_path), str(src_path))
             else:
+                orig_ctime_ns = _get_creation_time_ns(dst_path)
                 if dst_path.exists():
                     dst_path.unlink()
                 _atomic_write(src_path, rev["prior_content"] or "")
+                if orig_ctime_ns is not None:
+                    _set_windows_creation_time_ns(src_path, orig_ctime_ns)
 
             cursor.execute(
                 '''

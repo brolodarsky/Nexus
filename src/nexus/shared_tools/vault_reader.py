@@ -3,10 +3,11 @@ vault_reader.py — Pure Python filesystem operations for Vault navigation and r
 No LangChain @tool decorators here. These functions can be used by any agent, CLI call, or HTTP route.
 """
 import argparse
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 import difflib
 import os
 import re
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -871,6 +872,81 @@ def search_within(keyword: str, root_path: Optional[str] = None, tags: Optional[
     return output
 
 
+# Signature: `(raw_path: Optional[str]) -> str` strips any leading `Vault/` prefix and normalizes slashes for rel-path matching.
+def _normalize_hitl_rel_path(raw_path: Optional[str]) -> str:
+    clean = (raw_path or "").strip().replace("\\", "/").lstrip("/")
+    if clean.startswith("Vault/"):
+        return clean[len("Vault/"):]
+    return clean
+
+
+# Signature: `(cutoff_ts: float) -> Set[str]` queries `hitl.db` revisions to identify notes that pre-existed `cutoff_ts`.
+def _find_preexisting_files_from_hitl(cutoff_ts: float) -> Set[str]:
+    """Cross-checks the HITL `revisions` ledger so notes edited in-window are never misbadged as `[NEW]`.
+
+    Older Windows commits via `os.replace` clobbered NTFS `CreationTime` (`st_ctime`) on existing notes;
+    walking committed non-rolled-back revisions (`rolled_back = 0`) recovers ground-truth prior existence.
+    """
+    try:
+        from nexus.core import hitl_queue
+        db_path = Path(hitl_queue.DB_PATH)
+    except Exception:
+        db_path = Path(__file__).resolve().parent.parent / "hitl.db"
+
+    if not db_path.exists():
+        return set()
+
+    # SQLite `CURRENT_TIMESTAMP` stores UTC `YYYY-MM-DD HH:MM:SS` strings; convert `cutoff_ts` to match lexicographically.
+    cutoff_utc_str = datetime.fromtimestamp(cutoff_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    preexisting: Set[str] = set()
+    first_seen_in_window: Set[str] = set()
+    conn: Optional[sqlite3.Connection] = None
+
+    try:
+        conn = sqlite3.connect(db_path, timeout=5.0)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT REPLACE(target_file, '\\', '/') AS src_file,
+                   REPLACE(destination_file, '\\', '/') AS dst_file,
+                   prior_content IS NOT NULL AS had_prior,
+                   applied_content = '' AS is_delete,
+                   created_at
+            FROM revisions
+            WHERE rolled_back = 0
+            ORDER BY id ASC
+            """
+        )
+        for src_raw, dst_raw, had_prior, is_delete, created_at in cursor.fetchall():
+            src_rel = _normalize_hitl_rel_path(src_raw)
+            dst_rel = _normalize_hitl_rel_path(dst_raw) if dst_raw else ""
+            created_str = str(created_at or "")
+
+            if created_str < cutoff_utc_str:
+                # Reconstruct which files already existed before the requested time window began.
+                if dst_rel:
+                    preexisting.discard(src_rel)
+                    preexisting.add(dst_rel)
+                elif is_delete:
+                    preexisting.discard(src_rel)
+                elif src_rel:
+                    preexisting.add(src_rel)
+            else:
+                # Within the window, only the first revision on a path settles whether it already existed (`had_prior`).
+                eff_rel = dst_rel if dst_rel else src_rel
+                if eff_rel and eff_rel not in first_seen_in_window:
+                    first_seen_in_window.add(eff_rel)
+                    if had_prior:
+                        preexisting.add(eff_rel)
+    except sqlite3.Error:
+        return set()
+    finally:
+        if conn is not None:
+            conn.close()
+
+    return preexisting
+
+
 # Optional[float] / Optional[str] allow callers to filter by rolling hours, specific date, or default to today (local midnight).
 def get_recent_modifications(
     hours: Optional[float] = None,
@@ -915,6 +991,8 @@ def get_recent_modifications(
 
     # Convert cutoff datetime to a POSIX float timestamp (seconds since epoch) for fast comparison against os.stat().
     cutoff_ts: float = cutoff_dt.timestamp()
+    # Query committed HITL revisions once so edited pre-existing notes are never flagged `[NEW]` due to legacy `os.replace` ctime drift.
+    preexisting_hitl_files = _find_preexisting_files_from_hitl(cutoff_ts)
 
     # Tuple holds: (mtime_ts, is_new_in_window, rel_path_str, size_bytes)
     matched_files: List[Tuple[float, bool, str, int]] = []
@@ -947,8 +1025,9 @@ def get_recent_modifications(
             if stat_info.st_mtime >= cutoff_ts:
                 # Forward-slash relative path keeps output uniform across Windows and POSIX platforms.
                 rel_path = str(filepath.relative_to(resolved_vault)).replace("\\", "/")
-                # Compare creation timestamp (st_ctime) against cutoff_ts to distinguish newly created vs. edited notes.
-                is_new = stat_info.st_ctime >= cutoff_ts
+                # Compare filesystem birth/creation timestamp against `cutoff_ts` AND cross-check HITL pre-existence history.
+                birthtime_ts = getattr(stat_info, "st_birthtime", stat_info.st_ctime)
+                is_new = (birthtime_ts >= cutoff_ts) and (rel_path not in preexisting_hitl_files)
                 matched_files.append((stat_info.st_mtime, is_new, rel_path, stat_info.st_size))
 
     scope_label = f"in '{root_path}'" if root_path else "across the Vault"

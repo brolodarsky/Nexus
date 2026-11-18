@@ -2,7 +2,9 @@
 
 Every test runs against an isolated temp project root + temp `hitl.db`, so the real Vault is never touched.
 """
+import os
 from pathlib import Path
+import time
 
 import pytest
 # TestClient: Starlette/FastAPI in-process HTTP client; exercises routes without starting uvicorn
@@ -10,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from nexus.core import hitl_queue as hq
+from nexus.shared_tools import vault_reader
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
@@ -618,4 +621,45 @@ def test_move_file_and_delete_file_tools(root: Path, monkeypatch: pytest.MonkeyP
         "reasoning": "Changed mind, discard staged note",
     })
     assert "Discarded pending staged note creation" in discard_res
+
+
+# ── Creation Timestamp & `[NEW]` vs. `[EDITED]` Badge Integrity ────────────
+
+
+def test_commit_modify_preserves_creation_timestamp(root: Path):
+    """Modifying an existing note via HITL must preserve its original NTFS birth/creation timestamp."""
+    path = _write(root, "Note.md", "v1\n")
+    orig_stat = path.stat()
+    orig_ctime_ns = getattr(orig_stat, "st_birthtime_ns", orig_stat.st_ctime_ns)
+
+    time.sleep(0.05)
+    tx_id = _stage("Note.md", "v1\n", "v1\nv2\n")
+    hq.commit_transaction(tx_id, root)
+
+    updated_stat = path.stat()
+    assert updated_stat.st_mtime_ns > orig_ctime_ns
+    if os.name == "nt":
+        # Windows FILETIME stores 100ns ticks, so restoring ctime can round within 1 microsecond (< 1ms).
+        updated_ctime_ns = getattr(updated_stat, "st_birthtime_ns", updated_stat.st_ctime_ns)
+        assert abs(updated_ctime_ns - orig_ctime_ns) < 1_000_000
+
+
+def test_get_recent_modifications_distinguishes_hitl_create_vs_modify(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """`get_recent_modifications` must classify HITL edits as `[EDITED]` and true creations as `[NEW]`."""
+    monkeypatch.setattr(vault_reader, "VAULT_PATH", root / "Vault")
+
+    _write(root, "Existing.md", "old\n")
+    mod_tx_id = _stage("Existing.md", "old\n", "old\nnew\n")
+    hq.commit_transaction(mod_tx_id, root)
+
+    create_tx_id = _stage("BrandNew.md", None, "fresh\n")
+    hq.commit_transaction(create_tx_id, root)
+
+    report = vault_reader.get_recent_modifications(hours=1.0)
+    assert "[EDITED] Existing.md" in report
+    assert "[NEW] Existing.md" not in report
+    assert "[NEW] BrandNew.md" in report
+
 
