@@ -78,19 +78,75 @@ const BARE_PROSE_LATEX_PATTERN = new RegExp(
   "g"
 );
 
-// escapeProseCurrency: Escapes standalone currency expressions (e.g. `$41.20`, `$150k`, `$50–$100`)
-// into `\$...` so remark-math does not mistakenly pair conversational currency figures across prose.
-// If the number is immediately followed by a closing `$` (e.g. `$0.4$` or `$100$`), it is recognized
-// as an intentional single-number math literal and preserved without escaping.
-function escapeProseCurrency(text: string): string {
-  return text.replace(/(?<![\w$\\])\$(\d+(?:\.\d+)?(?:[kKmMbB])?)/g, (match, _num, offset, str) => {
-    const nextChar = str[offset + match.length];
-    if (nextChar === "$") {
-      // Followed immediately by closing $ -> math literal (e.g. `$0.4$`), do not escape
-      return match;
+// isClosedInlineMathOnSameLine: Checks whether a `$` + number token opens a genuine inline LaTeX span
+// (e.g. `$2^{\Omega(n)}$`, `$2n + 1$`, `$100 \text{ ms}$`) rather than standalone prose currency
+// (e.g. `$50`, `$50–$100`, `$50 and $x = 1$`).
+// - afterNumber: substring immediately following the matched `$<number>` token through the end of the segment
+function isClosedInlineMathOnSameLine(afterNumber: string): boolean {
+  if (!afterNumber) return false;
+  const firstChar = afterNumber[0];
+
+  // Immediate closing `$` (`$0.4$`) or unambiguous LaTeX continuation (`$2^{\Omega(n)}$`, `$2_i$`, `$2\pi$`)
+  if (firstChar === "$" || /^[\\^_{}]/.test(firstChar)) {
+    return true;
+  }
+
+  // Restrict inline-math pairing to the current line because single-dollar math cannot span lines
+  const newlineIdx = afterNumber.indexOf("\n");
+  const restOfLine = newlineIdx === -1 ? afterNumber : afterNumber.slice(0, newlineIdx);
+
+  // Scan for the next unescaped single `$` delimiter on the same line (skipping `\$` and `$$`)
+  for (let i = 0; i < restOfLine.length; i++) {
+    if (restOfLine[i] === "\\") {
+      i++; // Skip escaped character so `\$` is never mistaken for a closing delimiter
+      continue;
     }
-    return `\\${match}`;
-  });
+    if (restOfLine[i] !== "$") continue;
+    if (restOfLine[i + 1] === "$") {
+      // Encountered display-math `$$` before a closing `$` -> not an inline math span
+      return false;
+    }
+
+    const beforeClose = restOfLine.slice(0, i);
+    const charAfterClose = restOfLine[i + 1] ?? "";
+    // Reject if the candidate closing `$` is preceded by whitespace/dash/punctuation (e.g. `$50 and $100`, `$50–$100`)
+    // or immediately followed by a digit (which indicates the start of another currency amount like `$100`)
+    const validMathEnd = /[a-zA-Z0-9})\]|!'°%]$/.test(beforeClose);
+    const followedByCurrencyDigit = /\d/.test(charAfterClose);
+    return validMathEnd && !followedByCurrencyDigit;
+  }
+
+  return false;
+}
+
+// PROSE_CURRENCY_PROTECTED_SPAN: Matches inline code spans (``...``, `...`) and display math blocks ($$...$$)
+// so currency escaping never mutates literal code examples (e.g. `` `$50` ``) or display equations (`$$2^n$$`).
+const PROSE_CURRENCY_PROTECTED_SPAN = /(``(?:[^`\n]|`(?!`))+``|`[^`\n]+`|\$\$[\s\S]*?\$\$)/g;
+
+// escapeProseCurrency: Escapes standalone currency expressions (e.g. `$41.20`, `$150k`, `$50–$100`, `$1,200`)
+// into `\$...` so remark-math does not mistakenly pair conversational currency figures across prose.
+// Preserves genuine inline math expressions that start with digits (e.g. `$2^{\Omega(n)}$`, `$2n + 1$`, `$0.4$`).
+function escapeProseCurrency(text: string): string {
+  // Split on inline code and display math (odd indices are captured protected spans)
+  const parts = text.split(PROSE_CURRENCY_PROTECTED_SPAN);
+  return parts
+    .map((part, idx) => {
+      if (idx % 2 === 1) return part;
+
+      // Match `$` + number (supporting optional comma thousands groups, decimals, and standalone k/M/B/T suffix)
+      // when not preceded by a word character, `$`, or `\`.
+      return part.replace(
+        /(?<![\w$\\])\$(\d+(?:,\d{3})*(?:\.\d+)?(?:[kKmMbBtT](?!\w))?)/g,
+        (match, _num, offset, str) => {
+          const afterNumber = str.slice(offset + match.length);
+          if (isClosedInlineMathOnSameLine(afterNumber)) {
+            return match;
+          }
+          return `\\${match}`;
+        }
+      );
+    })
+    .join("");
 }
 
 // Strips trailing `.md` from note display labels so `[[Plan.md]]`, `` `Plan.md` ``, and `[[Plan]]` render identically
@@ -597,15 +653,26 @@ const MARKDOWN_COMPONENTS: Components = {
     );
   },
   pre: ({ children }) => (
-    <pre className="my-3.5 rounded-xl bg-[#05070e] border border-border-subtle p-4 overflow-x-auto text-xs font-mono leading-relaxed text-zinc-200 shadow-inner">
+    // whitespace-pre-wrap + break-words wraps prose/email/markdown code fences inside the box instead of clipping off-screen;
+    // max-w-full + overflow-x-auto keeps unbreakable long tokens safely contained within narrow viewports.
+    <pre className="my-3.5 max-w-full rounded-xl bg-[#05070e] border border-border-subtle p-4 overflow-x-auto whitespace-pre-wrap break-words text-xs font-mono leading-relaxed text-zinc-200 shadow-inner">
       {children}
     </pre>
   ),
   code: ({ className, children }) => {
-    // Inline code vs fenced code block detection (className "language-*" denotes fenced blocks)
-    const isBlock = Boolean(className?.includes("language-"));
+    // Inline code vs fenced code block detection:
+    // - `language-*` denotes a tagged fenced block (` ```markdown `, ` ```python `).
+    // - CommonMark converts line endings in inline code spans to spaces, so `\n` inside `<code>`
+    //   identifies an untagged fenced/indented block (` ``` `) rather than an inline code pill.
+    const isBlock =
+      Boolean(className?.includes("language-")) ||
+      (typeof children === "string" && children.includes("\n"));
     if (isBlock) {
-      return <code className={`${className} font-mono text-xs`}>{children}</code>;
+      return (
+        <code className={`${className ?? ""} block whitespace-pre-wrap break-words font-mono text-xs`.trim()}>
+          {children}
+        </code>
+      );
     }
 
     // Defense-in-depth: if any #wikilink: escaped pre-processing inside an inline code span,
@@ -628,7 +695,7 @@ const MARKDOWN_COMPONENTS: Components = {
               }
               if (!part) return null;
               return (
-                <code key={i} className="inline-block px-1.5 py-0.5 mx-0.5 my-0.5 rounded-md bg-bg-secondary/95 border border-white/15 font-mono text-[0.78rem] text-accent-cyan align-baseline">
+                <code key={i} className="inline-block max-w-full break-words px-1.5 py-0.5 mx-0.5 my-0.5 rounded-md bg-bg-secondary/95 border border-white/15 font-mono text-[0.78rem] text-accent-cyan align-baseline">
                   {part}
                 </code>
               );
@@ -639,7 +706,7 @@ const MARKDOWN_COMPONENTS: Components = {
     }
 
     return (
-      <code className="inline-block px-1.5 py-0.5 mx-0.5 my-0.5 rounded-md bg-bg-secondary/95 border border-white/15 font-mono text-[0.78rem] text-accent-cyan align-baseline">
+      <code className="inline-block max-w-full break-words px-1.5 py-0.5 mx-0.5 my-0.5 rounded-md bg-bg-secondary/95 border border-white/15 font-mono text-[0.78rem] text-accent-cyan align-baseline">
         {children}
       </code>
     );
@@ -698,7 +765,7 @@ const MarkdownMessage = memo(function MarkdownMessage({
 
   return (
     <WikiLinkContext.Provider value={wikiLinkConfig}>
-      <div className={`space-y-3 text-sm leading-relaxed text-text-primary break-words ${className}`}>
+      <div className={`min-w-0 max-w-full space-y-3 text-sm leading-relaxed text-text-primary break-words ${className}`}>
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
           rehypePlugins={REHYPE_PLUGINS}

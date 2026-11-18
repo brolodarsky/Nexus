@@ -119,7 +119,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${isUser
+        className={`min-w-0 max-w-full rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${isUser
           ? "max-w-2xl bg-accent-cyan/10 border border-accent-cyan/20 text-text-primary"
           : hasTrace
             ? "max-w-4xl xl:max-w-5xl w-full glass-card text-text-primary"
