@@ -427,3 +427,40 @@ def test_force_false_skips_auto_and_legacy_titles_and_conn_closes(client, tmp_pa
     assert not db_path.exists()
 
 
+def test_auto_generate_title_deleted_conversation_race(client, temp_conv):
+    """Verify non-forced auto-titling returns 'skipped' on deleted threads while forced refreshes still return 404."""
+    from types import SimpleNamespace
+    from nexus.core.chat_titles import auto_generate_title_sync
+
+    deleted_id = "deleted-conv-uuid-404-race"
+
+    # 1. Background/UI non-forced sync on a deleted conversation returns HTTP 200 skipped instead of 404
+    res_non_forced = client.post(f"/api/agents/ask/conversations/{deleted_id}/auto-title?force=false")
+    assert res_non_forced.status_code == 200
+    assert res_non_forced.json()["status"] == "skipped"
+    assert res_non_forced.json()["conversation_id"] == deleted_id
+
+    # 2. Explicit manual sparkle trigger (`?force=true`) on a missing conversation still returns HTTP 404
+    res_forced = client.post(f"/api/agents/ask/conversations/{deleted_id}/auto-title?force=true")
+    assert res_forced.status_code == 404
+
+    # 3. Deleting a conversation mid-flight while the LLM titling call executes returns skipped cleanly
+    chats_db.log_message("user", "Draft prompt before user deletes thread", conversation_id=temp_conv)
+    chats_db.log_message("assistant", "Initial answer before deletion.", conversation_id=temp_conv)
+
+    class DeletingFakeModel:
+        def invoke(self, _prompt):
+            # Simulate the user clicking Delete while Turn-1 LLM summarization is in flight
+            chats_db.delete_conversation(temp_conv)
+            return SimpleNamespace(content="Title For Deleted Thread")
+
+    with patch("nexus.core.constants.get_chat_model", return_value=DeletingFakeModel()):
+        res = auto_generate_title_sync(temp_conv, force=False)
+
+    assert res["status"] == "skipped"
+    assert res.get("skipped_deleted") is True
+    assert res.get("title") is None
+    assert chats_db.get_conversation(temp_conv) is None
+
+
+

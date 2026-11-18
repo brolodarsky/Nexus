@@ -191,9 +191,17 @@ def _commit_title_result(
         only_if_placeholder=(not force),
     )
     if not updated:
-        # Another thread (or a manual user rename during the LLM call) already updated this conversation's title
+        # Another thread, a manual user rename, or a concurrent deletion mutated/removed this row during the LLM call
         latest = get_conversation(conversation_id)
-        current_title = (latest or {}).get("title") or initial_title
+        if latest is None:
+            # Conversation was deleted while LLM title generation was in flight: skip silently instead of persisting stale state
+            return {
+                "status": "skipped",
+                "conversation_id": conversation_id,
+                "title": None,
+                "skipped_deleted": True,
+            }
+        current_title = latest.get("title") or initial_title
         return {
             "status": "unchanged",
             "conversation_id": conversation_id,
@@ -223,10 +231,15 @@ def auto_generate_title_sync(
     if not is_owner:
         slot["done_event"].wait(timeout=30.0)
         if slot.get("error") is not None:
+            # Background/non-forced callers treat missing/deleted conversation LookupError as a harmless skip
+            if not force and isinstance(slot["error"], LookupError):
+                return {"status": "skipped", "conversation_id": conversation_id, "title": None}
             raise slot["error"]
         if slot.get("result") is not None:
             return dict(slot["result"])
         conv = get_conversation(conversation_id)
+        if not conv and not force:
+            return {"status": "skipped", "conversation_id": conversation_id, "title": None}
         return {
             "status": "unchanged",
             "conversation_id": conversation_id,
@@ -236,6 +249,11 @@ def auto_generate_title_sync(
     try:
         conv = get_conversation(conversation_id)
         if not conv:
+            if not force:
+                # Conversation was deleted before this non-forced job ran: release slot cleanly without throwing 404/LookupError
+                res = {"status": "skipped", "conversation_id": conversation_id, "title": None}
+                _release_inflight_slot(conversation_id, slot, result=res)
+                return res
             raise LookupError(f"Conversation '{conversation_id}' not found.")
 
         initial_title = conv.get("title") or "New Chat"
@@ -349,12 +367,15 @@ async def auto_generate_title_async(
                 # Wait in worker thread for the active background Turn-1 job to finish instead of calling LLM twice
                 await asyncio.to_thread(existing["done_event"].wait, 30.0)
                 if existing.get("error") is not None:
+                    # Non-forced UI/background syncs treat a concurrently deleted thread's LookupError as a no-op skip
+                    if isinstance(existing["error"], LookupError):
+                        return {"status": "skipped", "conversation_id": conversation_id, "title": None}
                     raise existing["error"]
                 if existing.get("result") is not None:
                     return dict(existing["result"])
                 conv = await asyncio.to_thread(get_conversation, conversation_id)
                 if not conv:
-                    raise LookupError(f"Conversation '{conversation_id}' not found.")
+                    return {"status": "skipped", "conversation_id": conversation_id, "title": None}
                 return {
                     "status": "unchanged",
                     "conversation_id": conversation_id,
@@ -366,6 +387,11 @@ async def auto_generate_title_async(
     try:
         conv = await asyncio.to_thread(get_conversation, conversation_id)
         if not conv:
+            if not force:
+                # Non-forced UI syncs (`?force=false`) must return 200 skipped rather than 404 if the user just deleted the chat
+                res = {"status": "skipped", "conversation_id": conversation_id, "title": None}
+                _release_inflight_slot(conversation_id, slot, result=res)
+                return res
             raise LookupError(f"Conversation '{conversation_id}' not found.")
 
         initial_title = conv.get("title") or "New Chat"
