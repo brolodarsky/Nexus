@@ -7,6 +7,7 @@ and on-demand CLI tool execution.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from typing import List, Optional
@@ -41,8 +42,50 @@ def get_directory_structure(path: Optional[str] = None) -> str:
 
 # ── 2. Vault File Reading & Search Tools ─────────────────────────────────────
 
+def _format_missing_cache_keys_hint(conversation_id: str) -> str:
+    """Formats the list of valid `cache://...` keys currently available in `conversation_id`."""
+    from nexus.core.conversation_cache import list_captures
+
+    entries = list_captures(conversation_id)
+    if not entries:
+        return f"No external captures are currently cached in conversation `{conversation_id}`."
+    bullets = []
+    for item in entries:
+        url_note = f" ({item['source_url']})" if item.get("source_url") else ""
+        bullets.append(f"- `{item['cache_key']}` — {item['title']}{url_note}")
+    return f"Valid cached keys in conversation `{conversation_id}`:\n" + "\n".join(bullets)
+
+
+def _format_cached_capture_for_read(
+    capture: dict,
+    start_line: Optional[int] = None,
+    end_line: Optional[int] = None,
+) -> str:
+    """Formats a per-conversation cached external capture for `read_file` with optional 1-indexed line slicing."""
+    cache_key = capture["cache_key"]
+    short_key = cache_key[len("cache://") :] if cache_key.startswith("cache://") else cache_key
+    title = capture.get("title") or cache_key
+    src_type = capture.get("source_type") or "capture"
+    char_count = int(capture.get("char_count") or len(capture.get("content") or ""))
+    src_url = capture.get("source_url")
+    url_part = f" | URL: {src_url}" if src_url else ""
+    banner = (
+        f"[CONVERSATION CACHE CAPTURE (`{cache_key}`) — {title} | {src_type} | "
+        f"{char_count:,} chars{url_part}]\n"
+        f"*(Embed verbatim in `create_file` / `modify_file` via `{{{{cache:{short_key}}}}}`)*\n\n"
+    )
+    body = capture.get("content") or ""
+    if start_line is not None or end_line is not None:
+        lines = body.splitlines()
+        s_idx = max(0, (start_line or 1) - 1)
+        e_idx = min(len(lines), end_line or len(lines))
+        sliced = "\n".join(f"{i + 1}: {lines[i]}" for i in range(s_idx, e_idx))
+        return f"{banner}--- {cache_key} (Lines {s_idx + 1}-{e_idx} of {len(lines)}) ---\n{sliced}"
+    return f"{banner}{body}"
+
+
 # Pure-Python shared helper used by both `@tool read_file` and `spawn_subagent(context_files=...)`
-# so HITL staged-edit overlays and disk reads share one canonical implementation without duplicating logic.
+# so HITL staged-edit overlays, disk reads, and per-conversation `cache://` captures share one canonical path.
 def read_vault_file_with_hitl_overlay(
     file_path: str,
     start_line: Optional[int] = None,
@@ -50,9 +93,31 @@ def read_vault_file_with_hitl_overlay(
     start_page: Optional[int] = None,
     end_page: Optional[int] = None,
 ) -> str:
-    """Resolve and read a Vault note (including pending staged HITL edits) without LangChain `@tool` wrapping."""
+    """Resolve and read a Vault note (with HITL overlays) or per-conversation `cache://` capture."""
+    from nexus.core.conversation_cache import (
+        format_captures_manifest,
+        get_active_conversation_id,
+        get_capture,
+        is_cache_ref,
+    )
     from nexus.core.hitl_queue import get_pending_for_file
     from nexus.shared_tools.vault_reader import read_note_content, resolve_vault_note_path
+
+    cleaned_ref = (file_path or "").strip()
+    # 0. Support per-conversation external capture lookups (`cache://`, `cache://<key>`, or cached URLs)
+    if cleaned_ref.lower().rstrip("/") in ("cache:", "cache://", "cache://list", "cache://*"):
+        return format_captures_manifest(get_active_conversation_id())
+
+    if is_cache_ref(cleaned_ref) or cleaned_ref.lower().startswith(("http://", "https://")):
+        active_convo = get_active_conversation_id()
+        capture = get_capture(active_convo, cleaned_ref)
+        if capture is not None:
+            return _format_cached_capture_for_read(capture, start_line=start_line, end_line=end_line)
+        hint = _format_missing_cache_keys_hint(active_convo)
+        return (
+            f"Error: Cached capture `{cleaned_ref}` was not found in conversation `{active_convo}`.\n\n"
+            f"{hint}"
+        )
 
     # 1. Check if this file has a pending transaction in the HITL queue (`hitl.db`).
     # First resolve on disk if it exists so short filenames ("Plan.md") map to their canonical `Vault/...` path.
@@ -118,15 +183,23 @@ def read_vault_file_with_hitl_overlay(
     )
 
 
-# `context_files: List[str]` lists Vault paths or unique note titles to pre-hydrate before subagent boot.
+# `context_files: List[str]` lists Vault paths, unique note titles, or `cache://...` captures to pre-hydrate.
 # -> tuple[Optional[str], Optional[str]] returns (prehydrated_markdown, None) on success or (None, fail_fast_error) if any path fails.
 def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[str], Optional[str]]:
-    """Pre-hydrates Vault files for `spawn_subagent` with fail-fast hallucination detection on unresolved paths."""
+    """Pre-hydrates Vault files and per-conversation `cache://` captures for `spawn_subagent` with fail-fast checks."""
+    from nexus.core.conversation_cache import (
+        format_captures_manifest,
+        get_active_conversation_id,
+        get_capture,
+        is_cache_ref,
+    )
     from nexus.core.hitl_queue import get_pending_for_file
     from nexus.shared_tools.vault_reader import find_nearest_directory_and_matches, resolve_vault_note_path
 
     if not context_files:
         return None, None
+
+    active_convo = get_active_conversation_id()
 
     # Deduplicate requested paths while preserving caller order so identical files are never injected twice.
     seen_refs: set[str] = set()
@@ -148,6 +221,37 @@ def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[s
     for ref in ordered_refs:
         if not ref:
             failure_blocks.append("- `<empty string>`: Error: Path cannot be empty.")
+            continue
+
+        # Support `cache://` manifest and individual `cache://...` keys (or cached URLs) in this conversation
+        if ref.lower().rstrip("/") in ("cache:", "cache://", "cache://list", "cache://*"):
+            if "cache://" in seen_resolved_labels:
+                continue
+            seen_resolved_labels.add("cache://")
+            resolved_sections.append(
+                f"## `cache://` (Conversation Capture Manifest)\n\n{format_captures_manifest(active_convo)}"
+            )
+            continue
+
+        if is_cache_ref(ref) or ref.lower().startswith(("http://", "https://")):
+            capture = get_capture(active_convo, ref)
+            if capture is not None:
+                cache_key = capture["cache_key"]
+                if cache_key.lower() in seen_resolved_labels:
+                    continue
+                seen_resolved_labels.add(cache_key.lower())
+                short_key = cache_key[len("cache://") :] if cache_key.startswith("cache://") else cache_key
+                url_line = f"- **Source URL:** {capture['source_url']}\n" if capture.get("source_url") else ""
+                resolved_sections.append(
+                    f"## `{cache_key}` — {capture['title']}\n"
+                    f"{url_line}"
+                    f"- **Embed Verbatim Placeholder:** `{{{{cache:{short_key}}}}}`\n\n"
+                    f"{capture['content']}"
+                )
+                continue
+
+            hint = _format_missing_cache_keys_hint(active_convo)
+            failure_blocks.append(f"- `{ref}`: Cached capture not found in conversation `{active_convo}`.\n  {hint}")
             continue
 
         resolved_path, err = resolve_vault_note_path(ref)
@@ -195,15 +299,15 @@ def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[s
     if failure_blocks:
         error_report = (
             "❌ Fail-Fast Context Hydration Error: One or more `context_files` passed to `spawn_subagent` "
-            "could not be resolved on disk. Subagent execution aborted before wasting LLM turns.\n\n"
+            "could not be resolved on disk or in the conversation cache. Subagent execution aborted before wasting LLM turns.\n\n"
             + "\n\n".join(failure_blocks)
-            + "\n\nVerify actual on-disk filenames above (or call `get_directory_structure`) and re-invoke `spawn_subagent`."
+            + "\n\nVerify actual on-disk filenames (`get_directory_structure`) or cached captures (`read_file(\"cache://\")`) and re-invoke `spawn_subagent`."
         )
         return None, error_report
 
     prehydrated_block = (
         "# Pre-Hydrated Disk Context\n\n"
-        "The following Vault files were resolved and read directly from disk (including any pending HITL edits):\n\n"
+        "The following Vault files and/or cached external captures were resolved directly before execution:\n\n"
         + "\n\n---\n\n".join(resolved_sections)
     )
     return prehydrated_block, None
@@ -219,21 +323,21 @@ def read_file(
     start_page: Optional[int] = None,
     end_page: Optional[int] = None,
 ) -> str:
-    """Read the contents of a note or file in the Vault (automatically reflects any pending staged HITL edits).
+    """Read a Vault note (including pending HITL edits) or a per-conversation cached external capture (`cache://...`).
 
     CONTEXT HYGIENE DIRECTIVE: Reading 1–2 specific notes directly for quick queries is encouraged.
     However, when researching across >2 files or auditing a section, DO NOT call `read_file` repeatedly
     in the primary thread. Offload the inspection to parallel `spawn_subagent(task_prompt, context_files=...)`
     calls so raw file bodies do not inflate your primary context window.
 
-    You can pass a full Vault-relative path (e.g. "3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md")
-    or a unique note title (e.g. "Job Hunt War Room" or "Health Summary.md").
-    Supports Markdown notes, plain-text files, and PDF documents (extracts text, Markdown tables, and layout).
-    Optionally pass `start_line` and `end_line` (1-indexed, inclusive) to inspect a slice of a large file.
-    For PDF documents, optionally pass `start_page` and `end_page` (1-indexed, inclusive) to inspect target pages.
+    You can pass:
+      - A Vault-relative path or unique note title (e.g. `"3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md"` or `"Health Summary.md"`).
+      - `"cache://"` to list all external captures cached in the active conversation (`read_browser_tabs`, `read_webpage`, `fetch_emails`).
+      - A specific capture key (`"cache://tab/<slug>"`, `"cache://web/<slug>"`, `"cache://email/<id>"`) or cached URL.
+    Supports Markdown notes, plain-text files, PDF documents, and optional `start_line`/`end_line` or `start_page`/`end_page` slicing.
 
     Args:
-        file_path: Relative path from Vault root or unique note filename.
+        file_path: Relative Vault path, unique note filename, `"cache://"`, or a `"cache://..."` capture key.
         start_line: Optional 1-indexed starting line number (inclusive).
         end_line: Optional 1-indexed ending line number (inclusive).
         start_page: Optional 1-indexed starting page for PDF documents (inclusive).
@@ -319,6 +423,62 @@ def _apply_surgical_replacement(source_text: str, target: str, replacement: str)
     return None
 
 
+# Matches universal `{{cache:<key>}}` or `{{cache:cache://<key>}}` placeholders in `create_file` / `modify_file`
+_CACHE_PLACEHOLDER_RE = re.compile(r"\{\{\s*cache\s*:\s*([^{}\r\n]+?)\s*\}\}", re.IGNORECASE)
+
+
+def _resolve_cache_placeholders(
+    text: str,
+    conversation_id: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str], int]:
+    """Deterministically replaces `{{cache:<key>}}` placeholders with verbatim text from `conversation_cache`.
+
+    Uses a single-pass regex lambda callback so backslashes (e.g. `\\1`, Windows paths) inside
+    cached captures are inserted literally and literal `{{cache:...}}` strings inside captured
+    bodies are never recursively expanded.
+    """
+    from nexus.core.conversation_cache import get_active_conversation_id, get_capture
+
+    if not text or "{{" not in text:
+        return text, None, 0
+
+    matches = list(_CACHE_PLACEHOLDER_RE.finditer(text))
+    if not matches:
+        return text, None, 0
+
+    convo_id = (conversation_id or "").strip() or get_active_conversation_id()
+    resolved_by_token: dict[str, str] = {}
+    missing_refs: list[str] = []
+
+    for match in matches:
+        raw_token = match.group(0)
+        if raw_token in resolved_by_token:
+            continue
+        inner_ref = match.group(1).strip()
+        capture = get_capture(convo_id, inner_ref)
+        if capture is None:
+            if inner_ref not in missing_refs:
+                missing_refs.append(inner_ref)
+        else:
+            resolved_by_token[raw_token] = str(capture.get("content") or "")
+
+    if missing_refs:
+        missing_display = ", ".join(f"`{{{{cache:{ref}}}}}`" for ref in missing_refs)
+        hint = _format_missing_cache_keys_hint(convo_id)
+        return (
+            None,
+            (
+                f"Error: Unresolved cache placeholder(s) {missing_display} in conversation `{convo_id}`. "
+                f"Check the key name or capture the source via `read_browser_tabs` / `read_webpage` / `fetch_emails` first.\n\n"
+                f"{hint}"
+            ),
+            0,
+        )
+
+    spliced = _CACHE_PLACEHOLDER_RE.sub(lambda m: resolved_by_token[m.group(0)], text)
+    return spliced, None, len(matches)
+
+
 @tool
 def modify_file(
     file_path: str,
@@ -332,6 +492,10 @@ def modify_file(
     `modify_file` automatically applies your `target -> replacement` edit on top of the pending `proposed_content`
     and updates the single HITL card in place (preserving the true on-disk baseline and appending your reasoning).
 
+    VERBATIM CACHE SPLICING: To insert a cached capture verbatim without re-typing, include
+    `{{cache:<type>/<slug>}}` (or `{{cache:cache://...}}`) inside `replacement`; Python replaces it
+    deterministically before staging.
+
     NEVER regenerate an entire existing file just to edit a section or bullet. Instead:
     1. Call `read_file` first so you know the exact current text (including any staged pending edits).
     2. Set `target` to the exact contiguous character sequence (including whitespace/indentation) you want to replace.
@@ -341,7 +505,7 @@ def modify_file(
     Args:
         file_path: Vault-relative path or unique filename of the note to edit.
         target: The exact contiguous string in the file to be replaced (must match current/staged text).
-        replacement: The new text to substitute in place of `target`.
+        replacement: The new text to substitute in place of `target` (supports `{{cache:<key>}}` splice placeholders).
         reasoning: Concise explanation of WHY this edit is being proposed for human HITL review.
     """
     from nexus.core.hitl_queue import add_transaction, get_file_mutation_lock, get_pending_for_file
@@ -349,6 +513,12 @@ def modify_file(
 
     if not target:
         return "Error: `target` cannot be empty in `modify_file`. Read the file first and pass the exact text block to replace, or use `create_file` for new files."
+
+    spliced_replacement, splice_err, spliced_count = _resolve_cache_placeholders(replacement)
+    if splice_err:
+        return splice_err
+    assert spliced_replacement is not None
+    replacement = spliced_replacement
 
     resolved_path, err = resolve_vault_note_path(file_path)
     if err and ("outside the Vault" in err or "cannot be empty" in err):
@@ -421,14 +591,15 @@ def modify_file(
             original_content=baseline_original,
             reasoning=reasoning,
         )
+        splice_note = f" (spliced {spliced_count} cached capture(s) verbatim)" if spliced_count > 0 else ""
         if pending_tx:
             return (
-                f"✅ Surgical modification stacked onto existing pending HITL Transaction #{tx_id} on `{hitl_target_file}` "
-                f"(cumulative diff updated in place). Awaiting human approval."
+                f"✅ Surgical modification stacked onto existing pending HITL Transaction #{tx_id} on `{hitl_target_file}`"
+                f"{splice_note} (cumulative diff updated in place). Awaiting human approval."
             )
         return (
-            f"✅ Surgical modification staged to HITL queue (Transaction #{tx_id} on `{hitl_target_file}`). "
-            f"Awaiting human approval."
+            f"✅ Surgical modification staged to HITL queue (Transaction #{tx_id} on `{hitl_target_file}`)"
+            f"{splice_note}. Awaiting human approval."
         )
 
 
@@ -443,10 +614,13 @@ def create_file(
 
     Fails if the file already exists unless `overwrite=True` (for existing files, always prefer `modify_file`).
     Ensure new notes include standard YAML frontmatter (`aliases`, `tags`, `type`) and a `**Back to:**` header bar.
+    When archiving external content (job listings, webpages, emails), embed `{{cache:<type>/<slug>}}`
+    (or `{{cache:cache://...}}`) instead of re-typing long captures; Python deterministically splices
+    the exact verbatim capture from the active conversation cache before staging.
 
     Args:
         file_path: Vault-relative path for the new file (e.g. "3. Operations/3.1. Career Strategy & Revenue/Missions/Acme Corp.md").
-        content: Full Markdown content for the new file.
+        content: Full Markdown content for the new file (supports `{{cache:<key>}}` verbatim splice placeholders).
         reasoning: Concise explanation of WHY this file is being created.
         overwrite: Set True only if intentionally replacing an entire existing file (default: False).
     """
@@ -462,6 +636,13 @@ def create_file(
     candidate_target = (resolved_vault / clean_rel).resolve()
     if not candidate_target.is_relative_to(resolved_vault):
         return f"Error: Refusing to stage file outside the Vault: '{file_path}'"
+
+    # Universal deterministic cache-splice: expand any {{cache:<key>}} placeholders verbatim before staging
+    spliced_content, splice_err, spliced_count = _resolve_cache_placeholders(content)
+    if splice_err:
+        return splice_err
+    assert spliced_content is not None
+    content = spliced_content
 
     hitl_target_file = f"Vault/{clean_rel}"
     with get_file_mutation_lock(hitl_target_file):
@@ -488,9 +669,10 @@ def create_file(
             original_content=original_content,
             reasoning=reasoning,
         )
+        splice_note = f" (spliced {spliced_count} cached capture(s) verbatim)" if spliced_count > 0 else ""
         return (
             f"✅ File {'overwrite' if original_content is not None else 'creation'} staged to HITL queue "
-            f"(Transaction #{tx_id} on `{hitl_target_file}`). Awaiting human approval."
+            f"(Transaction #{tx_id} on `{hitl_target_file}`){splice_note}. Awaiting human approval."
         )
 
 
@@ -742,6 +924,8 @@ def fetch_emails(
     For broad sweeps (`count > 20` with `include_body=None`), full message bodies are hydrated only
     for the newest 20 matches and remaining matches return lightweight metadata (`subject`, `sender`,
     `date`, `labels`, `snippet`) to prevent Gmail API quota exhaustion (`HttpError 403 rateLimitExceeded`).
+    Each hydrated email is automatically stored in full (untruncated) in the per-conversation cache
+    under `cache://email/<id>` (returned in the `cache_key` field) for subagent hydration or `{{cache:email/<id>}}` splicing.
     When sweeping or triaging inbox mail, read and follow `[[Protocol - Email Triage]]` (or pass
     `context_files=["Protocol - Email Triage.md"]` to `spawn_subagent`).
 
@@ -796,7 +980,33 @@ def fetch_emails(
                 if msg_acc not in service_cache:
                     service_cache[msg_acc] = gmail_engine.get_gmail_service(account=msg_acc)
                 msg = gmail_engine.get_message(s["id"], account=msg_acc, service=service_cache[msg_acc])
-                emails.append({
+                full_body = str(msg.get("body") or "")
+                cache_key: Optional[str] = None
+                try:
+                    from nexus.core.conversation_cache import get_active_conversation_id, put_capture
+
+                    convo_id = get_active_conversation_id()
+                    email_doc = (
+                        f"# {msg.get('subject') or '(No Subject)'}\n"
+                        f"- **From:** {msg.get('sender') or ''}\n"
+                        f"- **Date:** {msg.get('date') or ''}\n"
+                        f"- **Account:** {msg.get('account', msg_acc)}\n"
+                        f"- **Message ID:** {msg['id']}\n"
+                        f"- **Thread ID:** {msg.get('thread_id') or ''}\n\n"
+                        f"{full_body}"
+                    )
+                    cache_key = put_capture(
+                        conversation_id=convo_id,
+                        source_type="email",
+                        title=str(msg.get("subject") or f"Email {msg['id']}"),
+                        content=email_doc,
+                        source_url=None,
+                        cache_key=f"cache://email/{msg['id']}",
+                    )
+                except Exception:
+                    cache_key = None
+
+                email_entry = {
                     "id": msg["id"],
                     "account": msg.get("account", msg_acc),
                     "thread_id": msg["thread_id"],
@@ -804,8 +1014,11 @@ def fetch_emails(
                     "sender": msg["sender"],
                     "date": msg["date"],
                     "labels": msg.get("labels", s.get("labels", [])),
-                    "body": msg["body"][:_BODY_CHAR_LIMIT],
-                })
+                    "body": full_body[:_BODY_CHAR_LIMIT],
+                }
+                if cache_key:
+                    email_entry["cache_key"] = cache_key
+                emails.append(email_entry)
             except Exception as msg_exc:
                 # Degrade gracefully per email instead of discarding the entire batch on one quota/MIME failure
                 emails.append({
@@ -1032,10 +1245,11 @@ def read_browser_tabs(
     active_only: bool = False,
     max_chars: int = 15000,
 ) -> str:
-    """Extract clean, read-only Markdown (and structured JSON-LD schema) from the live rendered DOM of open Chrome tabs.
+    """Extract clean, read-only Markdown from the live rendered DOM of open Chrome tabs.
 
     Reads directly from the user's authenticated Chrome session via the local Nexus Browser Bridge,
     bypassing anti-bot walls (LinkedIn, Workday, Greenhouse, Cloudflare) with zero vision tokens.
+    Automatically persists each extracted tab under `cache://tab/<slug>` in the active conversation cache.
 
     Args:
         tab_ids: Optional list of specific integer `tab_id` values to read (e.g. [142, 145]).
@@ -1069,14 +1283,21 @@ def run_shared_tool_cli(module: str, cli_args: Optional[List[str]] = None) -> st
         module: Dotted Python module path starting with `nexus.shared_tools.` (e.g. "nexus.shared_tools.read_webpage").
         cli_args: Optional list of CLI argument strings (e.g. ["https://example.com"] or ["--help"]).
     """
+    from nexus.core.conversation_cache import get_active_conversation_id
+
     clean_mod = module.strip()
     # Security boundary: restrict execution strictly to modules inside `nexus.shared_tools.`
     if not clean_mod.startswith("nexus.shared_tools."):
         return "Error: Only `nexus.shared_tools.<module>` modules may be invoked via `run_shared_tool_cli`."
 
     cmd = [sys.executable, "-m", clean_mod] + (cli_args or [])
-    # Disable interactive OAuth browser flows and terminal stdin prompts inside agent-spawned subprocesses
-    child_env = {**os.environ, "NEXUS_NONINTERACTIVE_AUTH": "1"}
+    # Disable interactive OAuth browser flows and propagate conversation_id so subprocess CLI tools
+    # (`read_webpage`, `browser_bridge`) share the exact active conversation capture cache partition.
+    child_env = {
+        **os.environ,
+        "NEXUS_NONINTERACTIVE_AUTH": "1",
+        "NEXUS_CONVERSATION_ID": get_active_conversation_id(),
+    }
     try:
         proc = subprocess.run(
             cmd,

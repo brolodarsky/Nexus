@@ -681,13 +681,14 @@ def spawn_subagent(
     whenever inspecting multiple files, auditing multiple sections, or running independent subtasks so
     raw file contents stay out of your primary context window.
 
-    PRE-HYDRATED DISK CONTEXT (`context_files`):
-    Never summarize user credentials, degrees, or section rules from memory into `task_prompt`!
+    PRE-HYDRATED DISK & CACHE CONTEXT (`context_files`):
+    Never summarize user credentials, degrees, section rules, or captured webpages/emails from memory into `task_prompt`!
     Pass shared baseline Vault paths/titles (e.g. `["3. Operations/3.1. Career Strategy & Revenue/Section Instructions.md", "Resume - Master.md"]`)
-    via `context_files`. Python resolves and reads them directly from disk (zero Commander context bloat,
-    zero extra subagent tool turns) and prepends `# Pre-Hydrated Disk Context` to the subagent's initial prompt.
-    If any path in `context_files` does not exist on disk, `spawn_subagent` fails fast before calling the LLM
-    and returns the actual sibling files in the nearest matching directory.
+    AND/OR per-conversation external capture keys (`"cache://tab/<slug>"`, `"cache://web/<slug>"`, `"cache://email/<id>"`, `"cache://"` manifest, or cached URLs)
+    via `context_files`. Python resolves them directly (zero Commander context bloat, zero extra subagent tool turns)
+    and prepends `# Pre-Hydrated Disk Context` to the subagent's initial prompt.
+    If any path or cache key cannot be resolved, `spawn_subagent` fails fast before calling the LLM
+    and surfaces actual sibling files or available `cache://` keys in this conversation.
 
     ARCHITECT-DRAFTER PATTERN (WRITING & EDIT DELEGATION):
     Subagents are not just for reading; they are your execution workforce. When multiple notes need to be created
@@ -710,8 +711,8 @@ def spawn_subagent(
         task_prompt: A clear, self-contained, actionable prompt instructing the subagent what to do and return.
         model_tier: Capability/cost tier (`"low"`, `"medium"`, or `"strong"`). Defaults to `"low"` for fast,
                     cost-efficient execution; pass `"medium"` or `"strong"` only for complex synthesis subtasks.
-        context_files: Optional list of Vault-relative paths or unique note titles to pre-hydrate directly from disk
-                       under `# Pre-Hydrated Disk Context` (fails fast if any path cannot be resolved).
+        context_files: Optional list of Vault-relative paths, unique note titles, or `cache://...` capture handles/URLs
+                       to pre-hydrate directly under `# Pre-Hydrated Disk Context` (fails fast if any ref cannot be resolved).
     """
     effective_tier: ModelTier = model_tier if model_tier in ("low", "medium", "strong") else "low"
     # Propagate conversation_id from parent while scoping thread_id, agent_id, and agent_role to this subagent

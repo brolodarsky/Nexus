@@ -155,6 +155,29 @@ def init_db():
         if "title_source" not in conv_cols:
             conn.execute("ALTER TABLE conversations ADD COLUMN title_source TEXT DEFAULT 'legacy'")
 
+        # Per-conversation external capture cache (`conversation_cache.py`), kept independent of FK
+        # cascade so CLI/eval `"nexus_primary"` runs can store captures while `delete_conversation` purges explicitly.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_captures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_url TEXT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                char_count INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(conversation_id, cache_key)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conv_captures_conv_id ON conversation_captures (conversation_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conv_captures_conv_url ON conversation_captures (conversation_id, source_url)"
+        )
+
     # If legacy rows were migrated out of the primary messages table, vacuum the database file to reclaim disk space
     if migrated_count > 0:
         with _get_conn() as vacuum_conn:
@@ -258,11 +281,12 @@ def delete_conversation(conversation_id: str):
             "UPDATE conversations SET parent_conversation_id = NULL WHERE parent_conversation_id = ?",
             (conversation_id,),
         )
-        # Purge diagnostic execution traces linked to messages in this conversation
+        # Purge diagnostic execution traces and cached external captures linked to this conversation
         conn.execute(
             "DELETE FROM message_traces WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)",
             (conversation_id,),
         )
+        conn.execute("DELETE FROM conversation_captures WHERE conversation_id = ?", (conversation_id,))
         conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
         conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
         conn.commit()

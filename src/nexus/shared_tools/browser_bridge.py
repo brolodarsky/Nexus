@@ -289,6 +289,43 @@ def list_tabs(
     )
 
 
+# ── Per-Conversation Tab Capture Cache Hook ──────────────────────────────────
+
+# Extracts valid DOM reads from `read_tabs()` output, stores them in the active conversation's
+# SQLite capture ledger (`conversation_cache`), and attaches each tab's assigned `cache://tab/<slug>` handle.
+def _store_read_tabs_in_conversation_cache(
+    result: Dict[str, Any],
+    conversation_id: Optional[str] = None,
+) -> None:
+    """Stores successful `read_tabs()` extractions in `conversation_cache` for the active conversation."""
+    try:
+        from nexus.core.conversation_cache import get_active_conversation_id, put_capture
+
+        data = result.get("data") or {}
+        tabs = data.get("tabs") or []
+        convo_id = (conversation_id or "").strip() or get_active_conversation_id()
+
+        for tab in tabs:
+            if not isinstance(tab, dict) or not tab.get("ok"):
+                continue
+            md_text = str(tab.get("markdown") or "")
+            if not md_text.strip():
+                continue
+            raw_url = str(tab.get("url") or "").strip() or None
+            title = str(tab.get("title") or "").strip() or (raw_url or "Chrome Tab")
+            cache_key = put_capture(
+                conversation_id=convo_id,
+                source_type="tab",
+                title=title,
+                content=md_text,
+                source_url=raw_url,
+            )
+            tab["cache_key"] = cache_key
+    except Exception:
+        # Defensive guard: cache I/O failures must never break live `read_tabs()` responses
+        return
+
+
 def read_tabs(
     tab_ids: Optional[List[int]] = None,
     group_name: Optional[str] = None,
@@ -305,7 +342,7 @@ def read_tabs(
         active_only: If True, reads only the currently active tab.
         max_chars: Maximum characters of Markdown to return per tab (default: 20,000).
     """
-    return _dispatch_browser_command(
+    res = _dispatch_browser_command(
         action="read_tabs",
         params={
             "tab_ids": tab_ids,
@@ -316,6 +353,9 @@ def read_tabs(
         },
         timeout=25.0,
     )
+    if res.get("ok"):
+        _store_read_tabs_in_conversation_cache(res)
+    return res
 
 
 # ── Markdown Formatters for Agent & CLI Consumption ──────────────────────────
@@ -389,10 +429,17 @@ def format_tab_reads_as_markdown(result: Dict[str, Any]) -> str:
         url = t.get("url") or ""
         g_title = t.get("group_title")
         group_line = f"- **Chrome Tab Group:** {g_title} ({t.get('group_color')})\n" if g_title else ""
+        cache_key = t.get("cache_key")
+        if isinstance(cache_key, str) and cache_key:
+            short_key = cache_key[len("cache://") :] if cache_key.startswith("cache://") else cache_key
+            cache_line = f"- **Cache Key:** `{cache_key}` *(embed verbatim via `{{{{cache:{short_key}}}}}`)*\n"
+        else:
+            cache_line = ""
 
         header = (
             f"## {idx}. [tab_id: {tid}] {title}\n"
             f"- **URL:** {url}\n"
+            f"{cache_line}"
             f"{group_line}"
         )
 

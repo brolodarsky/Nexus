@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from nexus.core import chats_db
 from nexus.core.google_auth import get_google_credentials
 from nexus.shared_tools import gmail_engine
 from nexus.shared_tools.shared import fetch_emails
@@ -114,8 +115,12 @@ def test_google_auth_headless_guard_and_refresh_persistence(tmp_path: Path, monk
     assert json.loads(token_path.read_text(encoding="utf-8"))["token"] == "fresh_tok"
 
 
-def test_fetch_emails_caps_bodies_caches_service_and_degrades_per_message(monkeypatch: pytest.MonkeyPatch):
+def test_fetch_emails_caps_bodies_caches_service_and_degrades_per_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """Verify fetch_emails reuses Gmail service clients, caps auto-body hydration at 20, and handles per-msg errors."""
+    monkeypatch.setattr(chats_db, "DB_PATH", tmp_path / "test_chats.db")
+    chats_db.init_db()
     summaries = [
         {
             "id": f"msg_{i}",
@@ -178,6 +183,7 @@ def test_fetch_emails_caps_bodies_caches_service_and_degrades_per_message(monkey
     # First 20 hydrated (with msg_3 gracefully degraded to snippet + body_error)
     assert items[0]["body"] == "Body for msg_0"
     assert items[0]["labels"] == ["INBOX", "UNREAD"]
+    assert items[0]["cache_key"] == "cache://email/msg_0"
     assert "body_error" in items[3]
     assert items[3]["snippet"] == "Snippet 3"
     # Items 20..24 omitted body cleanly with metadata + snippet preserved

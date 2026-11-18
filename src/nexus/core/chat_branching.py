@@ -28,6 +28,7 @@ from nexus.core.chats_db import (
     mark_branch_merged,
 )
 from nexus.core.constants import get_chat_model, resolve_model_config
+from nexus.core.conversation_cache import inherit_captures
 
 
 def _format_transcript_for_synthesis(messages: list[dict]) -> str:
@@ -357,6 +358,8 @@ def fork_conversation(
         branch_mode=effective_mode,
         title_source=branch_title_source,
     )
+    # Snapshot parent's external capture cache into the child branch so cache:// refs remain resolvable
+    inherit_captures(parent_conversation_id, child_conv_id)
 
     if effective_mode == "fork" or not prior_messages:
         # Full clone mode (or branching on the very first turn where no prior history exists):
@@ -552,6 +555,10 @@ def spawn_seeded_conversation(
         trace=[],
         conversation_id=new_conv_id,
     )
+
+    # Inherit any external captures from the spawning parent conversation (even for unnested roots spawned from a parent)
+    if parent_conversation_id:
+        inherit_captures(parent_conversation_id, new_conv_id)
 
     # Read back persisted history and hydrate LangGraph `memory.sqlite` checkpointer for immediate Turn-1 continuity
     seeded_history = get_chat_history(new_conv_id)

@@ -399,7 +399,9 @@ function extractTabMarkdownReadOnly(maxChars) {
   // 2. Extract structured JSON-LD (<script type="application/ld+json">) if present.
   // Job boards (LinkedIn, Greenhouse, Lever, Workday, Ashby) and retailers embed rich
   // structured data here (e.g. JobPosting salary, location, company, and full description).
-  const jsonLdBlocks = [];
+  // Store candidate entries alongside their description text so Step 6 can include them
+  // ONLY when the live rendered DOM is sparse or missing that schema content.
+  const jsonLdEntries = [];
   const ldScripts = document.querySelectorAll('script[type="application/ld+json"]');
   const stripHtmlTags = (htmlStr) => {
     if (!htmlStr || typeof htmlStr !== "string") return "";
@@ -463,14 +465,20 @@ function extractTabMarkdownReadOnly(maxChars) {
                 : `${currency} ${val.value ?? ""}`;
             summaryLines.push(`- **Base Salary:** ${range}`);
           }
+          let cleanDesc = "";
           if (item.description) {
-            const cleanDesc = stripHtmlTags(String(item.description));
+            cleanDesc = stripHtmlTags(String(item.description));
             if (cleanDesc) {
-              summaryLines.push(`- **Schema Description:** ${cleanDesc.slice(0, 4000)}`);
+              // Cap at `charBudget` (not hardcoded 4,000) so fallback subpages preserve full text
+              summaryLines.push(`- **Schema Description:** ${cleanDesc.slice(0, charBudget)}`);
             }
           }
           if (summaryLines.length > 1) {
-            jsonLdBlocks.push(summaryLines.join("\n"));
+            jsonLdEntries.push({
+              block: summaryLines.join("\n"),
+              descText: cleanDesc,
+              fullText: summaryLines.slice(1).join(" "),
+            });
           }
         }
       }
@@ -1030,14 +1038,63 @@ function extractTabMarkdownReadOnly(maxChars) {
 
   const overlayMarkdown = extractActiveOverlaysMarkdown();
 
-  // Assemble header + optional JSON-LD schema + rendered DOM markdown + active overlays
+  // 6. Universal Coverage Deduplication & Section Assembly
+  // Checks whether `candidateText` is already substantially present in `referenceText`
+  // using normalized 5+-char unique token recall (universal, zero site-specific regexes).
+  const isSubstantiallyCovered = (candidateText, referenceText) => {
+    const normRef = (referenceText || "").toLowerCase().replace(/[^a-z0-9]+/g, " ");
+    const normCand = (candidateText || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (!normCand) return true;
+    // Fast substring hit when the leading 120 normalized characters match verbatim in referenceText
+    if (normCand.length >= 60 && normRef.includes(normCand.slice(0, 120))) {
+      return true;
+    }
+    const refWords = new Set(normRef.split(" ").filter((w) => w.length >= 5));
+    const candWords = [];
+    const seen = new Set();
+    for (const w of normCand.split(" ")) {
+      if (w.length >= 5 && !seen.has(w)) {
+        seen.add(w);
+        candWords.push(w);
+        if (candWords.length >= 80) break;
+      }
+    }
+    if (candWords.length === 0) return true;
+    let hits = 0;
+    for (const w of candWords) {
+      if (refWords.has(w)) hits += 1;
+    }
+    return hits / candWords.length >= 0.55;
+  };
+
+  // Prioritize `cleanMarkdown` (live rendered DOM body) first so metadata/JSON-LD never triples
+  // payload size or pushes the bottom of long pages past `charBudget`.
   const sections = [];
   if (siteName) sections.push(`**Site:** ${siteName}`);
-  if (metaDescription) sections.push(`**Meta Description:** ${metaDescription}`);
-  if (jsonLdBlocks.length > 0) {
-    sections.push(jsonLdBlocks.join("\n\n"));
+  if (cleanMarkdown) sections.push(cleanMarkdown);
+
+  // Track cumulative reference text so accepting JSON-LD also suppresses duplicate metaDescription
+  let coverageRef = cleanMarkdown;
+  const isSparseDom = cleanMarkdown.length < 300;
+
+  for (const entry of jsonLdEntries) {
+    const compareTarget = entry.descText || entry.fullText;
+    const neededForSparse = isSparseDom && !isSubstantiallyCovered(compareTarget, coverageRef);
+    const missingSubstantialDesc = entry.descText.length >= 150 && !isSubstantiallyCovered(entry.descText, coverageRef);
+    if (neededForSparse || missingSubstantialDesc) {
+      sections.push(entry.block);
+      coverageRef = `${coverageRef}\n\n${entry.block}`;
+    }
   }
-  sections.push(cleanMarkdown);
+
+  if (metaDescription) {
+    const neededMetaForSparse = isSparseDom && !isSubstantiallyCovered(metaDescription, coverageRef);
+    const missingSubstantialMeta = metaDescription.length >= 150 && !isSubstantiallyCovered(metaDescription, coverageRef);
+    if (neededMetaForSparse || missingSubstantialMeta) {
+      sections.push(`**Meta Description:** ${metaDescription}`);
+    }
+  }
+
   if (overlayMarkdown) {
     sections.push(overlayMarkdown);
   }

@@ -162,6 +162,38 @@ class MockNode {
   }
 }
 
+function attachDocumentHelpers(docNode, title, bodyNode) {
+  docNode.title = title;
+  docNode.body = bodyNode;
+  // Minimal `createElement` shim supporting `stripHtmlTags()` inside `extractTabMarkdownReadOnly`
+  docNode.createElement = (_tag) => {
+    let rawHtml = "";
+    const decodeEntitiesAndStrip = (s) =>
+      String(s || "")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&nbsp;/g, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    return {
+      set innerHTML(val) {
+        rawHtml = String(val || "");
+      },
+      get textContent() {
+        return decodeEntitiesAndStrip(rawHtml);
+      },
+      get innerText() {
+        return decodeEntitiesAndStrip(rawHtml);
+      },
+    };
+  };
+  return docNode;
+}
+
 class MockTextNode {
   constructor(text) {
     this.nodeType = 3;
@@ -224,9 +256,7 @@ b2.appendChild(new MockTextNode("Thanks Jane, reviewing the job spec now!"));
 body.appendChild(new MockNode("div", { role: "dialog", class: "cookie-consent-banner" }))
   .appendChild(new MockNode("p", {}, "Accept cookies"));
 
-global.document = root;
-global.document.title = "Senior AI Engineer Job";
-global.document.body = body;
+global.document = attachDocumentHelpers(root, "Senior AI Engineer Job", body);
 
 // Evaluate extractTabMarkdownReadOnly
 const evalFunc = new Function(`${funcCode}; return extractTabMarkdownReadOnly;`)();
@@ -251,9 +281,7 @@ const main2 = body2.appendChild(new MockNode("main"));
 main2.appendChild(new MockNode("h1", {}, "Clean Documentation Page"));
 main2.appendChild(new MockNode("p", {}, "This is standard documentation content for the Nexus browser bridge. It provides a comprehensive explanation of how read-only DOM extraction works, ensuring that pages with no floating overlays or active dialogs return clean rendered Markdown without any injected overlay sections. The progressive enhancement model guarantees zero side effects for ordinary web pages."));
 
-global.document = root2;
-global.document.title = "Documentation";
-global.document.body = body2;
+global.document = attachDocumentHelpers(root2, "Documentation", body2);
 
 const result2 = evalFunc(20000);
 if (result2.markdown.includes("## Active Chat & Floating Overlays")) {
@@ -261,6 +289,95 @@ if (result2.markdown.includes("## Active Chat & Floating Overlays")) {
 }
 if (!result2.markdown.includes("Clean Documentation Page")) {
   throw new Error("Missing main content on clean page");
+}
+
+// ── Test 3: Rich DOM with duplicate metaDescription + duplicate JobPosting JSON-LD (no payload tripling) ──
+const sharedJdParagraph =
+  "Merge is the connectivity layer for AI agents. Build scalable enterprise API integrations, lead technical discovery sessions, architect proof-of-concept connectors in Python and TypeScript, and collaborate with product engineering across customer deployments.";
+const bottomMarker = "EQUAL_OPPORTUNITY_BOTTOM_ANCHOR_TEXT_PRESERVED";
+const root3 = new MockNode("html");
+const head3 = root3.appendChild(new MockNode("head"));
+head3.appendChild(new MockNode("meta", { name: "description", content: sharedJdParagraph }));
+head3.appendChild(
+  new MockNode(
+    "script",
+    { type: "application/ld+json" },
+    JSON.stringify({
+      "@type": "JobPosting",
+      title: "Solutions Engineer",
+      hiringOrganization: { name: "Merge" },
+      description: `<p>${sharedJdParagraph}</p>`,
+    })
+  )
+);
+const body3 = root3.appendChild(new MockNode("body"));
+const main3 = body3.appendChild(new MockNode("main"));
+main3.appendChild(new MockNode("h1", {}, "Solutions Engineer"));
+main3.appendChild(new MockNode("p", {}, sharedJdParagraph));
+main3.appendChild(new MockNode("p", {}, `Compensation and benefits details. ${bottomMarker}`));
+
+global.document = attachDocumentHelpers(root3, "Solutions Engineer @ Merge", body3);
+const result3 = evalFunc(1500);
+if (result3.markdown.includes("**Meta Description:**")) {
+  throw new Error("Rich DOM should NOT duplicate Meta Description");
+}
+if (result3.markdown.includes("### Structured Schema")) {
+  throw new Error("Rich DOM should NOT duplicate Structured Schema JobPosting when text is already in cleanMarkdown");
+}
+if (!result3.markdown.includes(bottomMarker)) {
+  throw new Error("Bottom of cleanMarkdown was unexpectedly dropped/truncated");
+}
+
+// ── Test 4: /application form subpage (long form DOM lacking JD) + JobPosting JSON-LD + duplicate metaDescription ──
+const root4 = new MockNode("html");
+const head4 = root4.appendChild(new MockNode("head"));
+head4.appendChild(new MockNode("meta", { name: "description", content: sharedJdParagraph }));
+head4.appendChild(
+  new MockNode(
+    "script",
+    { type: "application/ld+json" },
+    JSON.stringify({
+      "@type": "JobPosting",
+      title: "Solutions Engineer",
+      hiringOrganization: { name: "Merge" },
+      description: `<p>${sharedJdParagraph}</p>`,
+    })
+  )
+);
+const body4 = root4.appendChild(new MockNode("body"));
+const main4 = body4.appendChild(new MockNode("main"));
+main4.appendChild(new MockNode("h1", {}, "Apply for Solutions Engineer"));
+main4.appendChild(
+  new MockNode(
+    "p",
+    {},
+    "Application Form: First Name, Last Name, Email Address, Phone Number, LinkedIn Profile URL, Resume Upload, Work Authorization Sponsorship Question, Voluntary Equal Employment Opportunity Self-Identification Disclosure, Veteran Status, Disability Self-Identification Form. Please verify all fields before submitting your application."
+  )
+);
+
+global.document = attachDocumentHelpers(root4, "Apply — Solutions Engineer", body4);
+const result4 = evalFunc(20000);
+if (!result4.markdown.includes("### Structured Schema (JobPosting)")) {
+  throw new Error("/application form subpage missing JD text MUST include JobPosting JSON-LD");
+}
+if (!result4.markdown.includes("Merge is the connectivity layer for AI agents.")) {
+  throw new Error("Included JobPosting JSON-LD must preserve the schema description");
+}
+if (result4.markdown.includes("**Meta Description:**")) {
+  throw new Error("Duplicate Meta Description must be suppressed once JSON-LD fallback already covers it");
+}
+
+// ── Test 5: Sparse SPA shell DOM + substantial metaDescription (no JSON-LD) ──
+const root5 = new MockNode("html");
+const head5 = root5.appendChild(new MockNode("head"));
+head5.appendChild(new MockNode("meta", { name: "description", content: sharedJdParagraph }));
+const body5 = root5.appendChild(new MockNode("body"));
+body5.appendChild(new MockNode("p", {}, "Loading application..."));
+
+global.document = attachDocumentHelpers(root5, "Loading...", body5);
+const result5 = evalFunc(20000);
+if (!result5.markdown.includes("**Meta Description:**")) {
+  throw new Error("Sparse SPA shell DOM without JSON-LD MUST include substantial Meta Description");
 }
 
 console.log("All Node.js browser extension DOM tests passed successfully!");
