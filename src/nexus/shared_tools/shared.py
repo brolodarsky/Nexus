@@ -1408,6 +1408,10 @@ def spawn_conversation(
       - **Vault / project deep dives:** Include exact verified `[[Wiki-Links]]` or Vault-relative paths,
         pass `target_section` so the live on-disk directory tree is snapped automatically, and summarize
         current architectural/decision state, constraints, and open questions.
+      - **External captures (`cache://`):** Any `read_browser_tabs`, `read_webpage`, and `fetch_emails`
+        captures cached in this conversation are inherited automatically (and appended as a lightweight manifest);
+        cite the exact relevant `cache://...` handle(s) in `context_brief` so the child thread knows what to
+        hydrate or splice via `{{cache:<key>}}`.
       - **Deterministic Path Guard:** Referenced `[[Wiki-Links]]` and `.md`/`.pdf`/`.docx` filenames in
         `context_brief` are automatically verified against disk; any missing filenames trigger a `[SYSTEM WARNING]`.
 
@@ -1427,13 +1431,16 @@ def spawn_conversation(
                         When provided, Python automatically appends the live directory file tree to the seeded brief.
     """
     from nexus.core.chat_branching import spawn_seeded_conversation
+    from nexus.core.conversation_cache import get_active_conversation_id
     from nexus.core.hitl_queue import get_hitl_execution_context
 
     # Read `conversation_id` from ContextVar-backed execution context (propagated into both Head Agent & subagent threads)
     exec_ctx = get_hitl_execution_context()
     raw_parent_id = exec_ctx.get("conversation_id")
     # Treat the synthetic `"nexus_primary"` CLI/eval default as having no persistent parent row in `chats.db`
+    # while still inheriting any captures cached under that active conversation ID.
     parent_id = raw_parent_id if (raw_parent_id and raw_parent_id != "nexus_primary") else None
+    cache_source_id = (raw_parent_id or "").strip() or get_active_conversation_id()
 
     try:
         result = spawn_seeded_conversation(
@@ -1442,18 +1449,21 @@ def spawn_conversation(
             parent_conversation_id=parent_id,
             nest_under_parent=nest_under_current,
             target_section=target_section,
+            source_cache_conversation_id=cache_source_id,
         )
         new_id = result["conversation_id"]
         created_title = result["title"]
         linked_parent = result.get("parent_conversation_id")
+        inherited_count = int(result.get("inherited_captures") or 0)
         scope_note = (
             f"nested branch under `{linked_parent}`"
             if linked_parent
             else "standalone root conversation"
         )
+        cache_note = f", inherited captures: {inherited_count}" if inherited_count > 0 else ""
         receipt = (
             f"💬 Spawned {scope_note}: **{created_title}** "
-            f"(conversation_id: `{new_id}`, seeded brief: {len(context_brief.strip()):,} chars). "
+            f"(conversation_id: `{new_id}`, seeded brief: {len(context_brief.strip()):,} chars{cache_note}). "
             f"Ready and waiting in the sidebar."
         )
         if result.get("section_warning"):

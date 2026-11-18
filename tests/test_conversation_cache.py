@@ -584,3 +584,89 @@ def test_kv_prompt_cache_system_prompt_unaffected_by_captures(isolated_env: dict
     )
     after = inject_root_instructions()
     assert before == after
+
+
+def test_spawn_conversation_inherits_manifest_cli_nexus_primary_and_brief_lint(
+    isolated_env: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `spawn_conversation` appends inherited capture manifest, works from `nexus_primary`, and ignores `cache://` in path lint."""
+    monkeypatch.setattr(chat_branching, "seed_langgraph_thread_from_messages", lambda *_a, **_kw: None)
+
+    vault_dir = isolated_env["vault"]
+    (vault_dir / "Real Note.md").write_text("# Real Note", encoding="utf-8")
+
+    # 1. Path lint must NOT flag cache:// handles or {{cache:...}} placeholders ending in .md/.pdf/.docx
+    brief_with_cache = (
+        "Inspect [[Real Note]], cache://web/report.pdf, `cache://tab/notes.md`, and {{cache:web/paper.pdf}}."
+    )
+    assert vault_reader.verify_context_brief_paths(brief_with_cache) == []
+
+    brief_with_real_and_missing = (
+        "Inspect cache://web/report.pdf, {{cache:web/paper.pdf}}, and Missing File.md."
+    )
+    assert vault_reader.verify_context_brief_paths(brief_with_real_and_missing) == ["Missing File.md"]
+
+    # 2. Normal parent UUID: spawn_conversation inherits captures, appends manifest, and surfaces count in receipt
+    parent_id = chats_db.create_conversation(title="Inbox Sweep")
+    secret_body = "UNIQUE_RAW_CAPTURE_BODY_SHOULD_NOT_BE_DUMPED_IN_MANIFEST"
+    k_parent = conversation_cache.put_capture(
+        conversation_id=parent_id,
+        source_type="tab",
+        title="Target Listing",
+        content=secret_body,
+        source_url="https://example.com/listing",
+    )
+    tok = set_hitl_execution_context(conversation_id=parent_id, thread_id=parent_id)
+    try:
+        receipt = shared_module.spawn_conversation.invoke(
+            {
+                "title": "Follow-up Thread",
+                "context_brief": f"Archive `cache://tab/notes.md` and `{k_parent}` with [[Real Note]].",
+                "nest_under_current": True,
+            }
+        )
+    finally:
+        reset_hitl_execution_context(tok)
+
+    assert "inherited captures: 1" in receipt
+    assert "[SYSTEM WARNING:" not in receipt
+    children = [c for c in chats_db.get_conversations() if c.get("parent_conversation_id") == parent_id]
+    assert len(children) == 1
+    child_id = children[0]["id"]
+
+    history = chats_db.get_chat_history(child_id)
+    assert len(history) == 1
+    seeded_brief = history[0]["content"]
+    assert "### 📦 Inherited External Captures (1)" in seeded_brief
+    assert k_parent in seeded_brief
+    assert secret_body not in seeded_brief
+    assert conversation_cache.get_capture(child_id, k_parent)["content"] == secret_body
+
+    # 3. CLI/eval `"nexus_primary"` context: creates standalone root thread AND inherits `"nexus_primary"` captures
+    k_cli = conversation_cache.put_capture(
+        conversation_id="nexus_primary",
+        source_type="web",
+        title="CLI Spec",
+        content="CLI verbatim body.",
+        source_url="https://example.com/cli-spec",
+    )
+    cli_tok = set_hitl_execution_context(conversation_id="nexus_primary", thread_id="nexus_primary")
+    try:
+        cli_receipt = shared_module.spawn_conversation.invoke(
+            {
+                "title": "CLI Spawned Thread",
+                "context_brief": f"Work from `{k_cli}`.",
+                "nest_under_current": True,
+            }
+        )
+    finally:
+        reset_hitl_execution_context(cli_tok)
+
+    assert "standalone root conversation" in cli_receipt
+    assert "inherited captures: 1" in cli_receipt
+    cli_convs = [c for c in chats_db.get_conversations() if c.get("title") == "CLI Spawned Thread"]
+    assert len(cli_convs) == 1
+    cli_child_id = cli_convs[0]["id"]
+    assert cli_convs[0]["parent_conversation_id"] is None
+    assert conversation_cache.get_capture(cli_child_id, k_cli)["content"] == "CLI verbatim body."

@@ -28,7 +28,7 @@ from nexus.core.chats_db import (
     mark_branch_merged,
 )
 from nexus.core.constants import get_chat_model, resolve_model_config
-from nexus.core.conversation_cache import inherit_captures
+from nexus.core.conversation_cache import format_captures_manifest, inherit_captures
 
 
 def _format_transcript_for_synthesis(messages: list[dict]) -> str:
@@ -430,7 +430,8 @@ def fork_conversation(
 # `nest_under_parent: bool` nests the thread as a child branch under `parent_conversation_id` when True, or creates a root thread when False.
 # `parent_message_id: Optional[int]` optionally pins the branch to a specific parent message row ID; falls back to the latest parent message.
 # `target_section: Optional[str]` optionally appends a live `get_directory_tree(..., show_files=True)` snapshot to the seeded brief.
-# `-> dict[str, Any]` returns the created conversation UUID, metadata row, seeded messages list, and path verification metadata.
+# `source_cache_conversation_id: Optional[str]` optional cache source ID (e.g. `"nexus_primary"` in CLI/eval mode when `parent_conversation_id` is None).
+# `-> dict[str, Any]` returns the created conversation UUID, metadata row, seeded messages list, and path/cache verification metadata.
 def spawn_seeded_conversation(
     title: str,
     context_brief: str,
@@ -438,6 +439,7 @@ def spawn_seeded_conversation(
     nest_under_parent: bool = True,
     parent_message_id: Optional[int] = None,
     target_section: Optional[str] = None,
+    source_cache_conversation_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Creates and seeds a brand-new conversation thread ready for an independent discussion ("seed & wait").
@@ -542,6 +544,18 @@ def spawn_seeded_conversation(
 
     if section_block:
         formatted_brief = f"{formatted_brief}\n\n{section_block}"
+
+    # Inherit external captures from the spawning conversation (including CLI/eval `"nexus_primary"` runs)
+    # BEFORE logging the seeded brief so Turn 1 receives a lightweight manifest of inherited `cache://` handles.
+    cache_source_id = (source_cache_conversation_id or parent_conversation_id or "").strip() or None
+    inherited_captures = inherit_captures(cache_source_id, new_conv_id) if cache_source_id else 0
+    if inherited_captures > 0:
+        cache_block = (
+            f"### 📦 Inherited External Captures ({inherited_captures})\n"
+            f"{format_captures_manifest(new_conv_id)}"
+        )
+        formatted_brief = f"{formatted_brief}\n\n{cache_block}"
+
     if warning_block:
         formatted_brief = f"{formatted_brief}\n\n{warning_block}"
 
@@ -555,10 +569,6 @@ def spawn_seeded_conversation(
         trace=[],
         conversation_id=new_conv_id,
     )
-
-    # Inherit any external captures from the spawning parent conversation (even for unnested roots spawned from a parent)
-    if parent_conversation_id:
-        inherit_captures(parent_conversation_id, new_conv_id)
 
     # Read back persisted history and hydrate LangGraph `memory.sqlite` checkpointer for immediate Turn-1 continuity
     seeded_history = get_chat_history(new_conv_id)
@@ -577,6 +587,7 @@ def spawn_seeded_conversation(
         "section_warning": section_warning,
         "missing_files": missing_files,
         "warning_block": warning_block,
+        "inherited_captures": inherited_captures,
     }
 
 

@@ -703,7 +703,7 @@ def verify_context_brief_paths(context_brief: str) -> List[str]:
 
     def _should_ignore(raw: str) -> bool:
         val = raw.strip()
-        if not val or val.startswith(("#", "http://", "https://", "mailto:", "file://")):
+        if not val or val.lower().startswith(("#", "http://", "https://", "mailto:", "file://", "cache://")):
             return True
         if any(ch in _TEMPLATE_HINT_CHARS for ch in val):
             return True
@@ -734,8 +734,14 @@ def verify_context_brief_paths(context_brief: str) -> List[str]:
             seen_missing_lower.add(key)
             missing.append(cleaned)
 
-    # Mask URLs upfront so external web links ending in .md/.pdf/.docx are never treated as Vault filenames.
-    scan_text = re.sub(r"https?://[^\s)\]>]+", lambda m: " " * len(m.group(0)), context_brief)
+    # Mask URLs, `cache://...` handles, and `{{cache:...}}` placeholders upfront so external/cache refs
+    # ending in `.md`/`.pdf`/`.docx` are never flagged as phantom Vault filenames.
+    scan_text = re.sub(
+        r"(?:https?|cache)://[^\s)\]>\"'`]+|\{\{\s*cache\s*:[^{}\r\n]+\}\}",
+        lambda m: " " * len(m.group(0)),
+        context_brief,
+        flags=re.IGNORECASE,
+    )
 
     # 1. Scan Obsidian [[Wiki-Links]] (stripping |Display Alias and #Heading Anchor)
     def _scan_wikilink(match: re.Match) -> str:
