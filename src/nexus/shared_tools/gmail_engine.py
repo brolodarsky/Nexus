@@ -7,15 +7,15 @@ and draft Gmail messages across one or multiple Gmail accounts using local OAuth
 Standing Architectural Directives:
 - Pure data access layer (No LangChain @tool decorators here; see shared.py for LLM wrappers).
 - Uses token_gmail.json (default) and token_gmail_<account>.json to isolate accounts and calendar tokens.
-- Search uses native Gmail query syntax (e.g. 'from:recruiter newer_than:7d is:unread').
+- Search uses native Gmail query syntax (e.g. 'from:recruiter newer_than:7d is:unread'), defaulting to `in:inbox` (all inbox mail regardless of labels; `--include-archived` expands to archived non-inbox mail).
 - Supports --account <alias> and --account all for multi-account querying and aggregation.
 - No send function by design: outbound mail is drafted, then sent by a human (Playbook HITL).
 
 Usage:
     python -m nexus.shared_tools.gmail_engine --accounts
     python -m nexus.shared_tools.gmail_engine --auth [--account <ALIAS>]
-    python -m nexus.shared_tools.gmail_engine --list 10 [--account <ALIAS|all>]
-    python -m nexus.shared_tools.gmail_engine --search "from:greenhouse.io newer_than:14d" [--account <ALIAS|all>]
+    python -m nexus.shared_tools.gmail_engine --list 10 [--account <ALIAS|all>] [--include-archived]
+    python -m nexus.shared_tools.gmail_engine --search "from:greenhouse.io newer_than:14d" [--account <ALIAS|all>] [--include-archived]
     python -m nexus.shared_tools.gmail_engine --read <MESSAGE_ID> [--account <ALIAS>] [-o Vault/0. Inbox/email.md]
     python -m nexus.shared_tools.gmail_engine --thread <THREAD_ID> [--account <ALIAS>]
     python -m nexus.shared_tools.gmail_engine --draft "to@x.com" "Subject" "Body" [--reply-to <MESSAGE_ID>] [--account <ALIAS>]
@@ -35,6 +35,8 @@ from email.message import EmailMessage
 from html.parser import HTMLParser
 from typing import Any, Optional
 
+import google_auth_httplib2
+import httplib2
 from googleapiclient.discovery import build, Resource
 
 # Reconfigure stdout/stderr to UTF-8 on Windows so emoji-laden subjects don't crash cp1252 consoles
@@ -55,6 +57,15 @@ SECRETS_DIR: str = str(PROJECT_ROOT / ".secrets")
 DEFAULT_TOKEN_FILENAME: str = "token_gmail.json"  # Primary cache; custom accounts use token_gmail_<email>.json
 ACCOUNTS_MAP_FILE: str = os.path.join(SECRETS_DIR, "gmail_accounts.json")
 USER_ID: str = "me"  # Gmail API alias for "the authenticated account" (no EMAIL_ADDRESS env var needed)
+# Reserved virtual account selectors that must never be registered or persisted as single-account token files
+RESERVED_ACCOUNT_ALIASES: frozenset[str] = frozenset({"all"})
+# Bounded TCP/HTTP socket timeout (seconds) so stalled Gmail API connections fail fast instead of hanging worker threads
+DEFAULT_HTTP_TIMEOUT_SECONDS: int = 30
+
+
+def _is_reserved_account_alias(account: Optional[str]) -> bool:
+    """Return True if `account` is a reserved multi-account selector such as `'all'`."""
+    return bool(account and account.strip().lower() in RESERVED_ACCOUNT_ALIASES)
 
 
 # ── Multi-Account & Email Address Mapping ─────────────────────────────────────
@@ -63,13 +74,20 @@ def load_accounts_map() -> dict[str, str]:
     Load the email/alias -> token_filename mapping from .secrets/gmail_accounts.json.
     
     // Reads JSON dictionary mapping email addresses and aliases to token filenames.
-    // Scans .secrets/ for any unmapped token_gmail*.json files to ensure auto-discovery.
+    // Scans .secrets/ for any unmapped token_gmail*.json files to ensure auto-discovery,
+    // strictly ignoring reserved aliases (like 'all') so they can never cause recursive loops.
     """
     mapping: dict[str, str] = {}
     if os.path.exists(ACCOUNTS_MAP_FILE):
         try:
             with open(ACCOUNTS_MAP_FILE, "r", encoding="utf-8") as f:
-                mapping = json.load(f)
+                raw_mapping = json.load(f)
+            if isinstance(raw_mapping, dict):
+                mapping = {
+                    k: v
+                    for k, v in raw_mapping.items()
+                    if not _is_reserved_account_alias(k)
+                }
         except Exception:
             mapping = {}
 
@@ -82,7 +100,12 @@ def load_accounts_map() -> dict[str, str]:
                     mapping["default"] = DEFAULT_TOKEN_FILENAME
             elif fname.startswith("token_gmail_") and fname.endswith(".json"):
                 identifier = fname[len("token_gmail_") : -len(".json")]
-                if identifier and identifier not in mapping and fname not in mapping.values():
+                if (
+                    identifier
+                    and not _is_reserved_account_alias(identifier)
+                    and identifier not in mapping
+                    and fname not in mapping.values()
+                ):
                     mapping[identifier] = fname
     return mapping
 
@@ -99,10 +122,16 @@ def get_token_filename(account: Optional[str] = "default") -> str:
     Resolve the token cache filename for a given account identifier (email address or alias).
 
     // account: str | None representing user-provided email address, alias, or 'default'.
-    // 1. Matches exact email or alias in registered accounts map (case-insensitive).
-    // 2. Matches substring across registered email addresses (e.g. 'william' -> 'williamvolodarsky@gmail.com').
-    // 3. Fallback: generates sanitized filename token_gmail_<identifier>.json.
+    // 1. Rejects reserved multi-account selectors like 'all' so token_gmail_all.json is never created.
+    // 2. Matches exact email or alias in registered accounts map (case-insensitive).
+    // 3. Matches substring across registered email addresses (e.g. 'william' -> 'williamvolodarsky@gmail.com').
+    // 4. Fallback: generates sanitized filename token_gmail_<identifier>.json.
     """
+    if _is_reserved_account_alias(account):
+        raise ValueError(
+            f"Account alias '{account}' is reserved for multi-account aggregation and cannot map to a single token file."
+        )
+
     if not account or account.strip().lower() in ("default", "primary"):
         # Check if mapping specifies a default token file
         mapping = load_accounts_map()
@@ -148,7 +177,8 @@ def list_available_accounts(secrets_dir: str = SECRETS_DIR) -> list[str]:
     """
     Scan secrets directory and return all configured Gmail accounts (email addresses preferred).
 
-    // Returns a sorted list of unique identifiers (emails if known, otherwise aliases/default).
+    // Returns a sorted list of unique concrete identifiers (emails if known, otherwise aliases/default),
+    // never including reserved selectors such as 'all'.
     """
     mapping = load_accounts_map()
     accounts: list[str] = []
@@ -156,13 +186,16 @@ def list_available_accounts(secrets_dir: str = SECRETS_DIR) -> list[str]:
     # Map each existing token file to its primary email key if available
     token_to_email: dict[str, str] = {}
     for key, token_name in mapping.items():
+        if _is_reserved_account_alias(key):
+            continue
         if os.path.exists(os.path.join(secrets_dir, token_name)):
             # If key contains '@', it takes precedence over aliases
             if "@" in key or token_name not in token_to_email:
                 token_to_email[token_name] = key
 
     for token_name, display_key in token_to_email.items():
-        accounts.append(display_key)
+        if not _is_reserved_account_alias(display_key):
+            accounts.append(display_key)
 
     # Ensure default token_gmail.json is included if present on disk
     if os.path.exists(os.path.join(secrets_dir, DEFAULT_TOKEN_FILENAME)):
@@ -181,7 +214,11 @@ def authenticate_account(account: Optional[str] = None) -> tuple[str, str]:
     // Returns: tuple of (verified_email_address, token_filename).
     """
     target = account.strip() if account and account.strip() else None
-    
+    if _is_reserved_account_alias(target):
+        raise ValueError(
+            "Cannot authenticate reserved alias 'all'. Pass a concrete email address or omit --account for default."
+        )
+
     # 1. Determine token filename to write
     if target and "@" in target:
         clean_email = re.sub(r"[^\w@.\-]", "_", target.lower())
@@ -192,13 +229,16 @@ def authenticate_account(account: Optional[str] = None) -> tuple[str, str]:
         # Default target
         token_file = DEFAULT_TOKEN_FILENAME
 
-    # 2. Run OAuth flow via Google auth module
+    # 2. Run interactive OAuth flow via Google auth module (explicit user `--auth` invocation)
     creds = get_google_credentials(
         scopes=GMAIL_SCOPES,
         secrets_dir=SECRETS_DIR,
         token_filename=token_file,
+        allow_interactive=True,
+        auth_hint=f"Run `.venv\\Scripts\\python.exe -m nexus.shared_tools.gmail_engine --auth {target or ''}`.",
     )
-    service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+    auth_http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=DEFAULT_HTTP_TIMEOUT_SECONDS))
+    service = build("gmail", "v1", http=auth_http, cache_discovery=False)
 
     # 3. Retrieve verified email address directly from Google Profile
     profile = service.users().getProfile(userId=USER_ID).execute()
@@ -470,56 +510,99 @@ def get_gmail_service(account: str = "default") -> Resource:
     """
     Authenticate and build the Gmail API v1 Resource client for a specific account.
 
-    // account: str specifying which account token cache to load/refresh (e.g. 'default', 'work').
-    // Returns: googleapiclient.discovery.Resource authorized service client instance.
+    // account: str specifying which concrete account token cache to load/refresh (e.g. 'default', 'work').
+    // Returns: googleapiclient.discovery.Resource authorized service client instance with bounded HTTP timeouts.
     """
+    if _is_reserved_account_alias(account):
+        raise ValueError(
+            "get_gmail_service() requires a concrete account alias or email, not 'all'."
+        )
     token_file = get_token_filename(account)
-    # 1. Retrieve or refresh credentials via isolated token file (browser consent on first run)
+    # 1. Retrieve or refresh credentials headlessly (never launch surprise browser OAuth during API/agent calls)
     creds = get_google_credentials(
         scopes=GMAIL_SCOPES,
         secrets_dir=SECRETS_DIR,
         token_filename=token_file,
+        allow_interactive=False,
+        auth_hint=f"Run `.venv\\Scripts\\python.exe -m nexus.shared_tools.gmail_engine --auth {account}` in a terminal.",
     )
-    # 2. Build the discovery client; cache_discovery=False silences the oauth2client file-cache warning
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    # 2. Bind AuthorizedHttp with a 30s socket timeout so stalled Gmail TCP calls fail cleanly instead of hanging
+    auth_http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=DEFAULT_HTTP_TIMEOUT_SECONDS))
+    return build("gmail", "v1", http=auth_http, cache_discovery=False)
 
 
 # ── Read Operations ───────────────────────────────────────────────────────────
+
+# Helper building the effective Gmail `q` string from an optional user query and `include_archived` flag.
+# - query: str = "" optional Gmail search syntax; empty returns recent mail matching the archive scope.
+# - include_archived: bool = False scopes to `in:inbox` (all inbox emails regardless of labels) unless
+#   the caller already specified an `in:` operator; True searches all mail including archived messages.
+# - Returns: str ready for `users.messages.list(q=...)` (or "" for an unfiltered all-mail sweep).
+def _build_effective_query(query: str = "", include_archived: bool = False) -> str:
+    """Apply `in:inbox` by default (unless `include_archived=True` or caller already gave an `in:` scope)."""
+    cleaned = (query or "").strip()
+    if include_archived:
+        return cleaned
+    if not cleaned:
+        return "in:inbox"
+    if "in:" in cleaned.lower():
+        return cleaned
+    # Parenthesize `cleaned` so embedded `OR` clauses still require `in:inbox`
+    return f"in:inbox ({cleaned})"
+
+
+# Signature breakdown for list_messages:
+# - query: str = "" searches all matching emails without label filtering (empty sweeps all of `in:inbox`).
+# - max_results: int = 10 caps returned summaries (clamped 1-100 by Gmail API constraints).
+# - account: str = "default" targets a concrete account alias/email or "all" to merge across connected accounts.
+# - service: Optional[Resource] reuses an existing authenticated Gmail v1 Discovery client when provided.
+# - include_archived: bool = False excludes archived (non-inbox) mail by default via `in:inbox`; set True for all mail.
 def list_messages(
-    query: str = "in:inbox",
+    query: str = "",
     max_results: int = 10,
     account: str = "default",
     service: Optional[Resource] = None,
+    include_archived: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Search messages with native Gmail query syntax and return lightweight summaries (newest first).
 
-    // query: Gmail search string, identical to the Gmail search bar
-    //        (e.g. 'from:openai.com', 'subject:interview newer_than:30d', 'is:unread label:Jobs').
+    // query: Optional Gmail search string (e.g. 'from:openai.com', 'subject:interview newer_than:30d', or '').
     // max_results: Max messages to return (clamped 1–100).
     // account: Target account alias ('default', 'work', etc.) or 'all' to aggregate across accounts.
     // service: Optional pre-built client (reuse across calls to skip re-auth).
+    // include_archived: When False (default), restricts results to `in:inbox` (all inbox mail regardless of labels).
+    //                   Pass True to search all mail including archived messages.
 
     Returns:
         list[dict]: Summaries with id, account, thread_id, date, sender, to, subject, snippet, labels.
     """
-    # Multi-account aggregation branch: query all discovered accounts and merge results
+    # Multi-account aggregation branch: query all discovered concrete accounts and merge results
     if account.lower() == "all" and service is None:
-        available = list_available_accounts()
+        available = [acc for acc in list_available_accounts() if not _is_reserved_account_alias(acc)]
         if not available:
             available = ["default"]
 
         combined: list[dict[str, Any]] = []
+        errors: list[str] = []
         for acc in available:
             try:
                 acc_msgs = list_messages(
                     query=query,
                     max_results=max_results,
                     account=acc,
+                    include_archived=include_archived,
                 )
                 combined.extend(acc_msgs)
+            except RecursionError:
+                raise
             except Exception as e:
+                errors.append(f"{acc}: {e}")
                 print(f"[Nexus] Warning: failed to fetch messages for account '{acc}': {e}", file=sys.stderr)
+
+        # Surface an error when every configured account failed so callers don't mistake total failure for 0 emails
+        if not combined and errors and len(errors) == len(available):
+            raise RuntimeError(f"Gmail list_messages failed across all accounts: {'; '.join(errors)}")
 
         # Sort combined results descending by ISO date string (newest first)
         combined.sort(key=lambda m: m.get("date", ""), reverse=True)
@@ -529,9 +612,15 @@ def list_messages(
     token_file = get_token_filename(account)
     display_acc = resolve_account_display_name(account, token_file)
     max_results = max(1, min(max_results, 100))
+    effective_query = _build_effective_query(query=query, include_archived=include_archived)
+
+    # Omit `q` when `effective_query` is empty (unfiltered all-mail sweep) so Gmail returns all non-spam/trash mail
+    list_kwargs: dict[str, Any] = {"userId": USER_ID, "maxResults": max_results}
+    if effective_query:
+        list_kwargs["q"] = effective_query
 
     # Step 1: messages.list returns ONLY {id, threadId} stubs, never headers
-    resp = service.users().messages().list(userId=USER_ID, q=query, maxResults=max_results).execute()
+    resp = service.users().messages().list(**list_kwargs).execute()
     stubs = resp.get("messages", [])
     if not stubs:
         return []
@@ -579,8 +668,8 @@ def get_message(
     """
     if service is None:
         if account.lower() == "all":
-            # Probe each configured account until the message is found
-            available = list_available_accounts() or ["default"]
+            # Probe each configured concrete account until the message is found
+            available = [acc for acc in list_available_accounts() if not _is_reserved_account_alias(acc)] or ["default"]
             last_exc = None
             for acc in available:
                 try:
@@ -630,7 +719,7 @@ def get_thread(
     """
     if service is None:
         if account.lower() == "all":
-            available = list_available_accounts() or ["default"]
+            available = [acc for acc in list_available_accounts() if not _is_reserved_account_alias(acc)] or ["default"]
             last_exc = None
             for acc in available:
                 try:
@@ -652,7 +741,28 @@ def list_labels(
     account: str = "default",
     service: Optional[Resource] = None,
 ) -> list[dict[str, str]]:
-    """Return all labels as [{'id': 'Label_12', 'name': 'Jobs', 'type': 'user'}, ...]."""
+    """Return all labels as [{'id': 'Label_12', 'name': 'Jobs', 'type': 'user'}, ...]; supports account='all'."""
+    if account.lower() == "all" and service is None:
+        available = [acc for acc in list_available_accounts() if not _is_reserved_account_alias(acc)] or ["default"]
+        combined_labels: list[dict[str, str]] = []
+        errors: list[str] = []
+        for acc in available:
+            try:
+                acc_labels = list_labels(account=acc)
+                token_file = get_token_filename(acc)
+                display_acc = resolve_account_display_name(acc, token_file)
+                for lbl in acc_labels:
+                    lbl["account"] = display_acc
+                combined_labels.extend(acc_labels)
+            except RecursionError:
+                raise
+            except Exception as exc:
+                errors.append(f"{acc}: {exc}")
+                print(f"[Nexus] Warning: failed to list labels for account '{acc}': {exc}", file=sys.stderr)
+        if not combined_labels and errors and len(errors) == len(available):
+            raise RuntimeError(f"Gmail list_labels failed across all accounts: {'; '.join(errors)}")
+        return combined_labels
+
     service = service or get_gmail_service(account=account)
     labels = service.users().labels().list(userId=USER_ID).execute().get("labels", [])
     return [{"id": l["id"], "name": l["name"], "type": l.get("type", "")} for l in labels]
@@ -861,9 +971,19 @@ def main():
         metavar="EMAIL",
         help="Run OAuth login flow and record verified email (optionally passing email as argument)"
     )
-    parser.add_argument("--list", metavar="N", type=int, help="List the N most recent inbox messages")
+    parser.add_argument(
+        "--list",
+        metavar="N",
+        type=int,
+        help="List the N most recent inbox messages (regardless of labels; add --include-archived for all mail)",
+    )
     parser.add_argument("--search", metavar="QUERY", help="Search with Gmail syntax (from:, subject:, newer_than:, is:unread)")
     parser.add_argument("--max", type=int, default=10, help="Max results for --search (default: 10)")
+    parser.add_argument(
+        "--include-archived",
+        action="store_true",
+        help="Include archived (non-inbox) messages in --list/--search results",
+    )
     parser.add_argument("--read", metavar="MESSAGE_ID", help="Print a full message as markdown")
     parser.add_argument("--thread", metavar="THREAD_ID", help="Print every message in a thread as markdown")
     parser.add_argument("--labels", action="store_true", help="List all label names and IDs")
@@ -906,10 +1026,15 @@ def main():
         print(f"[Nexus] Gmail authentication successful for '{email}'. Token stored at .secrets/{token_file}")
         return
 
-    if args.list or args.search:
-        query = args.search or "in:inbox"
-        count = args.list or args.max
-        msgs = list_messages(query=query, max_results=count, account=args.account)
+    if args.list is not None or args.search is not None:
+        query = args.search or ""
+        count = args.list if args.list is not None else args.max
+        msgs = list_messages(
+            query=query,
+            max_results=count,
+            account=args.account,
+            include_archived=args.include_archived,
+        )
         print(json.dumps(msgs, indent=2, ensure_ascii=False) if args.json else format_messages_table(msgs))
         return
 
@@ -927,8 +1052,13 @@ def main():
         return
 
     if args.labels:
-        for l in list_labels(account=args.account):
-            print(f"{l['id']:<24} {l['type']:<8} {l['name']}")
+        labels_list = list_labels(account=args.account)
+        if args.json:
+            print(json.dumps(labels_list, indent=2, ensure_ascii=False))
+        else:
+            for l in labels_list:
+                acc_prefix = f"{l['account']:<32} " if l.get("account") else ""
+                print(f"{acc_prefix}{l['id']:<28} {l['type']:<8} {l['name']}")
         return
 
     if args.draft:

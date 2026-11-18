@@ -6,6 +6,7 @@ and deletion (move_file, delete_file), recent modification queries, email/calend
 and on-demand CLI tool execution.
 """
 import json
+import os
 import subprocess
 import sys
 from typing import List, Optional
@@ -57,36 +58,16 @@ def get_vault_structure(path: Optional[str] = None) -> str:
 
 # ── 2. Vault File Reading & Search Tools ─────────────────────────────────────
 
-# Optional[int] parameters let the agent inspect specific line ranges of large logs or TOC files without blowing token budget.
-# Optional[int] start_page / end_page allow inspecting specific page ranges of PDF documents.
-@tool
-def read_file(
+# Pure-Python shared helper used by both `@tool read_file` and `spawn_subagent(context_files=...)`
+# so HITL staged-edit overlays and disk reads share one canonical implementation without duplicating logic.
+def read_vault_file_with_hitl_overlay(
     file_path: str,
     start_line: Optional[int] = None,
     end_line: Optional[int] = None,
     start_page: Optional[int] = None,
     end_page: Optional[int] = None,
 ) -> str:
-    """Read the contents of a note or file in the Vault (automatically reflects any pending staged HITL edits).
-
-    CONTEXT HYGIENE DIRECTIVE: Reading 1–2 specific notes directly for quick queries is encouraged.
-    However, when researching across >2 files or auditing a section, DO NOT call `read_file` repeatedly
-    in the primary thread. Offload the inspection to parallel `spawn_subagent(task_prompt)` calls so raw
-    file bodies do not inflate your primary context window.
-
-    You can pass a full Vault-relative path (e.g. "3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md")
-    or a unique note title (e.g. "Job Hunt War Room" or "Health Summary.md").
-    Supports Markdown notes, plain-text files, and PDF documents (extracts text, Markdown tables, and layout).
-    Optionally pass `start_line` and `end_line` (1-indexed, inclusive) to inspect a slice of a large file.
-    For PDF documents, optionally pass `start_page` and `end_page` (1-indexed, inclusive) to inspect target pages.
-
-    Args:
-        file_path: Relative path from Vault root or unique note filename.
-        start_line: Optional 1-indexed starting line number (inclusive).
-        end_line: Optional 1-indexed ending line number (inclusive).
-        start_page: Optional 1-indexed starting page for PDF documents (inclusive).
-        end_page: Optional 1-indexed ending page for PDF documents (inclusive).
-    """
+    """Resolve and read a Vault note (including pending staged HITL edits) without LangChain `@tool` wrapping."""
     from nexus.core.hitl_queue import get_pending_for_file
     from nexus.shared_tools.vault_reader import read_note_content, resolve_vault_note_path
 
@@ -147,6 +128,136 @@ def read_file(
     return read_note_content(
         note_path=file_path,
         domain_path=None,
+        start_line=start_line,
+        end_line=end_line,
+        start_page=start_page,
+        end_page=end_page,
+    )
+
+
+# `context_files: List[str]` lists Vault paths or unique note titles to pre-hydrate before subagent boot.
+# -> tuple[Optional[str], Optional[str]] returns (prehydrated_markdown, None) on success or (None, fail_fast_error) if any path fails.
+def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[str], Optional[str]]:
+    """Pre-hydrates Vault files for `spawn_subagent` with fail-fast hallucination detection on unresolved paths."""
+    from nexus.core.hitl_queue import get_pending_for_file
+    from nexus.shared_tools.vault_reader import find_nearest_directory_and_matches, resolve_vault_note_path
+
+    if not context_files:
+        return None, None
+
+    # Deduplicate requested paths while preserving caller order so identical files are never injected twice.
+    seen_refs: set[str] = set()
+    ordered_refs: List[str] = []
+    for raw in context_files:
+        cleaned = (raw or "").strip()
+        key = cleaned.lower()
+        if not cleaned:
+            ordered_refs.append("")
+            continue
+        if key not in seen_refs:
+            seen_refs.add(key)
+            ordered_refs.append(cleaned)
+
+    resolved_sections: List[str] = []
+    seen_resolved_labels: set[str] = set()
+    failure_blocks: List[str] = []
+
+    for ref in ordered_refs:
+        if not ref:
+            failure_blocks.append("- `<empty string>`: Error: Path cannot be empty.")
+            continue
+
+        resolved_path, err = resolve_vault_note_path(ref)
+        if err and ("outside the Vault" in err or "cannot be empty" in err):
+            failure_blocks.append(f"- `{ref}`: {err}")
+            continue
+
+        if resolved_path is not None:
+            rel_label = str(resolved_path.relative_to(VAULT_PATH.resolve())).replace("\\", "/")
+            if rel_label.lower() in seen_resolved_labels:
+                continue
+            content = read_vault_file_with_hitl_overlay(file_path=ref)
+            if content.startswith(("Error reading file", "Error reading PDF")):
+                failure_blocks.append(f"- `{ref}`: {content}")
+                continue
+            seen_resolved_labels.add(rel_label.lower())
+            resolved_sections.append(f"## `{rel_label}`\n\n{content}")
+            continue
+
+        # Allow newly staged HITL `create_file` notes that are not yet committed to disk.
+        pending_tx = get_pending_for_file(ref)
+        if pending_tx and pending_tx.get("proposed_content") is not None:
+            rel_label = pending_tx.get("target_file", ref)
+            if rel_label.lower() in seen_resolved_labels:
+                continue
+            content = read_vault_file_with_hitl_overlay(file_path=ref)
+            seen_resolved_labels.add(rel_label.lower())
+            resolved_sections.append(f"## `{rel_label}`\n\n{content}")
+            continue
+
+        # Fail-fast hallucination catch: surface nearest directory contents and similar filenames on disk.
+        msg_lines = [f"- `{ref}`: {err or 'File not found on disk.'}"]
+        if not err or "Multiple files found" not in err:
+            diag = find_nearest_directory_and_matches(ref)
+            if diag.get("nearest_dir") and diag.get("directory_listing"):
+                msg_lines.append(
+                    f"  Actual files in nearest matching directory (`{diag['nearest_dir']}`):\n"
+                    f"  ```\n{diag['directory_listing']}\n  ```"
+                )
+            if diag.get("similar_files"):
+                similar_list = ", ".join(f"`{p}`" for p in diag["similar_files"])
+                msg_lines.append(f"  Closest matching Vault files on disk: {similar_list}")
+        failure_blocks.append("\n".join(msg_lines))
+
+    if failure_blocks:
+        error_report = (
+            "❌ Fail-Fast Context Hydration Error: One or more `context_files` passed to `spawn_subagent` "
+            "could not be resolved on disk. Subagent execution aborted before wasting LLM turns.\n\n"
+            + "\n\n".join(failure_blocks)
+            + "\n\nVerify actual on-disk filenames above (or call `get_directory_structure`) and re-invoke `spawn_subagent`."
+        )
+        return None, error_report
+
+    prehydrated_block = (
+        "# Pre-Hydrated Disk Context\n\n"
+        "The following Vault files were resolved and read directly from disk (including any pending HITL edits):\n\n"
+        + "\n\n---\n\n".join(resolved_sections)
+    )
+    return prehydrated_block, None
+
+
+# Optional[int] parameters let the agent inspect specific line ranges of large logs or TOC files without blowing token budget.
+# Optional[int] start_page / end_page allow inspecting specific page ranges of PDF documents.
+@tool
+def read_file(
+    file_path: str,
+    start_line: Optional[int] = None,
+    end_line: Optional[int] = None,
+    start_page: Optional[int] = None,
+    end_page: Optional[int] = None,
+) -> str:
+    """Read the contents of a note or file in the Vault (automatically reflects any pending staged HITL edits).
+
+    CONTEXT HYGIENE DIRECTIVE: Reading 1–2 specific notes directly for quick queries is encouraged.
+    However, when researching across >2 files or auditing a section, DO NOT call `read_file` repeatedly
+    in the primary thread. Offload the inspection to parallel `spawn_subagent(task_prompt, context_files=...)`
+    calls so raw file bodies do not inflate your primary context window.
+
+    You can pass a full Vault-relative path (e.g. "3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md")
+    or a unique note title (e.g. "Job Hunt War Room" or "Health Summary.md").
+    Supports Markdown notes, plain-text files, and PDF documents (extracts text, Markdown tables, and layout).
+    Optionally pass `start_line` and `end_line` (1-indexed, inclusive) to inspect a slice of a large file.
+    For PDF documents, optionally pass `start_page` and `end_page` (1-indexed, inclusive) to inspect target pages.
+
+    Args:
+        file_path: Relative path from Vault root or unique note filename.
+        start_line: Optional 1-indexed starting line number (inclusive).
+        end_line: Optional 1-indexed ending line number (inclusive).
+        start_page: Optional 1-indexed starting page for PDF documents (inclusive).
+        end_page: Optional 1-indexed ending page for PDF documents (inclusive).
+    """
+    return read_vault_file_with_hitl_overlay(
+        file_path=file_path,
         start_line=start_line,
         end_line=end_line,
         start_page=start_page,
@@ -621,36 +732,108 @@ def delete_file(
 _BODY_CHAR_LIMIT = 4000
 
 
-@tool
-def fetch_emails(query: str = "in:inbox", count: int = 5, account: str = "all") -> str:
-    """Search and fetch emails from Gmail using native Gmail search syntax across accounts.
+# Maximum full MIME bodies hydrated automatically during broad sweep queries (when `include_body` is None)
+_FETCH_EMAILS_AUTO_BODY_CAP = 20
 
-    Read-only operation. Use this when the user asks to check their email, find recruiter outreach,
-    or look up a message thread. Supports multi-account Gmail ('all' to aggregate across all connected
-    inboxes, or a specific account alias like 'default' or 'work').
+
+# Signature breakdown for fetch_emails:
+# - count: int = 10 limits the total number of emails to collect across accounts.
+# - include_archived: bool = False sweeps `in:inbox` (all inbox emails regardless of labels) by default; True includes archived mail.
+# - query: str = "" optional Gmail search filter (leave empty for a general inbox sweep).
+# - account: str = "all" targets all configured Gmail accounts or a single concrete alias/email.
+# - include_body: Optional[bool] overrides automatic full-body hydration (default None hydrates up to 20 matches).
+@tool
+def fetch_emails(
+    count: int = 10,
+    include_archived: bool = False,
+    query: str = "",
+    account: str = "all",
+    include_body: Optional[bool] = None,
+) -> str:
+    """Sweep or search emails from Gmail across accounts without label filtering.
+
+    Read-only operation. By default (`query=""`, `include_archived=False`), sweeps everything in
+    `in:inbox` regardless of labels across all connected accounts. Pass `include_archived=True` to
+    include archived (non-inbox) mail, or provide an optional `query` for targeted searches.
+
+    For broad sweeps (`count > 20` with `include_body=None`), full message bodies are hydrated only
+    for the newest 20 matches and remaining matches return lightweight metadata (`subject`, `sender`,
+    `date`, `labels`, `snippet`) to prevent Gmail API quota exhaustion (`HttpError 403 rateLimitExceeded`).
 
     Args:
-        query: Gmail search syntax (e.g. 'in:inbox', 'from:recruiter newer_than:7d', 'subject:interview').
-        count: Maximum number of emails to return (default: 5).
+        count: Number of emails to collect (default: 10).
+        include_archived: When False (default), sweeps `in:inbox` (excludes archived mail). Set True
+                          to include archived mail as well.
+        query: Optional Gmail search syntax (e.g. 'from:recruiter newer_than:7d', 'subject:interview').
+               Leave empty ("") to sweep recent emails without filtering.
         account: Account alias ('all' for all configured accounts, 'default', or custom name).
+        include_body: Optional override: `True` hydrates every message body, `False` returns metadata+snippet
+                      only, `None` (default) hydrates full bodies up to 20 matches.
     """
     from nexus.shared_tools import gmail_engine
 
     try:
-        summaries = gmail_engine.list_messages(query=query, max_results=count, account=account)
+        summaries = gmail_engine.list_messages(
+            query=query,
+            max_results=count,
+            account=account,
+            include_archived=include_archived,
+        )
+        # Cache one Discovery Resource per account across the loop so we don't rebuild clients N times
+        service_cache: dict[str, object] = {}
         emails = []
-        for s in summaries:
-            msg_acc = s.get("account", account if account != "all" else "default")
-            msg = gmail_engine.get_message(s["id"], account=msg_acc)
-            emails.append({
-                "id": msg["id"],
-                "account": msg.get("account", msg_acc),
-                "thread_id": msg["thread_id"],
-                "subject": msg["subject"],
-                "sender": msg["sender"],
-                "date": msg["date"],
-                "body": msg["body"][:_BODY_CHAR_LIMIT],
-            })
+        for idx, s in enumerate(summaries):
+            msg_acc = s.get("account") or (account if account.lower() != "all" else "default")
+            should_fetch_body = (
+                include_body
+                if include_body is not None
+                else idx < _FETCH_EMAILS_AUTO_BODY_CAP
+            )
+            if not should_fetch_body:
+                emails.append({
+                    "id": s.get("id"),
+                    "account": msg_acc,
+                    "thread_id": s.get("thread_id"),
+                    "subject": s.get("subject"),
+                    "sender": s.get("sender"),
+                    "date": s.get("date"),
+                    "labels": s.get("labels", []),
+                    "snippet": s.get("snippet", ""),
+                    "body_omitted_reason": (
+                        "include_body=False"
+                        if include_body is False
+                        else f"Summary only in sweep mode (beyond first {_FETCH_EMAILS_AUTO_BODY_CAP} full bodies); call fetch_emails(query='id:{s.get('id')}', count=1, account='{msg_acc}') for full body."
+                    ),
+                })
+                continue
+
+            try:
+                if msg_acc not in service_cache:
+                    service_cache[msg_acc] = gmail_engine.get_gmail_service(account=msg_acc)
+                msg = gmail_engine.get_message(s["id"], account=msg_acc, service=service_cache[msg_acc])
+                emails.append({
+                    "id": msg["id"],
+                    "account": msg.get("account", msg_acc),
+                    "thread_id": msg["thread_id"],
+                    "subject": msg["subject"],
+                    "sender": msg["sender"],
+                    "date": msg["date"],
+                    "labels": msg.get("labels", s.get("labels", [])),
+                    "body": msg["body"][:_BODY_CHAR_LIMIT],
+                })
+            except Exception as msg_exc:
+                # Degrade gracefully per email instead of discarding the entire batch on one quota/MIME failure
+                emails.append({
+                    "id": s.get("id"),
+                    "account": msg_acc,
+                    "thread_id": s.get("thread_id"),
+                    "subject": s.get("subject"),
+                    "sender": s.get("sender"),
+                    "date": s.get("date"),
+                    "labels": s.get("labels", []),
+                    "snippet": s.get("snippet", ""),
+                    "body_error": f"Failed to hydrate full body: {msg_exc}",
+                })
         return json.dumps(emails, ensure_ascii=False)
     except Exception as exc:
         return json.dumps([{"error": f"fetch_emails failed: {exc}"}])
@@ -918,10 +1101,14 @@ def run_shared_tool_cli(module: str, cli_args: Optional[List[str]] = None) -> st
         return "Error: Only `nexus.shared_tools.<module>` modules may be invoked via `run_shared_tool_cli`."
 
     cmd = [sys.executable, "-m", clean_mod] + (cli_args or [])
+    # Disable interactive OAuth browser flows and terminal stdin prompts inside agent-spawned subprocesses
+    child_env = {**os.environ, "NEXUS_NONINTERACTIVE_AUTH": "1"}
     try:
         proc = subprocess.run(
             cmd,
             cwd=str(PROJECT_ROOT),
+            env=child_env,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -997,6 +1184,90 @@ def transcribe_media(
         )
     except Exception as exc:
         return f"Error transcribing media file '{file_path}': {exc}"
+
+
+# ── 9. Conversation Spawning & Context Handoff Tool ──────────────────────────
+
+# `title: str` is the concise topic label displayed in the Chat Sidebar (auto-prefixed with `🌿 ` when nested).
+# `context_brief: str` is the self-contained Markdown handoff seeded into the fresh conversation's context window.
+# `nest_under_current: bool` nests the spawned conversation under the active thread by default (`True`), or creates a root thread (`False`).
+# `target_section: Optional[str]` optional Vault folder path whose live directory snapshot is appended to the seeded brief.
+# `-> str` returns a compact creation receipt containing the new conversation's title, UUID, and any path verification warnings.
+@tool
+def spawn_conversation(
+    title: str,
+    context_brief: str,
+    nest_under_current: bool = True,
+    target_section: Optional[str] = None,
+) -> str:
+    """Create and seed a new, isolated Nexus conversation thread ready for focused follow-up discussion ("seed & wait").
+
+    Use this tool to spin off distinct topics, email categories, or multi-thread deep dives into clean,
+    fresh context windows without firing an immediate LLM turn. The spawned conversation appears in the
+    Control Panel sidebar pre-loaded with your `context_brief` in both `chats.db` and LangGraph memory.
+
+    CONTEXT-PACKING STANDARD (ZERO-LOSS HANDOFF):
+    Write `context_brief` so the fresh thread can immediately get to work without re-running broad searches:
+      - **Email sweeps:** Include exact Gmail message/thread IDs, account name, sender/recipients, subject,
+        dates, key quotes/numbers, action items, and recommended next questions.
+      - **Vault / project deep dives:** Include exact verified `[[Wiki-Links]]` or Vault-relative paths,
+        pass `target_section` so the live on-disk directory tree is snapped automatically, and summarize
+        current architectural/decision state, constraints, and open questions.
+      - **Deterministic Path Guard:** Referenced `[[Wiki-Links]]` and `.md`/`.pdf`/`.docx` filenames in
+        `context_brief` are automatically verified against disk; any missing filenames trigger a `[SYSTEM WARNING]`.
+
+    CALLING DISCIPLINE (HEAD AGENT VS. SUBAGENTS):
+      - **Head Agent:** May call anytime to break complex multi-topic sweeps or tangents into dedicated threads.
+      - **Subagents (`spawn_subagent`):** Only call `spawn_conversation` when your `task_prompt` (or delegated
+        user goal) instructs you to spin up threads directly from the raw data you gathered—avoid spawning
+        overlapping duplicate conversations across sibling workers.
+
+    Args:
+        title: Concise, descriptive title for the new conversation (e.g., "CPA & Tax Follow-ups", "Recruiter Outreach — Acme").
+        context_brief: Self-contained Markdown brief seeded as the opening context of the fresh thread.
+        nest_under_current: If True (default), nests the conversation as a child branch under the current thread
+                            (enabling collapsible sidebar grouping and `Distill & Merge`); set False to create a
+                            standalone top-level root conversation (e.g., for an ongoing independent project).
+        target_section: Optional Vault-relative section folder path (e.g. "3. Operations/3.1. Career Strategy & Revenue").
+                        When provided, Python automatically appends the live directory file tree to the seeded brief.
+    """
+    from nexus.core.chat_branching import spawn_seeded_conversation
+    from nexus.core.hitl_queue import get_hitl_execution_context
+
+    # Read `conversation_id` from ContextVar-backed execution context (propagated into both Head Agent & subagent threads)
+    exec_ctx = get_hitl_execution_context()
+    raw_parent_id = exec_ctx.get("conversation_id")
+    # Treat the synthetic `"nexus_primary"` CLI/eval default as having no persistent parent row in `chats.db`
+    parent_id = raw_parent_id if (raw_parent_id and raw_parent_id != "nexus_primary") else None
+
+    try:
+        result = spawn_seeded_conversation(
+            title=title,
+            context_brief=context_brief,
+            parent_conversation_id=parent_id,
+            nest_under_parent=nest_under_current,
+            target_section=target_section,
+        )
+        new_id = result["conversation_id"]
+        created_title = result["title"]
+        linked_parent = result.get("parent_conversation_id")
+        scope_note = (
+            f"nested branch under `{linked_parent}`"
+            if linked_parent
+            else "standalone root conversation"
+        )
+        receipt = (
+            f"💬 Spawned {scope_note}: **{created_title}** "
+            f"(conversation_id: `{new_id}`, seeded brief: {len(context_brief.strip()):,} chars). "
+            f"Ready and waiting in the sidebar."
+        )
+        if result.get("section_warning"):
+            receipt += f"\n{result['section_warning']}"
+        if result.get("warning_block"):
+            receipt += f"\n{result['warning_block']}"
+        return receipt
+    except Exception as exc:
+        return f"Error spawning conversation '{title}': {exc}"
 
 
 # ── Backward-Compatible Factories (for any legacy callers) ───────────────────

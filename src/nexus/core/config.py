@@ -41,6 +41,11 @@ class EngineSettings(BaseSettings):
     # - ai_max_retries: Maximum automatic retry attempts on transient HTTP/gRPC errors (e.g. 504 DEADLINE_EXCEEDED, 429, 503).
     ai_request_timeout: int = 300
     ai_max_retries: int = 3
+    # Wall-clock execution timeouts (seconds) preventing hung external sockets/APIs from freezing worker threads:
+    # - nexus_tool_timeout: Maximum wait for a single non-subagent tool batch (e.g. fetch_emails, web_search, CLI tools).
+    # - nexus_subagent_timeout: Maximum total wall-clock budget for a single `spawn_subagent` worker loop.
+    nexus_tool_timeout: int = 120
+    nexus_subagent_timeout: int = 900
     tavily_api_key: Optional[str] = None
     
     # Gmail: auth lives in .secrets/token_gmail*.json (see shared_tools/gmail_engine.py); supports multiple accounts.

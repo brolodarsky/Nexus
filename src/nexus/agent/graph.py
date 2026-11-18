@@ -15,6 +15,10 @@ or restricting directory access, Nexus runs ONE universal agent design (`NexusAg
   5. Preserves 100% lossless event-bounded conversation history without message-pruning summarization,
      maximizing provider KV prompt-cache hit rates (90–97% cached tokens) across multi-turn sessions.
 """
+# contextvars: Propagates active thread_id and HITL execution context across timeout wrapper threads
+import contextvars
+# concurrent.futures: Enables bounded wall-clock timeouts on tool batches without blocking on hung sockets
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 # sqlite3: Standard library SQL engine used for local thread checkpointing (`SqliteSaver`)
 import json
 # re: Regular expressions used to parse provider error payloads (e.g. `retryDelay` intervals on 429)
@@ -87,6 +91,7 @@ from nexus.shared_tools.shared import (
     get_directory_structure,
     get_recent_modifications,
     get_vault_structure,
+    hydrate_subagent_context_files,
     list_browser_tabs,
     modify_file,
     move_file,
@@ -96,6 +101,7 @@ from nexus.shared_tools.shared import (
     search_vault,
     search_web,
     send_telegram_notification,
+    spawn_conversation,
     transcribe_media,
     update_calendar_event,
     delete_calendar_event,
@@ -387,6 +393,7 @@ CORE_TOOLS = [
     delete_calendar_event,
     send_telegram_notification,
     transcribe_media,
+    spawn_conversation,
     run_shared_tool_cli,
 ]
 
@@ -659,14 +666,30 @@ def _invoke_llm_with_resilience(
 
 # ── Dynamic Subagent Spawner (`spawn_subagent`) ──────────────────────────────
 
+# `task_prompt: str` is the self-contained objective and output specification for the subagent.
+# `model_tier: ModelTier` selects capability/cost tier (`"low"`, `"medium"`, or `"strong"`).
+# `context_files: Optional[list[str]]` optional Vault paths/titles resolved and pre-hydrated from disk before boot.
+# `-> str` returns the subagent's final distilled synthesis or a fail-fast resolution error if any `context_files` path is invalid.
 @tool
-def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
+def spawn_subagent(
+    task_prompt: str,
+    model_tier: ModelTier = "low",
+    context_files: Optional[list[str]] = None,
+) -> str:
     """Spawn an isolated subagent to execute a focused research, audit, or synthesis subtask.
 
     PARALLEL SWARMING: Emitting multiple `spawn_subagent` tool calls in a single turn executes all
     subagents concurrently in parallel via the runtime thread pool (`ToolNode`). Use parallel fan-out
     whenever inspecting multiple files, auditing multiple sections, or running independent subtasks so
     raw file contents stay out of your primary context window.
+
+    PRE-HYDRATED DISK CONTEXT (`context_files`):
+    Never summarize user credentials, degrees, or section rules from memory into `task_prompt`!
+    Pass shared baseline Vault paths/titles (e.g. `["3. Operations/3.1. Career Strategy & Revenue/Section Instructions.md", "Resume - Master.md"]`)
+    via `context_files`. Python resolves and reads them directly from disk (zero Commander context bloat,
+    zero extra subagent tool turns) and prepends `# Pre-Hydrated Disk Context` to the subagent's initial prompt.
+    If any path in `context_files` does not exist on disk, `spawn_subagent` fails fast before calling the LLM
+    and returns the actual sibling files in the nearest matching directory.
 
     ARCHITECT-DRAFTER PATTERN (WRITING & EDIT DELEGATION):
     Subagents are not just for reading; they are your execution workforce. When multiple notes need to be created
@@ -678,9 +701,10 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
 
     The subagent boots automatically with `inject_root_instructions()` (`Master Instructions.md` +
     `{vault_structure}` + `{shared_tools}`) and has full access to all Vault navigation, reading,
-    search, and HITL file tools. You do NOT need to pass tool lists or file arrays—just make
-    `task_prompt` self-contained, specific, and crystal clear:
-      1. State the exact objective and which Vault section(s) or note(s) to inspect.
+    search, HITL file tools, and `spawn_conversation` (when instructed to spin up seeded discussion
+    threads directly from raw tool payloads without dumping them back into the Commander window).
+    Make `task_prompt` self-contained, specific, and crystal clear:
+      1. State the exact objective and which Vault section(s) or note(s) to inspect (plus `context_files` for shared baseline notes).
       2. Specify any constraints (e.g. read-only vs. staging a surgical edit via `modify_file`).
       3. Specify the exact output format and distilled takeaways to return to you.
 
@@ -688,6 +712,8 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
         task_prompt: A clear, self-contained, actionable prompt instructing the subagent what to do and return.
         model_tier: Capability/cost tier (`"low"`, `"medium"`, or `"strong"`). Defaults to `"low"` for fast,
                     cost-efficient execution; pass `"medium"` or `"strong"` only for complex synthesis subtasks.
+        context_files: Optional list of Vault-relative paths or unique note titles to pre-hydrate directly from disk
+                       under `# Pre-Hydrated Disk Context` (fails fast if any path cannot be resolved).
     """
     effective_tier: ModelTier = model_tier if model_tier in ("low", "medium", "strong") else "low"
     # Propagate conversation_id from parent while scoping thread_id, agent_id, and agent_role to this subagent
@@ -718,34 +744,9 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
             "model_tier": effective_tier,
             "model_name": sub_model_name,
             "task_prompt": task_prompt,
+            "context_files": list(context_files) if context_files else [],
         },
     )
-
-    # Build an ephemeral, stateless subagent client (no checkpointer needed; lives only for this subtask)
-    sub_base_llm = get_chat_model(tier=sub_tier_arg, temperature=0.0)
-    sub_llm = sub_base_llm.bind_tools(CORE_TOOLS)
-    # handle_tool_errors=True: Prebuilt LangGraph handler that intercepts unhandled tool exceptions
-    # (e.g. HttpError 404/500, network disconnects, file locks) and wraps them into a ToolMessage(status="error")
-    # rather than raising through ToolNode.invoke() and terminating the subagent turn mid-flight.
-    sub_tool_node = ToolNode(CORE_TOOLS, handle_tool_errors=True)
-
-    # Static subagent system prefix (no per-subagent serial numbers) so parallel and sequential subagents
-    # share the exact same byte-identical prefix for Turn-1 KV prompt caching across Gemini and Anthropic.
-    sub_sys_content = (
-        f"{inject_root_instructions()}\n\n"
-        "### SUBAGENT EXECUTION PROTOCOL\n"
-        "You are an ephemeral, isolated Subagent worker spawned by the Supervisor (NexusAgent).\n"
-        "1. Read any relevant `Section Instructions.md` and Vault notes needed to execute your assigned task thoroughly.\n"
-        "2. Return a concise, high-signal, grounded synthesis of your findings in your final response "
-        "so the Supervisor can integrate your work directly."
-    )
-
-    # Run ReAct loop until the subagent finishes tool calls and returns its synthesis
-    sub_messages: list[BaseMessage] = [
-        _build_system_message(sub_sys_content, sub_resolved["provider"]),
-        HumanMessage(content=task_prompt),
-    ]
-    turn_idx = 0
 
     sub_thread_id = f"{parent_thread}:{sub_id}" if parent_thread else sub_id
     sub_ctx_token = set_hitl_execution_context(
@@ -754,12 +755,68 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
         agent_id=sub_id,
         agent_role=f"Subagent #{serial} ({effective_tier})",
     )
+    subagent_timeout_s = max(30.0, float(getattr(settings, "nexus_subagent_timeout", 900) or 900))
+    tool_timeout_s = max(15.0, float(getattr(settings, "nexus_tool_timeout", 120) or 120))
+    deadline = t0 + subagent_timeout_s
 
     try:
+        # Resolve and pre-hydrate any requested `context_files` before building/invoking the subagent LLM.
+        # If any path is hallucinated/missing on disk, fail fast and surface real sibling files to the Commander.
+        effective_task_prompt = task_prompt
+        if context_files:
+            prehydrated_block, hydration_error = hydrate_subagent_context_files(context_files)
+            if hydration_error:
+                err_report = (
+                    f"❌ Subagent #{serial} ({effective_tier} · {sub_model_name}) aborted before execution:\n\n"
+                    f"{hydration_error}"
+                )
+                local_tracer.tool_error("spawn_subagent", err_report)
+                local_tracer.agent_end("Aborted (fail-fast): unresolved context_files")
+                return err_report
+            if prehydrated_block:
+                effective_task_prompt = (
+                    f"{prehydrated_block}\n\n"
+                    f"---\n\n"
+                    f"# Assigned Subagent Task\n\n{task_prompt}"
+                )
+
+        # Build an ephemeral, stateless subagent client (no checkpointer needed; lives only for this subtask)
+        sub_base_llm = get_chat_model(tier=sub_tier_arg, temperature=0.0)
+        sub_llm = sub_base_llm.bind_tools(CORE_TOOLS)
+        # handle_tool_errors=True: Prebuilt LangGraph handler that intercepts unhandled tool exceptions
+        # (e.g. HttpError 404/500, network disconnects, file locks) and wraps them into a ToolMessage(status="error")
+        # rather than raising through ToolNode.invoke() and terminating the subagent turn mid-flight.
+        sub_tool_node = ToolNode(CORE_TOOLS, handle_tool_errors=True)
+
+        # Static subagent system prefix (no per-subagent serial numbers) so parallel and sequential subagents
+        # share the exact same byte-identical prefix for Turn-1 KV prompt caching across Gemini and Anthropic.
+        sub_sys_content = (
+            f"{inject_root_instructions()}\n\n"
+            "### SUBAGENT EXECUTION PROTOCOL\n"
+            "You are an ephemeral, isolated Subagent worker spawned by the Supervisor (NexusAgent).\n"
+            "1. Read any relevant `Section Instructions.md` and Vault notes needed to execute your assigned task thoroughly.\n"
+            "2. Return a concise, high-signal, grounded synthesis of your findings in your final response "
+            "so the Supervisor can integrate your work directly."
+        )
+
+        # Run ReAct loop until the subagent finishes tool calls and returns its synthesis
+        sub_messages: list[BaseMessage] = [
+            _build_system_message(sub_sys_content, sub_resolved["provider"]),
+            HumanMessage(content=effective_task_prompt),
+        ]
+        turn_idx = 0
+
         while True:
             # Cancellation guard: abort subagent immediately if the parent turn was stopped by user
             if is_thread_cancelled(parent_convo) or is_thread_cancelled(parent_thread):
                 raise InterruptedError(f"Subagent #{serial} execution stopped by user via Stop & Revert.")
+
+            # Wall-clock deadline guard: fail cleanly with partial context if a subagent runs past its budget
+            remaining_s = deadline - time.time()
+            if remaining_s <= 0:
+                raise TimeoutError(
+                    f"Subagent #{serial} exceeded wall-clock budget of {int(subagent_timeout_s)}s after {turn_idx} turn(s)."
+                )
 
             turn_idx += 1
             local_tracer.llm_call(metadata={"turn": turn_idx, "model_tier": effective_tier, "model_name": sub_model_name})
@@ -792,35 +849,91 @@ def spawn_subagent(task_prompt: str, model_tier: ModelTier = "low") -> str:
                 tc_id = tc.get("id")
                 local_tracer.tool_call(tc_name, tc.get("args", {}), call_id=tc_id)
 
-            tool_res = _invoke_tool_node_resilient(sub_tool_node, {"messages": sub_messages})
+            batch_timeout = min(tool_timeout_s, max(5.0, deadline - time.time()))
+            tool_res = _invoke_tool_node_resilient(
+                sub_tool_node,
+                {"messages": sub_messages},
+                timeout_seconds=batch_timeout,
+            )
             for t_msg in tool_res.get("messages", []):
                 t_name = getattr(t_msg, "name", "unknown")
                 t_call_id = getattr(t_msg, "tool_call_id", None)
                 t_content = extract_message_text(t_msg)
-                local_tracer.tool_result(t_name, t_content, call_id=t_call_id)
+                if getattr(t_msg, "status", None) == "error":
+                    local_tracer.tool_error(t_name, t_content, call_id=t_call_id)
+                else:
+                    local_tracer.tool_result(t_name, t_content, call_id=t_call_id)
                 sub_messages.append(t_msg)
+    except InterruptedError:
+        elapsed_sub = round(time.time() - t0, 2)
+        local_tracer.agent_end(f"Stopped by user after {elapsed_sub:.1f}s")
+        raise
+    except Exception as exc:
+        elapsed_sub = round(time.time() - t0, 2)
+        err_report = f"❌ Subagent #{serial} ({effective_tier} · {sub_model_name}) failed after {elapsed_sub:.1f}s: {exc}"
+        local_tracer.tool_error("spawn_subagent", err_report)
+        local_tracer.agent_end(f"Failed after {elapsed_sub:.1f}s: {exc}")
+        return err_report
     finally:
         reset_hitl_execution_context(sub_ctx_token)
         reset_trace_thread_id(trace_token)
 
 
-# ── Helper: Resilient ToolNode Execution with Synchronous In-Thread Fallback ─
+# ── Helper: Resilient ToolNode Execution with Timeout & Synchronous Fallback ─
+
+def _build_timeout_tool_messages(state_or_input: dict[str, Any], timeout_seconds: float) -> list[ToolMessage]:
+    """Synthesize error `ToolMessage`s for every pending tool call in the trailing `AIMessage` on timeout."""
+    messages = state_or_input.get("messages", [])
+    last_ai = messages[-1] if messages else None
+    tool_calls = getattr(last_ai, "tool_calls", None) or []
+    error_msgs: list[ToolMessage] = []
+    for tc in tool_calls:
+        tc_name = tc.get("name", "unknown")
+        tc_id = tc.get("id") or "timeout_call"
+        error_msgs.append(
+            ToolMessage(
+                content=f"Error: Tool '{tc_name}' timed out after {int(timeout_seconds)}s without returning a response.",
+                name=tc_name,
+                tool_call_id=tc_id,
+                status="error",
+            )
+        )
+    return error_msgs
+
 
 # `node: ToolNode` is the LangGraph tool runner (`sub_tool_node` for subagents or `tool_node` for the parent agent).
 # `state_or_input: dict[str, Any]` is the state dict containing `"messages"` whose trailing `AIMessage` holds `tool_calls`.
+# `timeout_seconds: Optional[float]` optionally caps wall-clock wait for the tool batch, detaching hung threads cleanly.
 # `-> dict[str, Any]` returns `{"messages": [ToolMessage, ...]}` matching `ToolNode.invoke()` output shape.
-def _invoke_tool_node_resilient(node: ToolNode, state_or_input: dict[str, Any]) -> dict[str, Any]:
-    """Execute a LangGraph `ToolNode` with an automatic synchronous in-thread fallback if the thread pool is shut down.
+def _invoke_tool_node_resilient(
+    node: ToolNode,
+    state_or_input: dict[str, Any],
+    timeout_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    """Execute a LangGraph `ToolNode` with bounded timeout protection and synchronous shutdown fallback.
 
-    Why this safeguard exists:
-    `ToolNode.invoke()` always dispatches tool calls through `ContextThreadPoolExecutor` (`concurrent.futures.ThreadPoolExecutor`).
-    When `uvicorn --reload` detects a `.py` file edit and initiates worker shutdown, Python's `threading._register_atexit(_python_exit)`
-    flags active `ThreadPoolExecutor` instances as `_shutdown = True` before daemon request threads finish.
-    Any subsequent `ToolNode.invoke()` call raises `RuntimeError('cannot schedule new futures after shutdown')`.
-    Catching that specific executor shutdown error and running the requested `@tool` callables sequentially on the current
-    thread allows synchronous tools (`read_file`, `search_vault`, `modify_file`) to complete cleanly instead of crashing mid-turn.
+    Why both safeguards exist:
+    1. Bounded timeout: If a tool blocks indefinitely on an external socket or C extension, waiting with
+       `executor.shutdown(wait=False)` prevents a single hung call from freezing the FastAPI worker thread forever,
+       returning structured `ToolMessage(status='error')` responses so the agent/GUI sees an explicit error.
+    2. Shutdown fallback: When `uvicorn --reload` flags `ThreadPoolExecutor` instances as `_shutdown = True`,
+       `ToolNode.invoke()` raises `RuntimeError('cannot schedule new futures after shutdown')`; running tools
+       sequentially on the current OS thread lets synchronous operations complete cleanly.
     """
     try:
+        if timeout_seconds is not None and timeout_seconds > 0:
+            # Copy ContextVars into the timeout wrapper thread so trace_thread_id and HITL context propagate cleanly
+            ctx = contextvars.copy_context()
+            executor = ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(ctx.run, node.invoke, state_or_input)
+            try:
+                res = future.result(timeout=timeout_seconds)
+                executor.shutdown(wait=False)
+                return res
+            except FuturesTimeoutError:
+                # Never call `shutdown(wait=True)` on timeout, or the caller blocks until the hung tool exits
+                executor.shutdown(wait=False, cancel_futures=True)
+                return {"messages": _build_timeout_tool_messages(state_or_input, timeout_seconds)}
         return node.invoke(state_or_input)
     except RuntimeError as exc:
         if "cannot schedule new futures after" not in str(exc).lower():
@@ -1053,12 +1166,26 @@ def traced_tool_node(state: NexusAgentState) -> dict:
     if is_thread_cancelled(thread_id):
         raise InterruptedError(f"Tool execution for thread '{thread_id}' stopped by user.")
 
-    result = _invoke_tool_node_resilient(tool_node, state)
+    # Use subagent timeout budget if this batch includes `spawn_subagent`, otherwise use per-tool timeout
+    messages = state.get("messages", [])
+    last_ai = messages[-1] if messages else None
+    pending_calls = getattr(last_ai, "tool_calls", None) or []
+    has_subagent = any(tc.get("name") == "spawn_subagent" for tc in pending_calls)
+    batch_timeout = (
+        float(getattr(settings, "nexus_subagent_timeout", 900) or 900) + 30.0
+        if has_subagent
+        else float(getattr(settings, "nexus_tool_timeout", 120) or 120)
+    )
+
+    result = _invoke_tool_node_resilient(tool_node, state, timeout_seconds=batch_timeout)
     for msg in result.get("messages", []):
         tool_name = getattr(msg, "name", "unknown")
         call_id = getattr(msg, "tool_call_id", None)
         content = extract_message_text(msg)
-        nexus_tracer.tool_result(tool_name, content, call_id=call_id)
+        if getattr(msg, "status", None) == "error":
+            nexus_tracer.tool_error(tool_name, content, call_id=call_id)
+        else:
+            nexus_tracer.tool_result(tool_name, content, call_id=call_id)
 
     # Post-tool cancellation check
     if is_thread_cancelled(thread_id):

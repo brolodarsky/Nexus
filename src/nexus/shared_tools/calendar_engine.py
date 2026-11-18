@@ -36,7 +36,7 @@ SECRETS_DIR: str = str(PROJECT_ROOT / ".secrets")
 TOKEN_FILENAME: str = "token_calendar.json"
 
 
-def get_calendar_service() -> Resource:
+def get_calendar_service(allow_interactive: bool = False) -> Resource:
     """
     Authenticate and build the Google Calendar Resource client.
     
@@ -48,6 +48,8 @@ def get_calendar_service() -> Resource:
         scopes=CALENDAR_SCOPES,
         secrets_dir=SECRETS_DIR,
         token_filename=TOKEN_FILENAME,
+        allow_interactive=allow_interactive,
+        auth_hint="Run `.venv\\Scripts\\python.exe -m nexus.shared_tools.calendar_engine --auth` in a terminal.",
     )
     # 2. Build the discovery service client for Calendar v3
     return build("calendar", "v3", credentials=creds)
@@ -335,7 +337,7 @@ def main():
 
     if args.auth:
         print("[Nexus] Authenticating Google Calendar...")
-        service = get_calendar_service()
+        service = get_calendar_service(allow_interactive=True)
         print("[Nexus] Calendar authentication successful! Token stored at .secrets/token_calendar.json")
         return
 

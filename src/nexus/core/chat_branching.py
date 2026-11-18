@@ -21,6 +21,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from nexus.agent.graph import extract_message_text, nexus_graph
 from nexus.core.chats_db import (
     create_branch_conversation,
+    create_conversation,
     get_chat_history,
     get_conversation,
     log_message,
@@ -107,10 +108,17 @@ def seed_langgraph_thread_from_messages(conversation_id: str, messages: list[dic
 
     # If the seeded slice starts with an AIMessage (e.g., a Parent Context Brief), prepend a lightweight
     # HumanMessage anchor so strict turn-alternating LLM providers (Gemini/Anthropic) never reject Message #0.
+    # Also remind the child agent that domain Section Instructions and living notes are NOT yet hydrated.
     if lc_messages and isinstance(lc_messages[0], AIMessage):
         lc_messages.insert(
             0,
-            HumanMessage(content="[Session initialized from parent conversation branch context]"),
+            HumanMessage(
+                content=(
+                    "[Session initialized from parent conversation branch context — Note: Section Instructions "
+                    "and living notes are NOT yet loaded in this thread. Hydrate target section files from disk "
+                    "before mutating state or delegating.]"
+                )
+            ),
         )
 
     config = {"configurable": {"thread_id": conversation_id, "conversation_id": conversation_id}}
@@ -410,6 +418,158 @@ def fork_conversation(
         "parent_conversation_id": parent_conversation_id,
         "parent_message_id": resolved_fork_msg_id,
         "branch_mode": effective_mode,
+    }
+
+
+# `title: str` is the human-readable sidebar label for the new conversation.
+# `context_brief: str` is the Markdown handoff brief seeded as the opening context of the fresh thread.
+# `parent_conversation_id: Optional[str]` identifies the active conversation spawning this thread (None if headless/root).
+# `nest_under_parent: bool` nests the thread as a child branch under `parent_conversation_id` when True, or creates a root thread when False.
+# `parent_message_id: Optional[int]` optionally pins the branch to a specific parent message row ID; falls back to the latest parent message.
+# `target_section: Optional[str]` optionally appends a live `get_directory_tree(..., show_files=True)` snapshot to the seeded brief.
+# `-> dict[str, Any]` returns the created conversation UUID, metadata row, seeded messages list, and path verification metadata.
+def spawn_seeded_conversation(
+    title: str,
+    context_brief: str,
+    parent_conversation_id: Optional[str] = None,
+    nest_under_parent: bool = True,
+    parent_message_id: Optional[int] = None,
+    target_section: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Creates and seeds a brand-new conversation thread ready for an independent discussion ("seed & wait").
+
+    Unlike `fork_conversation`, which copies or summarizes an existing thread turn, this helper is called
+    directly by agents (Head Agent or `spawn_subagent` workers) to spin up fresh, focused context windows
+    (e.g., splitting a multi-category email sweep into dedicated per-topic conversations) without executing
+    an immediate LLM turn.
+
+    Persistence guarantees:
+      1. Writes the conversation row to `chats.db` with `title_source="manual"` so Turn-1 auto-titling never
+         overwrites the agent-curated category title.
+      2. Appends an optional live `target_section` directory tree snapshot and runs a deterministic path/wiki-link
+         lint pass (`verify_context_brief_paths`), appending `[SYSTEM WARNING: ...]` if any phantom files appear.
+      3. Logs the seeded brief with `agent="branch_context"` so future `Distill & Merge` or auto-titling
+         treats it identically to a Context Brief rather than an ordinary assistant turn.
+      4. Seeds LangGraph's `SqliteSaver` (`memory.sqlite`) via `seed_langgraph_thread_from_messages` so the
+         user's first prompt inside the new conversation has full context immediately.
+    """
+    from nexus.shared_tools.vault_reader import get_directory_tree, verify_context_brief_paths
+
+    cleaned_brief = (context_brief or "").strip()
+    if not cleaned_brief:
+        raise ValueError("context_brief cannot be empty when spawning a conversation.")
+
+    cleaned_title = (title or "").strip() or "New Discussion"
+
+    # Run deterministic filesystem verification on the caller-authored brief before appending directory snapshots.
+    missing_files = verify_context_brief_paths(cleaned_brief)
+    warning_block: Optional[str] = None
+    if missing_files:
+        warning_block = (
+            f"[SYSTEM WARNING: The following files referenced in this brief do not exist on disk: "
+            f"{', '.join(missing_files)}. Verify actual files via get_directory_structure before proceeding.]"
+        )
+
+    # Optionally snapshot a target Vault section's live file tree so Turn 1 sees exact on-disk filenames immediately.
+    clean_section: Optional[str] = None
+    section_block: Optional[str] = None
+    section_warning: Optional[str] = None
+    if target_section and target_section.strip():
+        raw_section = target_section.strip().replace("\\", "/")
+        if raw_section.startswith("Vault/"):
+            raw_section = raw_section[len("Vault/"):]
+        clean_section = raw_section.rstrip("/") or None
+        if clean_section:
+            tree_output = get_directory_tree(path=clean_section, show_files=True)
+            if tree_output.startswith("Error:"):
+                section_warning = (
+                    f"[SYSTEM WARNING: Could not snapshot target_section '{target_section}': {tree_output}]"
+                )
+                section_block = section_warning
+            else:
+                section_block = (
+                    f"### 📁 Target Section Directory Snapshot (`{clean_section}`)\n"
+                    f"```\n{tree_output}\n```"
+                )
+
+    # Resolve whether this new conversation should nest as a child branch in `ChatSidebar` or start at root level
+    parent_conv = get_conversation(parent_conversation_id) if (nest_under_parent and parent_conversation_id) else None
+
+    if parent_conv is not None and parent_conversation_id:
+        display_title = cleaned_title if cleaned_title.startswith("🌿") else f"🌿 {cleaned_title}"
+        # Anchor the child branch to the caller's latest committed message if no explicit message ID was supplied
+        resolved_parent_msg_id = parent_message_id
+        if resolved_parent_msg_id is None:
+            parent_history = get_chat_history(parent_conversation_id)
+            if parent_history:
+                resolved_parent_msg_id = parent_history[-1].get("id")
+
+        effective_parent_id: Optional[str] = parent_conversation_id
+        effective_branch_mode: Optional[str] = "tangent"
+        new_conv_id = create_branch_conversation(
+            title=display_title,
+            parent_conversation_id=parent_conversation_id,
+            parent_message_id=resolved_parent_msg_id,
+            branch_mode=effective_branch_mode,
+            # Mark agent-curated category names as `"manual"` so Turn-1 auto-titling preserves them
+            title_source="manual",
+        )
+        parent_label = parent_conv.get("title") or "Parent Chat"
+        formatted_brief = (
+            cleaned_brief
+            if cleaned_brief.startswith("### ")
+            else f"### 🌿 Context Brief *(spawned from \"{parent_label}\")*\n\n{cleaned_brief}"
+        )
+    else:
+        display_title = cleaned_title
+        effective_parent_id = None
+        resolved_parent_msg_id = None
+        effective_branch_mode = None
+        new_conv_id = create_conversation(
+            title=display_title,
+            # Preserve the explicit topic title across subsequent user turns
+            title_source="manual",
+        )
+        formatted_brief = (
+            cleaned_brief
+            if cleaned_brief.startswith("### ")
+            else f"### 📋 Context Brief — *{display_title}*\n\n{cleaned_brief}"
+        )
+
+    if section_block:
+        formatted_brief = f"{formatted_brief}\n\n{section_block}"
+    if warning_block:
+        formatted_brief = f"{formatted_brief}\n\n{warning_block}"
+
+    # Persist the brief as a synthetic `branch_context` entry in `chats.db` so UI displays it cleanly on open
+    log_message(
+        role="assistant",
+        content=formatted_brief,
+        agent="branch_context",
+        domain=None,
+        confidence=1.0,
+        trace=[],
+        conversation_id=new_conv_id,
+    )
+
+    # Read back persisted history and hydrate LangGraph `memory.sqlite` checkpointer for immediate Turn-1 continuity
+    seeded_history = get_chat_history(new_conv_id)
+    seed_langgraph_thread_from_messages(new_conv_id, seeded_history)
+    new_conv = get_conversation(new_conv_id)
+
+    return {
+        "conversation_id": new_conv_id,
+        "title": display_title,
+        "conversation": new_conv,
+        "messages": seeded_history,
+        "parent_conversation_id": effective_parent_id,
+        "parent_message_id": resolved_parent_msg_id,
+        "branch_mode": effective_branch_mode,
+        "target_section": clean_section,
+        "section_warning": section_warning,
+        "missing_files": missing_files,
+        "warning_block": warning_block,
     }
 
 

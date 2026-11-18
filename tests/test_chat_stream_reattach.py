@@ -261,3 +261,36 @@ def test_safe_json_dumps_sanitizes_non_finite_floats_and_paths():
     assert parsed["event"]["nested"][0]["confidence"] is None
     assert parsed["event"]["nested"][0]["path"] == str(Path("Vault/note.md"))
 
+
+def test_stream_failure_persists_assistant_error_and_emits_terminal_error(client: TestClient, temp_conv: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify unhandled agent exceptions emit SSE 'error' AND persist an assistant error message + trace in chats.db."""
+    monkeypatch.setattr("nexus.core.run_logger.RUNS_DIR", tmp_path / "runs")
+
+    def failing_agent(query: str, thread_id: str, model_tier=None, images=None):
+        tracer = AgentTracer("NexusAgent", color="cyan", agent_id="nexus", thread_id=thread_id)
+        tracer.agent_start(f"Query: {query}")
+        tracer.tool_call("fetch_emails", args={"query": "label:Jobs"})
+        raise RuntimeError("Gmail gateway timed out")
+
+    with patch("nexus.agent.api.run_nexus_agent_with_trace", side_effect=failing_agent), patch(
+        "nexus.api.routers.agents.schedule_auto_title"
+    ):
+        with client.stream(
+            "POST",
+            "/api/agents/ask/stream",
+            json={"query": "sweep emails", "conversation_id": temp_conv, "model_tier": "low"},
+        ) as resp:
+            assert resp.status_code == 200
+            raw_lines = [line for line in resp.iter_lines() if line]
+
+    events = _parse_sse_events(raw_lines)
+    assert events[-1]["type"] == "error"
+    assert "Gmail gateway timed out" in events[-1]["message"]
+
+    history = get_chat_history(temp_conv, include_trace=True)
+    assert len(history) == 2
+    assert history[1]["role"] == "assistant"
+    assert "Gmail gateway timed out" in history[1]["content"]
+    assert history[1]["has_trace"] is True
+    assert any(t.get("type") == "error" for t in history[1]["trace"])
+

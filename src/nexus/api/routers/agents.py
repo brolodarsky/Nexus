@@ -10,8 +10,10 @@ import math
 import mimetypes
 from pathlib import Path
 import queue
+import sys
 import threading
 import time
+import traceback
 import uuid
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -763,11 +765,50 @@ def _run_pipeline(
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
     except Exception as e:
+        err_now = datetime.now(timezone.utc).isoformat()
+        err_text = f"Agent execution failed: {str(e)}"
+        print(f"[Nexus] Unhandled error in conversation {conversation_id}: {e}", file=sys.stderr, flush=True)
+        traceback.print_exc()
+
+        # Record the failure in trace history so both live Thinking Panel and persisted DB traces preserve the error
+        active_run.publish_trace({
+            "type": "error",
+            "agent": "NexusAgent",
+            "agent_id": "nexus",
+            "thread_id": conversation_id,
+            "message": err_text,
+            "timestamp": err_now,
+        })
+
+        # Persist assistant error reply + trace to chats.db and logs/runs/ if not cancelled via Stop & Revert
+        if not is_thread_cancelled(conversation_id) and not active_run.is_stopped:
+            try:
+                captured_traces = active_run.snapshot_trace()
+                log_message(
+                    role="assistant",
+                    content=f"❌ {err_text}",
+                    agent="nexus",
+                    trace=captured_traces,
+                    conversation_id=conversation_id,
+                )
+                schedule_auto_title(conversation_id)
+                log_run(
+                    agent_name="nexus",
+                    query=effective_query,
+                    response=f"❌ {err_text}",
+                    thread_id=conversation_id,
+                    trace_events=captured_traces,
+                    latency_seconds=time.time() - t0,
+                    metadata={"error": str(e)},
+                )
+            except Exception as persist_exc:
+                print(f"[Nexus] Failed to persist error state for {conversation_id}: {persist_exc}", file=sys.stderr)
+
         # Push terminal 'error' event to every active/re-attached SSE subscriber on failure
         active_run.publish_terminal({
             "type": "error",
-            "message": f"Agent execution failed: {str(e)}",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message": err_text,
+            "timestamp": err_now,
         })
     finally:
         # Ensure any attached subscriber unblocks even if the worker exited early on cancellation

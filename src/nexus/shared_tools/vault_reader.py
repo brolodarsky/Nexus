@@ -4,11 +4,12 @@ No LangChain @tool decorators here. These functions can be used by any agent, CL
 """
 import argparse
 from datetime import datetime, time, timedelta
+import difflib
 import os
 import re
 import sys
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from nexus.core.constants import IGNORE_DIRS, VAULT_PATH
 
@@ -503,6 +504,309 @@ def resolve_vault_note_path(note_path: str, domain_path: Optional[str] = None) -
         rel_paths = [str(p.relative_to(resolved_vault)).replace("\\", "/") for p in found_paths]
         scope = f" in {domain_path}" if domain_path else ""
         return None, f"Multiple files found for {note_path}{scope}. Please be more specific. Matches:\n" + "\n".join(rel_paths)
+
+
+def _parse_frontmatter_aliases(content: str) -> List[str]:
+    """Extract note aliases from YAML frontmatter (`aliases: [A, B]` or `aliases:\\n  - A`) for wiki-link resolution."""
+    fm_match = re.match(r'^---\s*\r?\n(.*?)\r?\n---', content, re.DOTALL)
+    if not fm_match:
+        return []
+
+    frontmatter = fm_match.group(1)
+    # Inline YAML array syntax: aliases: [Alias One, Alias Two]
+    inline_match = re.search(r'^aliases:\s*\[([^\]]*)\]', frontmatter, re.MULTILINE)
+    if inline_match:
+        return [a.strip().strip('"').strip("'") for a in inline_match.group(1).split(',') if a.strip()]
+
+    # Multi-line YAML bullet list syntax: aliases:\n  - Alias One
+    list_match = re.search(r'^aliases:\s*\r?\n((?:\s+-\s+.*\r?\n?)+)', frontmatter, re.MULTILINE)
+    if list_match:
+        aliases: List[str] = []
+        for line in list_match.group(1).strip().splitlines():
+            stripped = line.strip()
+            if stripped.startswith('- '):
+                val = stripped[2:].strip().strip('"').strip("'")
+                if val:
+                    aliases.append(val)
+        return aliases
+    return []
+
+
+# -> Dict[str, Any] returns normalized lookup sets/lists built from a single Vault walk for fast path/wiki-link verification.
+def _build_vault_file_index() -> Dict[str, Any]:
+    """Builds an in-memory index of all Vault relative paths, basenames, stems, and YAML frontmatter aliases."""
+    resolved_vault = VAULT_PATH.resolve()
+    rel_paths: List[str] = []
+    rel_paths_lower: Set[str] = set()
+    rel_stems_lower: Set[str] = set()
+    basenames: List[str] = []
+    basenames_lower: Set[str] = set()
+    stems_lower: Set[str] = set()
+    aliases_lower: Set[str] = set()
+
+    if not resolved_vault.exists():
+        return {
+            "rel_paths": rel_paths,
+            "rel_paths_lower": rel_paths_lower,
+            "rel_stems_lower": rel_stems_lower,
+            "basenames": basenames,
+            "basenames_lower": basenames_lower,
+            "stems_lower": stems_lower,
+            "aliases_lower": aliases_lower,
+        }
+
+    for root, dirs, files in os.walk(resolved_vault):
+        # Prune ignored/non-Vault directories in-place so os.walk skips .git, .obsidian, etc.
+        dirs[:] = [
+            d for d in dirs
+            if d not in IGNORE_DIRS
+            and (Path(root) / d).resolve().is_relative_to(resolved_vault)
+        ]
+        for file in files:
+            if file.startswith("."):
+                continue
+            filepath = (Path(root) / file).resolve()
+            if not filepath.is_relative_to(resolved_vault):
+                continue
+
+            rel_str = str(filepath.relative_to(resolved_vault)).replace("\\", "/")
+            rel_low = rel_str.lower()
+            base_low = file.lower()
+            rel_paths.append(rel_str)
+            rel_paths_lower.add(rel_low)
+            basenames.append(file)
+            basenames_lower.add(base_low)
+
+            if base_low.endswith(".md"):
+                stems_lower.add(base_low[:-3])
+                rel_stems_lower.add(rel_low[:-3])
+                # Read only the leading 4 KB head to extract YAML frontmatter aliases without loading large note bodies.
+                try:
+                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                        head = f.read(4096)
+                    for alias in _parse_frontmatter_aliases(head):
+                        aliases_lower.add(alias.lower())
+                except OSError:
+                    pass
+
+    return {
+        "rel_paths": sorted(rel_paths),
+        "rel_paths_lower": rel_paths_lower,
+        "rel_stems_lower": rel_stems_lower,
+        "basenames": sorted(set(basenames)),
+        "basenames_lower": basenames_lower,
+        "stems_lower": stems_lower,
+        "aliases_lower": aliases_lower,
+    }
+
+
+# `note_path: str` is an unresolved Vault path or filename; `max_matches: int` caps fuzzy fallback suggestions.
+# -> Dict[str, Any] returns nearest existing parent directory listing + closest matching filenames on disk.
+def find_nearest_directory_and_matches(note_path: str, max_matches: int = 8) -> Dict[str, Any]:
+    """Finds the nearest existing Vault parent directory listing and similar filenames for a missing path."""
+    if not note_path or not note_path.strip():
+        return {"nearest_dir": None, "directory_listing": None, "similar_files": []}
+
+    clean = note_path.strip().replace("\\", "/")
+    if (
+        clean.startswith("/")
+        or os.path.isabs(clean)
+        or bool(re.match(r"^[a-zA-Z]:", clean))
+        or Path(clean).is_absolute()
+        or bool(Path(clean).drive)
+    ):
+        return {"nearest_dir": None, "directory_listing": None, "similar_files": []}
+
+    if clean.startswith("Vault/"):
+        clean = clean[6:]
+    clean = clean.lstrip("/")
+
+    resolved_vault = VAULT_PATH.resolve()
+    candidate = (resolved_vault / clean).resolve()
+    if not candidate.is_relative_to(resolved_vault):
+        return {"nearest_dir": None, "directory_listing": None, "similar_files": []}
+
+    # Walk upward from the target's parent until we hit an existing directory inside the Vault.
+    nearest_dir: Optional[Path] = None
+    probe = candidate.parent
+    while probe != resolved_vault and probe.is_relative_to(resolved_vault):
+        if probe.exists() and probe.is_dir():
+            nearest_dir = probe
+            break
+        probe = probe.parent
+
+    nearest_rel: Optional[str] = None
+    directory_listing: Optional[str] = None
+    if nearest_dir is not None and nearest_dir != resolved_vault:
+        nearest_rel = str(nearest_dir.relative_to(resolved_vault)).replace("\\", "/")
+        raw_tree = get_directory_tree(path=nearest_rel, show_files=True, max_depth=2)
+        tree_lines = raw_tree.splitlines()
+        if len(tree_lines) > 40:
+            directory_listing = "\n".join(tree_lines[:40]) + f"\n... ({len(tree_lines) - 40} more entries omitted)"
+        else:
+            directory_listing = raw_tree
+
+    # Rank Vault files by token overlap + difflib similarity against the requested filename stem.
+    index = _build_vault_file_index()
+    req_base = os.path.basename(clean)
+    req_stem = req_base[:-3] if req_base.lower().endswith(".md") else os.path.splitext(req_base)[0]
+    req_tokens = {t for t in re.split(r"[^a-z0-9]+", req_stem.lower()) if len(t) >= 2}
+
+    scored: List[Tuple[float, str]] = []
+    for rel_p in index["rel_paths"]:
+        cand_base = os.path.basename(rel_p)
+        cand_stem = cand_base[:-3] if cand_base.lower().endswith(".md") else os.path.splitext(cand_base)[0]
+        cand_tokens = {t for t in re.split(r"[^a-z0-9]+", cand_stem.lower()) if len(t) >= 2}
+        overlap = len(req_tokens & cand_tokens)
+        seq_ratio = difflib.SequenceMatcher(None, req_stem.lower(), cand_stem.lower()).ratio()
+        if overlap > 0 or seq_ratio >= 0.45:
+            # Weight token overlap strongly so shared domain words (e.g. "Resume") surface canonical notes first.
+            scored.append((overlap * 2.0 + seq_ratio, rel_p))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    similar_files = [item[1] for item in scored[:max_matches]]
+
+    return {
+        "nearest_dir": nearest_rel,
+        "directory_listing": directory_listing,
+        "similar_files": similar_files,
+    }
+
+
+_TEMPLATE_HINT_CHARS = set("*?<>{}")
+_PROSE_LEAD_WORDS_RE = re.compile(
+    r"^(?:use|read|see|check|open|edit|update|create|write|inspect|review|hydrate|"
+    r"compare|using|via|from|with|and|or|to|in|for|on|at|into|against|including|"
+    r"between|both|plus|then)\s+",
+    re.IGNORECASE,
+)
+
+
+# `context_brief: str` is the Markdown handoff text passed to `spawn_conversation`.
+# -> List[str] returns deduplicated broken `[[Wiki-Links]]` or `.md`/`.pdf`/`.docx` references not found on disk.
+def verify_context_brief_paths(context_brief: str) -> List[str]:
+    """Scans a conversation context brief for `[[Wiki-Links]]` and `.md`/`.pdf`/`.docx` paths absent from the Vault."""
+    if not context_brief or not context_brief.strip():
+        return []
+
+    index = _build_vault_file_index()
+    # Include explicit "Vault/<rel_path>" forms alongside "<rel_path>" and basenames, longest-first,
+    # so wrong-folder paths like "2. Health/Resume - Master.md" never falsely match bare basenames after '/'.
+    known_variants = (
+        set(index["rel_paths"])
+        | {f"Vault/{p}" for p in index["rel_paths"]}
+        | set(index["basenames"])
+    )
+    known_suffixes = sorted(known_variants, key=len, reverse=True)
+    known_suffixes_lower = [s.lower() for s in known_suffixes]
+
+    def _should_ignore(raw: str) -> bool:
+        val = raw.strip()
+        if not val or val.startswith(("#", "http://", "https://", "mailto:", "file://")):
+            return True
+        if any(ch in _TEMPLATE_HINT_CHARS for ch in val):
+            return True
+        if "YYYY-MM-DD" in val or val.lower() in (".md", ".pdf", ".docx"):
+            return True
+        return False
+
+    def _is_valid_ref(raw: str, allow_stem_or_alias: bool) -> bool:
+        norm = raw.strip().strip("`\"'").replace("\\", "/").lstrip("./")
+        if norm.startswith("Vault/"):
+            norm = norm[6:]
+        low = norm.lower()
+        if "/" in low:
+            if low in index["rel_paths_lower"]:
+                return True
+            return allow_stem_or_alias and (low in index["rel_stems_lower"])
+        if low in index["basenames_lower"]:
+            return True
+        return allow_stem_or_alias and (low in index["stems_lower"] or low in index["aliases_lower"])
+
+    missing: List[str] = []
+    seen_missing_lower: Set[str] = set()
+
+    def _record_missing(candidate: str) -> None:
+        cleaned = candidate.strip().strip("`\"'")
+        key = cleaned.lower()
+        if cleaned and key not in seen_missing_lower:
+            seen_missing_lower.add(key)
+            missing.append(cleaned)
+
+    # Mask URLs upfront so external web links ending in .md/.pdf/.docx are never treated as Vault filenames.
+    scan_text = re.sub(r"https?://[^\s)\]>]+", lambda m: " " * len(m.group(0)), context_brief)
+
+    # 1. Scan Obsidian [[Wiki-Links]] (stripping |Display Alias and #Heading Anchor)
+    def _scan_wikilink(match: re.Match) -> str:
+        inner = match.group(1)
+        target = inner.split("|", 1)[0].split("#", 1)[0].strip()
+        if not _should_ignore(target) and not _is_valid_ref(target, allow_stem_or_alias=True):
+            _record_missing(target)
+        return " " * len(match.group(0))
+
+    scan_text = re.sub(r"\[\[([^\[\]\n]+?)\]\]", _scan_wikilink, scan_text)
+
+    # 2. Scan Markdown links [label](target.ext)
+    def _scan_md_link(match: re.Match) -> str:
+        target = match.group(1).strip()
+        if not _should_ignore(target) and not _is_valid_ref(target, allow_stem_or_alias=False):
+            _record_missing(target)
+        return " " * len(match.group(0))
+
+    scan_text = re.sub(r"\[[^\]\n]*\]\(([^)\n]+?\.(?:md|pdf|docx))\)", _scan_md_link, scan_text, flags=re.IGNORECASE)
+
+    # 3. Scan inline-code backticked references `path/to/file.ext`
+    def _scan_backtick(match: re.Match) -> str:
+        target = match.group(1).strip()
+        if not _should_ignore(target) and not _is_valid_ref(target, allow_stem_or_alias=False):
+            _record_missing(target)
+        return " " * len(match.group(0))
+
+    scan_text = re.sub(r"`([^`\n]+?\.(?:md|pdf|docx))`", _scan_backtick, scan_text, flags=re.IGNORECASE)
+
+    # 4. Scan remaining unquoted prose lines for `.md` / `.pdf` / `.docx` filename references
+    ext_re = re.compile(r"\.(?:md|pdf|docx)(?=$|[^A-Za-z0-9_])", re.IGNORECASE)
+    hard_delim_re = re.compile(r'[\[\]()`"\'*;|\n<>]')
+    prose_sep_re = re.compile(r"(?:^|[:;,]\s+)")
+
+    for line in scan_text.splitlines():
+        for ext_match in ext_re.finditer(line):
+            prefix = line[: ext_match.end()]
+            prefix_low = prefix.lower()
+
+            # Fast path: if a known real Vault file ends right at this extension on a non-slash boundary, it exists on disk.
+            matched_known = False
+            for known_low in known_suffixes_lower:
+                if prefix_low.endswith(known_low):
+                    boundary_idx = len(prefix_low) - len(known_low)
+                    if boundary_idx == 0 or prefix_low[boundary_idx - 1] in " \t:;,(\"'*":
+                        matched_known = True
+                        break
+            if matched_known:
+                continue
+
+            # Extract the candidate filename/path backward up to the nearest punctuation/markdown delimiter.
+            delim_matches = list(hard_delim_re.finditer(prefix))
+            start_idx = delim_matches[-1].end() if delim_matches else 0
+            cand = prefix[start_idx:]
+
+            sep_matches = list(prose_sep_re.finditer(cand))
+            if sep_matches:
+                cand = cand[sep_matches[-1].end() :]
+
+            cand = cand.lstrip(" -•\t")
+            # Strip leading prose verbs/prepositions (e.g. "Use Resume - Fake.md" -> "Resume - Fake.md").
+            while True:
+                stripped_cand = _PROSE_LEAD_WORDS_RE.sub("", cand)
+                if stripped_cand == cand:
+                    break
+                cand = stripped_cand
+
+            cand = cand.strip()
+            if not _should_ignore(cand) and not _is_valid_ref(cand, allow_stem_or_alias=False):
+                _record_missing(cand)
+
+    return missing
 
 
 def search_within(keyword: str, root_path: Optional[str] = None, tags: Optional[List[str]] = None) -> str:

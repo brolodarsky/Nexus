@@ -277,3 +277,229 @@ def test_agent_tracer_inherits_context_and_explicit_thread_id():
     finally:
         reset_trace_thread_id(token)
         unsub()
+
+
+def test_invoke_tool_node_resilient_timeout_returns_error_tool_messages():
+    """Verify _invoke_tool_node_resilient propagates LangGraph runtime context and detaches hung tools on timeout."""
+    import time
+    from langchain_core.messages import AIMessage
+    from langchain_core.tools import tool
+    from langgraph.graph import END, START, MessagesState, StateGraph
+    from langgraph.prebuilt import ToolNode
+    from nexus.agent.graph import _invoke_tool_node_resilient
+
+    @tool
+    def fast_tool() -> str:
+        """Returns quickly."""
+        return "fast_ok"
+
+    @tool
+    def hung_tool() -> str:
+        """Simulates a blocked external socket."""
+        time.sleep(1.5)
+        return "too late"
+
+    node = ToolNode([fast_tool, hung_tool], handle_tool_errors=True)
+    wf = StateGraph(MessagesState)
+    wf.add_node("tools", lambda s: _invoke_tool_node_resilient(node, s, timeout_seconds=0.15))
+    wf.add_edge(START, "tools")
+    wf.add_edge("tools", END)
+    app_graph = wf.compile()
+
+    # 1. Fast tool succeeds with runtime ContextVar propagated into timeout wrapper thread
+    fast_ai = AIMessage(
+        content="",
+        tool_calls=[{"name": "fast_tool", "args": {}, "id": "call_fast_1", "type": "tool_call"}],
+    )
+    fast_out = app_graph.invoke({"messages": [fast_ai]})
+    assert fast_out["messages"][-1].content == "fast_ok"
+
+    # 2. Hung tool times out promptly and yields structured error ToolMessage
+    hung_ai = AIMessage(
+        content="",
+        tool_calls=[{"name": "hung_tool", "args": {}, "id": "call_hang_1", "type": "tool_call"}],
+    )
+    t0 = time.time()
+    out = app_graph.invoke({"messages": [hung_ai]})
+    elapsed = time.time() - t0
+
+    assert elapsed < 1.0, f"Timeout wrapper blocked waiting for hung thread ({elapsed:.2f}s)"
+    last_msg = out["messages"][-1]
+    assert last_msg.status == "error"
+    assert last_msg.tool_call_id == "call_hang_1"
+    assert "timed out" in last_msg.content.lower()
+
+
+def test_spawn_subagent_emits_error_telemetry_and_returns_report_on_failure(monkeypatch: pytest.MonkeyPatch):
+    """Verify spawn_subagent catches unhandled LLM/tool failures, emits tool_error + agent_end, and returns an error report."""
+    from nexus.agent import graph as graph_mod
+
+    emitted = []
+    unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-subagent-err")
+    token = set_trace_thread_id("conv-subagent-err")
+    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-subagent-err", thread_id="conv-subagent-err")
+
+    monkeypatch.setattr(
+        graph_mod,
+        "_invoke_llm_with_resilience",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("Simulated API crash")),
+    )
+
+    try:
+        res = graph_mod.spawn_subagent.invoke({"task_prompt": "Test failure handling", "model_tier": "low"})
+    finally:
+        graph_mod.reset_hitl_execution_context(ctx_token)
+        reset_trace_thread_id(token)
+        unsub()
+
+    assert "failed" in res.lower()
+    assert "Simulated API crash" in res
+    event_types = [e["type"] for e in emitted]
+    assert "agent_start" in event_types
+    assert "tool_error" in event_types
+    assert "agent_end" in event_types
+
+
+def test_spawn_subagent_prehydrates_context_files_and_hitl_overlay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Verify `spawn_subagent(context_files=...)` resolves disk + staged HITL files and prepends `# Pre-Hydrated Disk Context`."""
+    from langchain_core.messages import AIMessage, HumanMessage
+    from nexus.agent import graph as graph_mod
+    import nexus.core.hitl_queue as hitl_mod
+    import nexus.shared_tools.shared as shared_mod
+    import nexus.shared_tools.vault_reader as vault_reader_mod
+
+    fake_vault = tmp_path / "Vault"
+    career_dir = fake_vault / "3. Operations" / "3.1. Career Strategy & Revenue"
+    career_dir.mkdir(parents=True)
+    (career_dir / "Resume - Master.md").write_text("BS in Computer Science\nPython, LangGraph", encoding="utf-8")
+    (career_dir / "Section Instructions.md").write_text("# Career Section Rules\nBe accurate.", encoding="utf-8")
+
+    monkeypatch.setattr(vault_reader_mod, "VAULT_PATH", fake_vault)
+    monkeypatch.setattr(shared_mod, "VAULT_PATH", fake_vault)
+    monkeypatch.setattr(hitl_mod, "DB_PATH", tmp_path / "test_hitl.db")
+    hitl_mod.init_db()
+
+    # Stage a brand-new note in HITL queue (not yet on disk) to confirm pending creates resolve too
+    hitl_mod.add_transaction(
+        agent_name="nexus_agent",
+        action_type="create",
+        target_file="Vault/3. Operations/3.1. Career Strategy & Revenue/Staged Draft.md",
+        proposed_content="# Staged Draft\nReady for review.",
+        original_content=None,
+        reasoning="Test staged context file hydration",
+    )
+
+    captured_calls = []
+
+    def _fake_invoke_llm(**kwargs):
+        captured_calls.append(kwargs["messages"])
+        return AIMessage(content="Evaluated against verified BS in CS.")
+
+    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
+
+    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-prehydrate", thread_id="conv-prehydrate")
+    trace_token = set_trace_thread_id("conv-prehydrate")
+    try:
+        res = graph_mod.spawn_subagent.invoke(
+            {
+                "task_prompt": "Evaluate JD fit strictly using the attached resume.",
+                "model_tier": "low",
+                "context_files": [
+                    "3. Operations/3.1. Career Strategy & Revenue/Resume - Master.md",
+                    "Section Instructions.md",
+                    "3. Operations/3.1. Career Strategy & Revenue/Staged Draft.md",
+                    "Resume - Master.md",  # duplicate title should only be hydrated once
+                ],
+            }
+        )
+    finally:
+        reset_trace_thread_id(trace_token)
+        graph_mod.reset_hitl_execution_context(ctx_token)
+
+    assert "Evaluated against verified BS in CS." in res
+    assert len(captured_calls) == 1
+    sent_messages = captured_calls[0]
+    assert isinstance(sent_messages[1], HumanMessage)
+    prompt_body = sent_messages[1].content
+    assert prompt_body.startswith("# Pre-Hydrated Disk Context")
+    assert "BS in Computer Science" in prompt_body
+    assert "# Career Section Rules" in prompt_body
+    assert "Ready for review." in prompt_body
+    assert "# Assigned Subagent Task" in prompt_body
+    assert "Evaluate JD fit strictly using the attached resume." in prompt_body
+    # Deduplicated: Resume - Master.md appears once as a hydrated section header
+    assert prompt_body.count("## `3. Operations/3.1. Career Strategy & Revenue/Resume - Master.md`") == 1
+
+
+def test_spawn_subagent_context_files_fail_fast_on_hallucinated_and_unsafe_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Verify `spawn_subagent` fails fast without calling the LLM on missing or escaping `context_files` paths."""
+    from nexus.agent import graph as graph_mod
+    import nexus.core.hitl_queue as hitl_mod
+    import nexus.shared_tools.shared as shared_mod
+    import nexus.shared_tools.vault_reader as vault_reader_mod
+
+    fake_vault = tmp_path / "Vault"
+    career_dir = fake_vault / "3. Operations" / "3.1. Career Strategy & Revenue"
+    career_dir.mkdir(parents=True)
+    (career_dir / "Resume - Master.md").write_text("# Master Resume", encoding="utf-8")
+    (career_dir / "Job Hunt War Room.md").write_text("# War Room", encoding="utf-8")
+
+    monkeypatch.setattr(vault_reader_mod, "VAULT_PATH", fake_vault)
+    monkeypatch.setattr(shared_mod, "VAULT_PATH", fake_vault)
+    monkeypatch.setattr(hitl_mod, "DB_PATH", tmp_path / "test_hitl.db")
+    hitl_mod.init_db()
+
+    llm_called = False
+
+    def _should_not_run(**_kwargs):
+        nonlocal llm_called
+        llm_called = True
+        raise AssertionError("LLM should never be invoked when context_files fail resolution")
+
+    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _should_not_run)
+
+    emitted = []
+    unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-failfast")
+    trace_token = set_trace_thread_id("conv-failfast")
+    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-failfast", thread_id="conv-failfast")
+    try:
+        missing_res = graph_mod.spawn_subagent.invoke(
+            {
+                "task_prompt": "Compare JDs against resume.",
+                "model_tier": "low",
+                "context_files": [
+                    "3. Operations/3.1. Career Strategy & Revenue/Resume - Applied AI & Forward Deployed Engineer.md"
+                ],
+            }
+        )
+        traversal_res = graph_mod.spawn_subagent.invoke(
+            {
+                "task_prompt": "Read secret.",
+                "model_tier": "low",
+                "context_files": ["../.env"],
+            }
+        )
+    finally:
+        graph_mod.reset_hitl_execution_context(ctx_token)
+        reset_trace_thread_id(trace_token)
+        unsub()
+
+    assert not llm_called
+    assert "Fail-Fast Context Hydration Error" in missing_res
+    assert "3. Operations/3.1. Career Strategy & Revenue" in missing_res
+    assert "Resume - Master.md" in missing_res
+    assert "Job Hunt War Room.md" in missing_res
+
+    assert "Fail-Fast Context Hydration Error" in traversal_res
+    assert "outside the Vault" in traversal_res
+
+    event_types = [e["type"] for e in emitted]
+    assert "agent_start" in event_types
+    assert "tool_error" in event_types
+    assert "agent_end" in event_types

@@ -9,6 +9,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
+  ApiError,
   askBrainStream,
   attachBrainStream,
   getActiveRuns,
@@ -129,6 +130,8 @@ export default function ChatPage() {
   const activeStreamConvIdRef = useRef<string | null>(null);
   // autoTitleInFlightRef: deduplicates concurrent client-side title sync requests per conversation UUID
   const autoTitleInFlightRef = useRef<Set<string>>(new Set());
+  // deletedConvIdsRef: Set<string> tracking UUIDs deleted during this session so concurrent polls/syncs skip stale 404s
+  const deletedConvIdsRef = useRef<Set<string>>(new Set());
 
   // Keep mirror refs synchronized with React state after commits
   useEffect(() => {
@@ -304,21 +307,48 @@ export default function ChatPage() {
     inputRef.current?.focus();
   }, []);
 
+  // Fetches conversations from SQLite and filters out UUIDs already deleted locally during this session
+  const reloadVisibleConversations = useCallback(() => {
+    return getConversations().then((list) => {
+      const visible = list.filter((c) => !deletedConvIdsRef.current.has(c.id));
+      setConversations(visible);
+      return visible;
+    });
+  }, []);
+
+  // Handles expected 404 deletion races silently and reconciles sidebar state on title mutation failures
+  const handleTitleMutationError = useCallback(
+    (convId: string, err: unknown, warnMessage: string, reconcileAlways: boolean) => {
+      if (err instanceof ApiError && err.status === 404) {
+        deletedConvIdsRef.current.add(convId);
+        reloadVisibleConversations().catch(() => {});
+        return;
+      }
+      console.warn(warnMessage, err);
+      if (reconcileAlways) {
+        reloadVisibleConversations().catch(() => {});
+      }
+    },
+    [reloadVisibleConversations]
+  );
+
   // Refreshes the sidebar conversation list and automatically syncs any newly completed placeholder titles
   // (`title_source === "placeholder"`) with the backend's Turn-1 auto-title job (`force=false` coalesces without duplicate LLM calls)
   const refreshConversationsAndSyncTitles = useCallback((candidateIds?: string[]) => {
-    getConversations()
-      .then((updatedList) => {
-        setConversations(updatedList);
-        const targets = updatedList.filter((c) => {
+    reloadVisibleConversations()
+      .then((visibleList) => {
+        const targets = visibleList.filter((c) => {
           if (c.title_source !== "placeholder") return false;
           if (candidateIds && !candidateIds.includes(c.id)) return false;
+          if (deletedConvIdsRef.current.has(c.id)) return false;
           return !autoTitleInFlightRef.current.has(c.id);
         });
         for (const conv of targets) {
           autoTitleInFlightRef.current.add(conv.id);
           autoGenerateConversationTitle(conv.id, false)
             .then((titleRes) => {
+              // Drop stale title responses if the user deleted this thread before auto-title returned
+              if (deletedConvIdsRef.current.has(conv.id)) return;
               if (titleRes.title && (titleRes.status === "updated" || titleRes.status === "unchanged")) {
                 setConversations((prev) =>
                   prev.map((c) =>
@@ -336,14 +366,20 @@ export default function ChatPage() {
                 );
               }
             })
-            .catch((err) => console.error("Failed to sync auto-generated conversation title:", err))
+            .catch((err) => {
+              // Suppress expected 404s when a conversation is deleted concurrently; warn (not error) on transient sync failures
+              if (deletedConvIdsRef.current.has(conv.id) || (err instanceof ApiError && err.status === 404)) {
+                return;
+              }
+              console.warn("Failed to sync auto-generated conversation title:", err);
+            })
             .finally(() => {
               autoTitleInFlightRef.current.delete(conv.id);
             });
         }
       })
       .catch(() => {});
-  }, []);
+  }, [reloadVisibleConversations]);
 
   // Helper building unified SSE stream callbacks shared between fresh submissions and mid-turn re-attachments
   const createStreamCallbacks = useCallback(
@@ -411,6 +447,11 @@ export default function ChatPage() {
               liveTraceRef.current = newTrace;
               return newTrace;
             });
+
+            // Immediately surface newly spawned conversations in ChatSidebar & BranchLineageBar while a multi-subagent sweep runs
+            if (event.type === "tool_result" && event.data?.tool === "spawn_conversation") {
+              refreshConversationsAndSyncTitles();
+            }
           },
           onDone: (event) => {
             setActiveRunIds((prev) => prev.filter((id) => id !== targetConvId));
@@ -595,6 +636,7 @@ export default function ChatPage() {
       isCancelled?: () => boolean,
       options?: { forceReattach?: boolean }
     ) => {
+      if (deletedConvIdsRef.current.has(convId)) return;
       try {
         // Query active-run status BEFORE history so post-completion SQLite commits are never missed in a race window
         const fallbackStatus: ActiveRunStatus = { active: false, conversation_id: convId };
@@ -602,14 +644,14 @@ export default function ChatPage() {
           getActiveRunStatus(convId).catch(() => fallbackStatus),
           getActiveRuns().catch(() => null),
         ]);
-        if (isCancelled?.() || activeConvIdRef.current !== convId) return;
+        if (isCancelled?.() || deletedConvIdsRef.current.has(convId) || activeConvIdRef.current !== convId) return;
 
         if (activeListRes) {
           setActiveRunIds(activeListRes.active_runs.map((r) => r.conversation_id));
         }
 
         const history = await getChatHistory(convId);
-        if (isCancelled?.() || activeConvIdRef.current !== convId) return;
+        if (isCancelled?.() || deletedConvIdsRef.current.has(convId) || activeConvIdRef.current !== convId) return;
 
         if (!historyMatchesMessages(history, messagesRef.current)) {
           setMessages(mapHistoryEntriesToMessages(history));
@@ -655,7 +697,7 @@ export default function ChatPage() {
               minReplyHistoryLength: history.length + 1,
             })
           );
-          if (isCancelled?.() || activeConvIdRef.current !== convId) {
+          if (isCancelled?.() || deletedConvIdsRef.current.has(convId) || activeConvIdRef.current !== convId) {
             abort();
             return;
           }
@@ -1038,6 +1080,8 @@ export default function ChatPage() {
   const handleDeleteChat = useCallback(
     async (id: string, e?: React.MouseEvent) => {
       e?.stopPropagation();
+      // Record deletion immediately before async network round-trips so concurrent sync/auto-title polls ignore this ID
+      deletedConvIdsRef.current.add(id);
 
       // Cleanly abort in-flight SSE stream if deleting the active streaming thread
       if (activeStreamConvIdRef.current === id) {
@@ -1054,8 +1098,10 @@ export default function ChatPage() {
       setActiveRunIds((prev) => prev.filter((cid) => cid !== id));
 
       await deleteConversation(id);
-      const updatedConvs = conversations.filter((c) => c.id !== id);
-      setConversations(updatedConvs);
+      const remainingConvs = conversations.filter(
+        (c) => c.id !== id && !deletedConvIdsRef.current.has(c.id)
+      );
+      setConversations((prev) => prev.filter((c) => c.id !== id));
 
       if (draftPersistTimerRef.current) {
         clearTimeout(draftPersistTimerRef.current);
@@ -1070,7 +1116,7 @@ export default function ChatPage() {
       persistDrafts(updatedDrafts);
 
       if (activeConvId === id) {
-        const nextId = updatedConvs.length > 0 ? updatedConvs[0].id : null;
+        const nextId = remainingConvs.length > 0 ? remainingConvs[0].id : null;
         activeConvIdRef.current = nextId;
         setActiveConvId(nextId);
         const nextDraft = (nextId ? updatedDrafts[nextId] : updatedDrafts[DRAFT_NEW_KEY]) ?? "";
@@ -1102,25 +1148,23 @@ export default function ChatPage() {
     try {
       await updateConversationTitle(convId, trimmed);
     } catch (err) {
-      console.error("Failed to update conversation title:", err);
-      // Reconcile against ground-truth database state on error
-      getConversations().then(setConversations).catch(() => {});
+      handleTitleMutationError(convId, err, "Failed to update conversation title:", true);
     }
-  }, []);
+  }, [handleTitleMutationError]);
 
   // Invokes fast AI auto-titling for an existing conversation using the low-tier Flash/Sonnet model (force=true overrides manual/existing titles)
   const handleAutoGenerateTitle = useCallback(async (convId: string) => {
     try {
       const res = await autoGenerateConversationTitle(convId, true);
-      if (res.title) {
+      if (res.title && !deletedConvIdsRef.current.has(convId)) {
         setConversations((prev) =>
           prev.map((c) => (c.id === convId ? { ...c, title: res.title!, title_source: "auto" } : c))
         );
       }
     } catch (err) {
-      console.error("Failed to auto-generate conversation title:", err);
+      handleTitleMutationError(convId, err, "Failed to auto-generate conversation title:", false);
     }
-  }, []);
+  }, [handleTitleMutationError]);
 
   const handleSubmit = useCallback(
     async (e?: React.FormEvent) => {

@@ -15,10 +15,13 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from nexus.api.main import app
-from nexus.agent.graph import rollback_checkpoints_for_thread
+from nexus.agent.graph import CORE_TOOLS, TOOLS, nexus_graph, rollback_checkpoints_for_thread
+from nexus.core.chat_branching import spawn_seeded_conversation
+from nexus.core.hitl_queue import reset_hitl_execution_context, set_hitl_execution_context
+from nexus.shared_tools.shared import spawn_conversation
 import nexus.core.chats_db as chats_db
 from nexus.core.chats_db import (
     create_conversation,
@@ -281,3 +284,249 @@ def test_branch_and_merge_error_guards(client, seeded_parent_conv):
     )
     assert res_root_merge.status_code == 400
     assert "root conversation" in res_root_merge.json()["detail"]
+
+
+def test_spawn_seeded_conversation_nested_under_parent(seeded_parent_conv):
+    """Verify `spawn_seeded_conversation(nest_under_parent=True)` nests under parent, preserves manual title, and seeds memory.sqlite."""
+    parent_id = seeded_parent_conv["parent_id"]
+    _, _, _, m4 = seeded_parent_conv["message_ids"]
+
+    result = spawn_seeded_conversation(
+        title="Taxes & CPA Follow-ups",
+        context_brief="Exact Gmail thread_id: `18f4a9c`, sender: cpa@firm.example, action: review W-2 discrepancy.",
+        parent_conversation_id=parent_id,
+        nest_under_parent=True,
+    )
+    child_id = result["conversation_id"]
+    seeded_parent_conv["created_ids"].append(child_id)
+
+    assert result["parent_conversation_id"] == parent_id
+    assert result["parent_message_id"] == m4
+    assert result["branch_mode"] == "tangent"
+    assert result["title"] == "🌿 Taxes & CPA Follow-ups"
+
+    conv = get_conversation(child_id)
+    assert conv is not None
+    assert conv["parent_conversation_id"] == parent_id
+    assert conv["parent_message_id"] == m4
+    assert conv["branch_mode"] == "tangent"
+    assert conv["title_source"] == "manual"
+
+    history = get_chat_history(child_id)
+    assert len(history) == 1
+    assert history[0]["role"] == "assistant"
+    assert history[0]["agent"] == "branch_context"
+    assert "Context Brief" in history[0]["content"]
+    assert "18f4a9c" in history[0]["content"]
+
+    # Verify LangGraph SqliteSaver checkpoint was hydrated with HumanMessage anchor + AIMessage brief
+    lg_state = nexus_graph.get_state({"configurable": {"thread_id": child_id, "conversation_id": child_id}})
+    seeded_msgs = lg_state.values.get("messages", [])
+    assert len(seeded_msgs) == 2
+    assert isinstance(seeded_msgs[0], HumanMessage)
+    assert isinstance(seeded_msgs[1], AIMessage)
+    assert "18f4a9c" in seeded_msgs[1].content
+
+
+def test_spawn_seeded_conversation_standalone_root(seeded_parent_conv):
+    """Verify `spawn_seeded_conversation(nest_under_parent=False)` creates an unnested root thread with manual title provenance."""
+    parent_id = seeded_parent_conv["parent_id"]
+
+    result = spawn_seeded_conversation(
+        title="Ongoing House Remodel Project",
+        context_brief="Contractor quotes and permit links gathered during inbox sweep.",
+        parent_conversation_id=parent_id,
+        nest_under_parent=False,
+    )
+    root_id = result["conversation_id"]
+    seeded_parent_conv["created_ids"].append(root_id)
+
+    assert result["parent_conversation_id"] is None
+    assert result["parent_message_id"] is None
+    assert result["branch_mode"] is None
+    assert result["title"] == "Ongoing House Remodel Project"
+
+    conv = get_conversation(root_id)
+    assert conv is not None
+    assert conv["parent_conversation_id"] is None
+    assert conv["branch_mode"] is None
+    assert conv["title_source"] == "manual"
+
+    lg_state = nexus_graph.get_state({"configurable": {"thread_id": root_id, "conversation_id": root_id}})
+    seeded_msgs = lg_state.values.get("messages", [])
+    assert len(seeded_msgs) == 2
+    assert isinstance(seeded_msgs[0], HumanMessage)
+    assert isinstance(seeded_msgs[1], AIMessage)
+    assert "Contractor quotes" in seeded_msgs[1].content
+
+
+def test_spawn_conversation_tool_from_parent_and_subagent_context(seeded_parent_conv):
+    """Verify `spawn_conversation` is bound in both `CORE_TOOLS` and `TOOLS`, and inherits parent `conversation_id` inside subagent context."""
+    core_names = {t.name for t in CORE_TOOLS}
+    parent_names = {t.name for t in TOOLS}
+    assert "spawn_conversation" in core_names
+    assert "spawn_conversation" in parent_names
+
+    parent_id = seeded_parent_conv["parent_id"]
+
+    # Simulate execution inside a spawned subagent worker whose `thread_id` is scoped to `:subagent-1`
+    # while `conversation_id` points to the active parent UI thread
+    sub_token = set_hitl_execution_context(
+        conversation_id=parent_id,
+        thread_id=f"{parent_id}:subagent-1",
+        agent_id="subagent-1",
+        agent_role="Subagent #1 (low)",
+    )
+    try:
+        receipt = spawn_conversation.invoke(
+            {
+                "title": "Recruiter Thread — Acme Corp",
+                "context_brief": "Thread ID `abc-999` from jane@acme.example requesting Thursday interview slots.",
+                "nest_under_current": True,
+            }
+        )
+    finally:
+        reset_hitl_execution_context(sub_token)
+
+    assert "🌿 Recruiter Thread — Acme Corp" in receipt
+    assert parent_id in receipt
+
+    # Locate the newly created branch in `chats.db` and register for teardown cleanup
+    all_convs = chats_db.get_conversations()
+    spawned_nested = [c for c in all_convs if c.get("parent_conversation_id") == parent_id]
+    assert len(spawned_nested) == 1
+    seeded_parent_conv["created_ids"].append(spawned_nested[0]["id"])
+    assert spawned_nested[0]["id"] in receipt
+
+    # Verify fallback to standalone root conversation when running under synthetic `"nexus_primary"` CLI/eval context
+    cli_token = set_hitl_execution_context(
+        conversation_id="nexus_primary",
+        thread_id="nexus_primary",
+        agent_id="nexus",
+        agent_role="Head Agent",
+    )
+    try:
+        cli_receipt = spawn_conversation.invoke(
+            {
+                "title": "CLI Standalone Thread",
+                "context_brief": "Seeded from headless CLI run.",
+                "nest_under_current": True,
+            }
+        )
+    finally:
+        reset_hitl_execution_context(cli_token)
+
+    assert "standalone root conversation" in cli_receipt
+    cli_matches = [c for c in chats_db.get_conversations() if c.get("title") == "CLI Standalone Thread"]
+    assert len(cli_matches) == 1
+    seeded_parent_conv["created_ids"].append(cli_matches[0]["id"])
+    assert cli_matches[0]["parent_conversation_id"] is None
+
+
+def test_spawn_conversation_target_section_and_broken_path_lint_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded_parent_conv,
+):
+    """Verify Tune-Up B: `target_section` snapshot, broken path/wiki-link warnings, and explicit handoff header."""
+    import nexus.shared_tools.vault_reader as vault_reader_mod
+    import nexus.shared_tools.shared as shared_mod
+
+    # Build an isolated temporary Vault fixture so tests never depend on personal Vault contents
+    fake_vault = tmp_path / "Vault"
+    career_dir = fake_vault / "3. Operations" / "3.1. Career Strategy & Revenue"
+    eng_dir = fake_vault / "6. Engineering"
+    career_dir.mkdir(parents=True)
+    eng_dir.mkdir(parents=True)
+
+    (career_dir / "Section Instructions.md").write_text("# Career Rules", encoding="utf-8")
+    (career_dir / "Resume - Master.md").write_text("# Master Resume\nBS in CS", encoding="utf-8")
+    (career_dir / "Job Hunt War Room.md").write_text("# War Room", encoding="utf-8")
+    (eng_dir / "Log.md").write_text("---\naliases: [Engineering Log]\n---\n# Log", encoding="utf-8")
+
+    monkeypatch.setattr(vault_reader_mod, "VAULT_PATH", fake_vault)
+    monkeypatch.setattr(shared_mod, "VAULT_PATH", fake_vault)
+
+    parent_id = seeded_parent_conv["parent_id"]
+    ctx_token = set_hitl_execution_context(
+        conversation_id=parent_id,
+        thread_id=parent_id,
+        agent_id="nexus",
+        agent_role="Head Agent",
+    )
+    try:
+        # 1. Phantom filenames + missing wiki-link trigger deterministic [SYSTEM WARNING] on both brief and receipt
+        bad_receipt = spawn_conversation.invoke(
+            {
+                "title": "Job Sprint — Bad Refs",
+                "context_brief": (
+                    "Review [[Job Hunt War Room]], [[Engineering Log]], and [[Nonexistent Mission]].\n"
+                    "Use Resume - Applied AI & Forward Deployed Engineer.md and `Offer.docx`, "
+                    "plus 6. Engineering/Resume - Master.md (wrong folder). "
+                    "Ignore external https://example.com/guide.pdf and template Mission - *.md."
+                ),
+                "nest_under_current": True,
+                "target_section": "3. Operations/3.1. Career Strategy & Revenue",
+            }
+        )
+    finally:
+        reset_hitl_execution_context(ctx_token)
+
+    assert "[SYSTEM WARNING:" in bad_receipt
+    assert "Nonexistent Mission" in bad_receipt
+    assert "Resume - Applied AI & Forward Deployed Engineer.md" in bad_receipt
+    assert "Offer.docx" in bad_receipt
+    assert "6. Engineering/Resume - Master.md" in bad_receipt
+    # Real on-disk notes, frontmatter aliases, external URLs, and glob templates must NOT trigger false positives
+    assert "Job Hunt War Room" not in bad_receipt.split("[SYSTEM WARNING:")[1]
+    assert "Engineering Log" not in bad_receipt.split("[SYSTEM WARNING:")[1]
+    assert "guide.pdf" not in bad_receipt
+    assert "Mission - *.md" not in bad_receipt
+
+    nested_convs = [c for c in chats_db.get_conversations() if c.get("parent_conversation_id") == parent_id]
+    assert len(nested_convs) == 1
+    bad_child_id = nested_convs[0]["id"]
+    seeded_parent_conv["created_ids"].append(bad_child_id)
+
+    # Verify target_section live snapshot + warning are persisted in chats.db AND LangGraph memory.sqlite
+    history = get_chat_history(bad_child_id)
+    assert len(history) == 1
+    brief_content = history[0]["content"]
+    assert "Target Section Directory Snapshot (`3. Operations/3.1. Career Strategy & Revenue`)" in brief_content
+    assert "Resume - Master.md" in brief_content
+    assert "Section Instructions.md" in brief_content
+    assert "[SYSTEM WARNING:" in brief_content
+
+    lg_state = nexus_graph.get_state({"configurable": {"thread_id": bad_child_id, "conversation_id": bad_child_id}})
+    seeded_msgs = lg_state.values.get("messages", [])
+    assert len(seeded_msgs) == 2
+    assert isinstance(seeded_msgs[0], HumanMessage)
+    assert (
+        seeded_msgs[0].content
+        == "[Session initialized from parent conversation branch context — Note: Section Instructions and living notes are NOT yet loaded in this thread. Hydrate target section files from disk before mutating state or delegating.]"
+    )
+    assert isinstance(seeded_msgs[1], AIMessage)
+    assert "Resume - Master.md" in seeded_msgs[1].content
+    assert "[SYSTEM WARNING:" in seeded_msgs[1].content
+
+    # 2. Valid brief with real files produces zero [SYSTEM WARNING]
+    ctx_token = set_hitl_execution_context(conversation_id=parent_id, thread_id=parent_id)
+    try:
+        clean_receipt = spawn_conversation.invoke(
+            {
+                "title": "Job Sprint — Verified Refs",
+                "context_brief": (
+                    "Hydrate [[Job Hunt War Room|War Room]], [[Engineering Log]], "
+                    "and `3. Operations/3.1. Career Strategy & Revenue/Resume - Master.md`."
+                ),
+                "nest_under_current": True,
+                "target_section": "Vault/3. Operations/3.1. Career Strategy & Revenue",
+            }
+        )
+    finally:
+        reset_hitl_execution_context(ctx_token)
+
+    assert "[SYSTEM WARNING:" not in clean_receipt
+    clean_convs = [c for c in chats_db.get_conversations() if c.get("title") == "🌿 Job Sprint — Verified Refs"]
+    assert len(clean_convs) == 1
+    seeded_parent_conv["created_ids"].append(clean_convs[0]["id"])
