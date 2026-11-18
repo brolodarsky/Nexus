@@ -75,7 +75,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **[[Health Summary]]**: Master dashboard for symptoms, workups, doctors visits, lab work, biomarkers, medical history and longitudinal tracking.
 - **[[Sleep Specialist Intake Summary]]**
 - **[[Insurance Card]]**
-	- [[Doc - Medical Insurance 2026 Summary of Benefits and Coverage (SBC)]]: 2026 Oscar Health Summary of Benefits and Coverage
+	- [[Doc - Medical Insurance 2027 Summary of Benefits and Coverage (SBC)]]: 2027 Oscar Health Summary of Benefits and Coverage
 - **[[Prescriptions]]**
 - **Health Logs:** Doctor's visits
 - **Lab Work**
@@ -105,6 +105,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 
 ## 2.4. Nutrition
+- **[[Protocol - Caffeine Cycling & Tolerance Management]]:** Stepped sine-wave caffeine cycling framework, adenosine receptor resensitization, and daily beverage substitution guide.
 - **The Recipe Vault:** High-protein/low-calorie favorites (Crack Slaw, etc.).    
 - **Feeding Reference:** Bookmarks/Videos on nutrition science and food prep.
 
@@ -149,8 +150,6 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **📁 Resumes**
 	- **[[Resume - Master|Resume - Master - Markdown]]:** The source-of-truth CV.
 		- **[[Resume - Master.pdf]]:** Exported PDF output.
-		- **[[Resume - Master (Active Operations)]]:** Variant with `SiliSlick Knives` dated `June 2017 – Present` for executive/family warm intros and commercial SE roles ([[Resume - Master (Active Operations).pdf|PDF]]).
-		- **[[Resume - Master (Extended)]]**
 - **📁 Cover Letters**
 	- **[[Cover Letter - Agentic AI Focus]]**
 	- **[[Cover Letter - Java Dev Focus]]**
@@ -169,6 +168,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 
 ### 3.1.5. Income Streams & Side Revenue
 - **[[Income Streams Hub]]**
+- **[[Project - Sell Dad's Domains]]**
 - **[[Project - Silislick Web Optimization]]:** Revenue tracking and growth strategy for the family business.
 
 ### 3.1.6. Compensation & Negotiation
@@ -214,6 +214,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 - **Home**
 	- **[[Parents Home Purchase Application.pdf|Doc - Parents Home Purchase Application]]**
 - **[[Family & Parental Care Logistics|Parental Care]]:** Health records, medical billing history, and local Fort Lee resources.
+	- **[[Campaign - MEM Billing]]**
 	- **[[Plan - Recover & Transition for MEM Practice]]**
 	- **[[Project - Switch Dad to Google Voice (Software Only)]]**
 	- **[[Protocol - Dad Laptop Backup]]**
@@ -221,7 +222,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 ### 3.3.3. Auto
 - **[[Auto Knowledge Base]]:** Central dashboard and Map of Content for all vehicle specifications, projects, and general automotive knowledge.
 - **[[Car Info]]:** Persistent vehicle specifications and details.
-- **[[Maintenance Log]]:** Service history and recurring tasks for the Pilot.
+- **[[Honda Pilot - Maintenance Log]]:** Service history and recurring tasks for the Pilot.
 - **[[List - Pilot Remaining Maintenance]]** - Short list of car To-Do's.
 - **[[Protocol - 2005 Honda Pilot Longevity Blueprint]]**
 - **Projects**
@@ -237,10 +238,10 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 # 4. Life
 _Dedicated space for exploration, relationships, and pure interest._ Connection & Joy
 ## 4.1. Social Life & Community
+- **[[Project - Human Relationship Engine]]:** Agentic relational layer for living dossiers, conversation triage, and gift scouting.
 - [[People & Names]]
-- **Family Data**
-- **"People Data":** Things people tell me - Preferences, important context. B-days in Google contacts.
-- **Gift Ideas:** Running list of potential gifts for friends and family.
+	- 📁 [[People & Names|People]]: [[Robert Volodarsky]], [[Leonard Volodarsky]], [[Mary Ellen McMahon Volodarsky]], [[Juan Torres]], [[Alex Sapienza]], [[Jeffrey McDonald]]
+- **[[Gift Ideas]]:** Running list of potential gifts for friends and family.
 - **Social Club:** Event planning and community building.
 	- **[[Itinerary - Maryland & DC Day Out with Cousins]]:** Day plan featuring IHOP, Needwood short golf, tennis, and evening Union Station tour.
 - **[[Activities List]]**: Hobbies, sports, or experiences I want to try.
@@ -253,6 +254,7 @@ _Dedicated space for exploration, relationships, and pure interest._ Connection 
 - **Values Alignment:** What am I looking for in a partner?
 - **Relationship Maintenance:** Strategies for connection and conflict resolution.
 	- **[[Protocol - Dating Grounding & Dopamine Management]]**
+	- **[[Girlfriend & Wife Treatment Ideas]]:** Living idea bank for tactile pampering, domestic care, and thoughtful micro-gestures.
 - **Date Ideas:** Local & travel-based.
 
 
@@ -288,7 +290,7 @@ _The Content Log & Reference_
 	- **[[Protocol - Laptop App List Update]]**
 	- **[[Protocol - Digitize DVD Collection]]:** Workflow for ripping disc data via MakeMKV and encoding via HandBrake (H.264/H.265).
 - **Software Subscriptions:** (See [[Recurring Payments]])
-- **Hardware Inventory:** Serial numbers and warranty info.
+- **[[Hardware Inventory]]:** Device specs, external storage topology, serial numbers, and hardware quirks.
 
 
 
@@ -320,6 +322,7 @@ _The Content Log & Reference_
 	4. **[[Project - Nexus Demo]]**
 	- **[[Workshop - MCP Additions]]**
 	- **[[Workshop - Sidecar Consolidation Daemons]]**
+	- **[[Workshop - Tool Execution Safety & Harm Monitoring]]**
 	- **📁 Archive**
 - **[[Project - Inventory Replenishment Agent]]:** Agentic workflow to check and automate recommended inventory replenishment for eCommerce Silislick.com family business.
 - **Resources:**
@@ -385,6 +388,7 @@ _The Content Log & Reference_
 - **Enterprise Governance:** Managing autonomous boundaries, strict tool bounding, and Human-in-the-Loop (HITL) checkpoints.
 - **Benchmarking:** SWE-bench (software engineering mastery), WebArena (browser automation).
 - **Safety:** Defending against adversarial payloads, prompt injections, and infinite resource loops.
+- **[[Concept - Agentic Harm Ladder & Runtime Safety Governance]]:** Action Harm Ladder taxonomy, CaMeL information-flow control, and deterministic runtime guardrails.
 - **[[Glossary - Nexus Engine Terminology]]:** Standardized acronyms and terminology for the Nexus Agentic Engine (AFS, DPFH, LTM, DCD, DTM, RSI, CI, HITL).
 - 📁 **Sources**
 	- **[[Article - Building Effective Agents]]**
