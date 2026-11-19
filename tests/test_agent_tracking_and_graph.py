@@ -503,3 +503,137 @@ def test_spawn_subagent_context_files_fail_fast_on_hallucinated_and_unsafe_paths
     assert "agent_start" in event_types
     assert "tool_error" in event_types
     assert "agent_end" in event_types
+
+
+def test_subagent_turn_cap_triggers_tool_free_synthesis(monkeypatch: pytest.MonkeyPatch):
+    """Verify spawn_subagent enforces subagent_max_turns and forces one unbound synthesis turn without executing excess tools."""
+    from unittest.mock import MagicMock
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from nexus.agent import graph as graph_mod
+    from nexus.core.config import EngineSettings
+
+    default_settings = EngineSettings()
+    assert default_settings.subagent_max_turns == 12
+    assert default_settings.subagent_max_input_tokens == 400_000
+
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 2)
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_input_tokens", 400_000)
+
+    mock_base_llm = MagicMock()
+    mock_bound_llm = MagicMock()
+    mock_base_llm.bind_tools.return_value = mock_bound_llm
+    monkeypatch.setattr(graph_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
+
+    tool_exec_calls = []
+
+    def _fake_tool_node(_node, state_or_input, timeout_seconds=None):
+        tool_exec_calls.append(state_or_input)
+        last_tc = state_or_input["messages"][-1].tool_calls[0]
+        return {
+            "messages": [
+                ToolMessage(
+                    content="Read line 1-50 of target note.",
+                    name=last_tc["name"],
+                    tool_call_id=last_tc["id"],
+                )
+            ]
+        }
+
+    monkeypatch.setattr(graph_mod, "_invoke_tool_node_resilient", _fake_tool_node)
+
+    llm_invocations = []
+
+    def _fake_invoke_llm(*, llm, messages, **_kwargs):
+        llm_invocations.append((llm, list(messages)))
+        if llm is mock_bound_llm:
+            call_num = sum(1 for invoked_llm, _ in llm_invocations if invoked_llm is mock_bound_llm)
+            return AIMessage(
+                content=f"Inspecting step {call_num}",
+                tool_calls=[{"name": "read_file", "args": {"file_path": "Note.md"}, "id": f"tc_{call_num}"}],
+                usage_metadata={"input_tokens": 150, "output_tokens": 25, "total_tokens": 175},
+            )
+        assert llm is mock_base_llm
+        return AIMessage(
+            content="Budget-capped synthesis: Note.md lines 1-50 inspected.",
+            usage_metadata={"input_tokens": 200, "output_tokens": 30, "total_tokens": 230},
+        )
+
+    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
+
+    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-turn-cap", thread_id="conv-turn-cap")
+    trace_token = set_trace_thread_id("conv-turn-cap")
+    try:
+        res = graph_mod.spawn_subagent.invoke({"task_prompt": "Keep digging forever.", "model_tier": "low"})
+    finally:
+        reset_trace_thread_id(trace_token)
+        graph_mod.reset_hitl_execution_context(ctx_token)
+
+    assert res == "Budget-capped synthesis: Note.md lines 1-50 inspected."
+    # Turn 1 ran tool execution; Turn 2 hit max_turns=2 before running tool execution; Turn 3 ran unbound synthesis
+    assert len(tool_exec_calls) == 1
+    assert [inv[0] for inv in llm_invocations] == [mock_bound_llm, mock_bound_llm, mock_base_llm]
+
+    synthesis_msgs = llm_invocations[-1][1]
+    assert all(not getattr(m, "tool_calls", None) for m in synthesis_msgs)
+    assert all(not isinstance(m, ToolMessage) for m in synthesis_msgs)
+    assert isinstance(synthesis_msgs[-1], HumanMessage)
+    assert "Subagent turn/token budget reached" in synthesis_msgs[-1].content
+
+
+def test_subagent_input_token_budget_triggers_tool_free_synthesis(monkeypatch: pytest.MonkeyPatch):
+    """Verify spawn_subagent halts tool loops once cumulative input_tokens reaches subagent_max_input_tokens."""
+    from unittest.mock import MagicMock
+    from langchain_core.messages import AIMessage, ToolMessage
+    from nexus.agent import graph as graph_mod
+
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 12)
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_input_tokens", 1_000)
+
+    mock_base_llm = MagicMock()
+    mock_bound_llm = MagicMock()
+    mock_base_llm.bind_tools.return_value = mock_bound_llm
+    monkeypatch.setattr(graph_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
+
+    tool_exec_count = 0
+
+    def _fake_tool_node(_node, state_or_input, timeout_seconds=None):
+        nonlocal tool_exec_count
+        tool_exec_count += 1
+        last_tc = state_or_input["messages"][-1].tool_calls[0]
+        return {
+            "messages": [
+                ToolMessage(content="Big payload", name=last_tc["name"], tool_call_id=last_tc["id"])
+            ]
+        }
+
+    monkeypatch.setattr(graph_mod, "_invoke_tool_node_resilient", _fake_tool_node)
+
+    invoked_llms = []
+
+    def _fake_invoke_llm(*, llm, messages, **_kwargs):
+        invoked_llms.append(llm)
+        if llm is mock_bound_llm:
+            return AIMessage(
+                content="Need another file",
+                tool_calls=[{"name": "read_file", "args": {"file_path": "Big.md"}, "id": f"tc_{len(invoked_llms)}"}],
+                usage_metadata={"input_tokens": 600, "output_tokens": 20, "total_tokens": 620},
+            )
+        return AIMessage(
+            content="Token-capped synthesis completed.",
+            usage_metadata={"input_tokens": 500, "output_tokens": 25, "total_tokens": 525},
+        )
+
+    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
+
+    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-tok-cap", thread_id="conv-tok-cap")
+    trace_token = set_trace_thread_id("conv-tok-cap")
+    try:
+        res = graph_mod.spawn_subagent.invoke({"task_prompt": "Scan large corpus.", "model_tier": "low"})
+    finally:
+        reset_trace_thread_id(trace_token)
+        graph_mod.reset_hitl_execution_context(ctx_token)
+
+    assert res == "Token-capped synthesis completed."
+    # Turn 1 = 600 tokens (< 1000) -> tool ran; Turn 2 = 1200 tokens (>= 1000) -> jumped straight to sub_base_llm
+    assert tool_exec_count == 1
+    assert invoked_llms == [mock_bound_llm, mock_bound_llm, mock_base_llm]

@@ -13,7 +13,7 @@ or restricting directory access, Nexus runs ONE universal agent design (`NexusAg
   4. Spawns isolated subagents via `spawn_subagent(task_prompt: str)` for parallel or deep subtasks,
      where each subagent inherits `inject_root_instructions()` and the core tool suite.
   5. Preserves 100% lossless event-bounded conversation history without message-pruning summarization,
-     maximizing provider KV prompt-cache hit rates (90–97% cached tokens) across multi-turn sessions.
+     sustaining high provider KV prompt-cache hit rates (83.5% across 748 measured runs; 90–95% on static prefixes).
 """
 # contextvars: Propagates active thread_id and HITL execution context across timeout wrapper threads
 import contextvars
@@ -664,6 +664,61 @@ def _invoke_llm_with_resilience(
 
 # ── Dynamic Subagent Spawner (`spawn_subagent`) ──────────────────────────────
 
+# `messages: Sequence[BaseMessage]` is the subagent message list ending in an `AIMessage(tool_calls)` that exceeded budget.
+# `-> list[BaseMessage]` returns provider-safe plain-text messages ending with a tool-free synthesis directive.
+def _build_tool_free_synthesis_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+    """Flatten tool-calling turns into plain text for a single unbound (`sub_base_llm`) final synthesis call.
+
+    Why flattening is required when invoking `sub_base_llm` without `bind_tools(...)`:
+    1. Provider APIs (Anthropic Messages, Google Gemini, OpenAI) reject dangling `AIMessage(tool_calls)` lacking
+       matching `ToolMessage` responses, and Anthropic rejects `tool_use`/`tool_result` blocks when `tools` are omitted.
+    2. Converting prior `tool_calls` and `ToolMessage` outputs into plain `AIMessage`/`HumanMessage` transcripts
+       keeps the emergency synthesis call valid across every provider while leaving normal turns 100% KV-cached.
+    """
+    synthesis_messages: list[BaseMessage] = []
+    for msg in messages:
+        if isinstance(msg, SystemMessage):
+            synthesis_messages.append(msg)
+        elif isinstance(msg, AIMessage):
+            text_body = extract_message_text(msg).strip()
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            if tool_calls:
+                called_names = ", ".join(str(tc.get("name", "unknown")) for tc in tool_calls)
+                note = f"[Called tools: {called_names}]"
+                combined = f"{text_body}\n{note}".strip() if text_body else note
+                synthesis_messages.append(AIMessage(content=combined))
+            else:
+                synthesis_messages.append(AIMessage(content=text_body or "(no text)"))
+        elif isinstance(msg, ToolMessage):
+            t_name = getattr(msg, "name", None) or "tool"
+            t_text = extract_message_text(msg).strip()
+            formatted = f"[Tool Result ({t_name})]:\n{t_text}"
+            # Merge consecutive HumanMessages so alternating user/assistant turn structure stays clean
+            if synthesis_messages and isinstance(synthesis_messages[-1], HumanMessage):
+                prev = extract_message_text(synthesis_messages[-1])
+                synthesis_messages[-1] = HumanMessage(content=f"{prev}\n\n{formatted}")
+            else:
+                synthesis_messages.append(HumanMessage(content=formatted))
+        else:
+            msg_text = extract_message_text(msg)
+            if synthesis_messages and isinstance(synthesis_messages[-1], HumanMessage):
+                prev = extract_message_text(synthesis_messages[-1])
+                synthesis_messages[-1] = HumanMessage(content=f"{prev}\n\n{msg_text}")
+            else:
+                synthesis_messages.append(HumanMessage(content=msg_text))
+
+    directive = (
+        "[SYSTEM: Subagent turn/token budget reached. Do not call more tools. "
+        "Synthesize your findings now from the information already gathered.]"
+    )
+    if synthesis_messages and isinstance(synthesis_messages[-1], HumanMessage):
+        prev = extract_message_text(synthesis_messages[-1])
+        synthesis_messages[-1] = HumanMessage(content=f"{prev}\n\n{directive}")
+    else:
+        synthesis_messages.append(HumanMessage(content=directive))
+    return synthesis_messages
+
+
 # `task_prompt: str` is the self-contained objective and output specification for the subagent.
 # `model_tier: ModelTier` selects capability/cost tier (`"low"`, `"medium"`, or `"strong"`).
 # `context_files: Optional[list[str]]` optional Vault paths/titles resolved and pre-hydrated from disk before boot.
@@ -798,12 +853,15 @@ def spawn_subagent(
             "so the Supervisor can integrate your work directly."
         )
 
-        # Run ReAct loop until the subagent finishes tool calls and returns its synthesis
+        # Run ReAct loop until the subagent finishes tool calls or hits its turn/token budget cap
+        max_turns = max(1, int(getattr(settings, "subagent_max_turns", 12) or 12))
+        max_input_tokens = max(1, int(getattr(settings, "subagent_max_input_tokens", 400_000) or 400_000))
         sub_messages: list[BaseMessage] = [
             _build_system_message(sub_sys_content, sub_resolved["provider"]),
             HumanMessage(content=effective_task_prompt),
         ]
         turn_idx = 0
+        cumulative_input_tokens = 0
 
         while True:
             # Cancellation guard: abort subagent immediately if the parent turn was stopped by user
@@ -828,7 +886,8 @@ def spawn_subagent(
                 tier=effective_tier,
                 max_retries=settings.ai_max_retries,
             )
-            _log_token_usage(local_tracer, ai_msg, model_name=sub_model_name, tier=effective_tier)
+            usage_stats = _log_token_usage(local_tracer, ai_msg, model_name=sub_model_name, tier=effective_tier)
+            cumulative_input_tokens += int(usage_stats.get("input_tokens", 0) or 0)
             sub_messages.append(ai_msg)
 
             if not getattr(ai_msg, "tool_calls", None):
@@ -836,6 +895,56 @@ def spawn_subagent(
                 elapsed_sub = round(time.time() - t0, 2)
                 local_tracer.llm_response(final_text, metadata={"turn": turn_idx, "latency_seconds": elapsed_sub})
                 local_tracer.agent_end(f"Completed in {elapsed_sub:.1f}s")
+                return final_text
+
+            # Turn & cumulative input-token circuit breaker: if the model still wants more tools at/past the budget,
+            # skip further tool calls and force a single tool-free synthesis turn via `sub_base_llm`.
+            # Note: We intentionally preserve full KV prompt-cache prefixes during turns 1..N (no sliding-window
+            # ToolMessage mutation mid-loop) and rely on `context_files` + output caps to keep normal turns lean.
+            budget_reason: Optional[str] = None
+            if turn_idx >= max_turns:
+                budget_reason = f"turn limit ({turn_idx}/{max_turns})"
+            elif cumulative_input_tokens >= max_input_tokens:
+                budget_reason = f"input token budget ({cumulative_input_tokens:,}/{max_input_tokens:,})"
+
+            if budget_reason:
+                local_tracer.info(
+                    f"⚠️ Subagent #{serial} reached {budget_reason}. Requesting final tool-free synthesis...",
+                    data={
+                        "turn": turn_idx,
+                        "max_turns": max_turns,
+                        "cumulative_input_tokens": cumulative_input_tokens,
+                        "max_input_tokens": max_input_tokens,
+                    },
+                )
+                synthesis_messages = _build_tool_free_synthesis_messages(sub_messages)
+                local_tracer.llm_call(
+                    metadata={
+                        "turn": turn_idx + 1,
+                        "model_tier": effective_tier,
+                        "model_name": sub_model_name,
+                        "budget_synthesis": True,
+                    }
+                )
+                final_ai_msg = _invoke_llm_with_resilience(
+                    llm=sub_base_llm,
+                    messages=synthesis_messages,
+                    tracer=local_tracer,
+                    thread_ids=[parent_convo, parent_thread, sub_id],
+                    model_name=sub_model_name,
+                    tier=effective_tier,
+                    max_retries=settings.ai_max_retries,
+                )
+                _log_token_usage(local_tracer, final_ai_msg, model_name=sub_model_name, tier=effective_tier)
+                final_text = extract_message_text(final_ai_msg).strip() or (
+                    f"Subagent #{serial} reached {budget_reason} without returning synthesis text."
+                )
+                elapsed_sub = round(time.time() - t0, 2)
+                local_tracer.llm_response(
+                    final_text,
+                    metadata={"turn": turn_idx + 1, "budget_reached": True, "latency_seconds": elapsed_sub},
+                )
+                local_tracer.agent_end(f"Completed at budget cap in {elapsed_sub:.1f}s")
                 return final_text
 
             # If the LLM emitted intermediate thought/explanation alongside tool calls, trace that text too

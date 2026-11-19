@@ -46,6 +46,11 @@ class EngineSettings(BaseSettings):
     # - nexus_subagent_timeout: Maximum total wall-clock budget for a single `spawn_subagent` worker loop.
     nexus_tool_timeout: int = 120
     nexus_subagent_timeout: int = 900
+    # Subagent ReAct loop circuit breakers (`spawn_subagent` in `src/nexus/agent/graph.py`):
+    # - subagent_max_turns: Maximum tool-calling iterations before forcing a final tool-free synthesis turn.
+    # - subagent_max_input_tokens: Cumulative input-token ceiling per subagent run to prevent TPM exhaustion and fallback spikes.
+    subagent_max_turns: int = 12
+    subagent_max_input_tokens: int = 400_000
     tavily_api_key: Optional[str] = None
     
     # Gmail: auth lives in .secrets/token_gmail*.json (see shared_tools/gmail_engine.py); supports multiple accounts.
