@@ -13,6 +13,9 @@
  *    authenticated Chrome session—generating zero extra HTTP requests to external sites.
  */
 
+// Extension protocol/extractor version verified by `browser_bridge.py` to flag stale loaded workers
+const BRIDGE_VERSION = "1.1.0";
+
 // Loopback WebSocket endpoints:
 // - 8000: Primary Nexus FastAPI backend (`start.ps1`)
 // - 8765: Ephemeral standalone CLI listener (`python -m nexus.shared_tools.browser_bridge`)
@@ -137,7 +140,7 @@ async function connectEndpoint(key) {
     const summary = await getQuickCounts();
     safeSend(ws, {
       type: "hello",
-      bridge_version: "1.0.0",
+      bridge_version: BRIDGE_VERSION,
       mode: "read_only",
       endpoint: key,
       user_agent: navigator.userAgent,
@@ -169,7 +172,7 @@ async function connectEndpoint(key) {
           data: {
             status: "ok",
             mode: "read_only",
-            bridge_version: "1.0.0",
+            bridge_version: BRIDGE_VERSION,
             user_agent: navigator.userAgent,
             tab_count: summary.tabCount,
             group_count: summary.groupCount,
@@ -384,6 +387,50 @@ async function handleListTabs(params = {}) {
 function extractTabMarkdownReadOnly(maxChars) {
   const charBudget = typeof maxChars === "number" && maxChars > 0 ? maxChars : 20000;
 
+  // Detect whether this script instance is executing inside an embedded <iframe> vs. top frame
+  let isSubframe = false;
+  try {
+    isSubframe = window.self !== window.top;
+  } catch (_e) {
+    // Cross-origin access to window.top throws SecurityError, proving this is an iframe
+    isSubframe = true;
+  }
+
+  const currentUrl = window.location && window.location.href ? window.location.href : "";
+  if (isSubframe) {
+    const lowerUrl = currentUrl.toLowerCase();
+    // Skip blank, tracking, payment-card, or CAPTCHA iframes with no readable content/forms
+    if (
+      !lowerUrl ||
+      lowerUrl === "about:blank" ||
+      lowerUrl.startsWith("javascript:") ||
+      /recaptcha|hcaptcha|challenges\.cloudflare\.com|doubleclick\.net|googlesyndication\.com|googletagmanager\.com|facebook\.com\/tr|stripe\.com\/v3\/elements-inner/i.test(
+        lowerUrl
+      )
+    ) {
+      return {
+        title: "",
+        url: currentUrl,
+        markdown: "",
+        char_count: 0,
+        truncated: false,
+        is_subframe: true,
+        has_form_controls: false,
+      };
+    }
+    if (typeof window.innerWidth === "number" && (window.innerWidth < 120 || window.innerHeight < 80)) {
+      return {
+        title: "",
+        url: currentUrl,
+        markdown: "",
+        char_count: 0,
+        truncated: false,
+        is_subframe: true,
+        has_form_controls: false,
+      };
+    }
+  }
+
   // 1. Extract page metadata (<meta name="description">, canonical URL, OG tags)
   const getMeta = (selector) => {
     const el = document.querySelector(selector);
@@ -522,13 +569,50 @@ function extractTabMarkdownReadOnly(maxChars) {
       if (role === "dialog" || role === "alertdialog" || tag === "DIALOG") {
         return true;
       }
+      if (el.getAttribute && el.getAttribute("aria-modal") === "true") {
+        return true;
+      }
     }
     if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return true;
     try {
       const style = window.getComputedStyle(el);
       if (style.display === "none" || style.visibility === "hidden") return true;
+      // Catch CSS fade-out / closed transition modals while keeping MockNode safe (opacity undefined)
+      if (style.opacity !== undefined && style.opacity !== "" && parseFloat(style.opacity) === 0) {
+        return true;
+      }
     } catch (_e) {}
     return false;
+  };
+
+  // Pure parentElement-chain ancestor check (avoids Element.prototype.contains for MockNode compatibility)
+  const isAncestorOf = (ancestor, descendant) => {
+    if (!ancestor || !descendant) return false;
+    let curr = descendant.parentElement;
+    while (curr) {
+      if (curr === ancestor) return true;
+      curr = curr.parentElement;
+    }
+    return false;
+  };
+
+  // Returns visible interactive form controls inside `rootEl` for modal/form detection
+  const getVisibleFormControls = (rootEl) => {
+    if (!rootEl || typeof rootEl.querySelectorAll !== "function") return [];
+    try {
+      const candidates = rootEl.querySelectorAll(
+        'input:not([type="hidden"]), textarea, select, [role="combobox"], [role="listbox"], [role="checkbox"], [role="radio"], [role="switch"], [contenteditable="true"]'
+      );
+      const visible = [];
+      for (const c of candidates) {
+        if (!isElementHidden(c, false)) {
+          visible.push(c);
+        }
+      }
+      return visible;
+    } catch (_e) {
+      return [];
+    }
   };
 
   // Recursive DOM-to-Markdown serializer (also traverses open Shadow DOM roots)
@@ -664,6 +748,181 @@ function extractTabMarkdownReadOnly(maxChars) {
       return mdRows.length > 0 ? `\n\n${mdRows.join("\n")}\n\n` : "";
     }
 
+    // Interactive form controls: serialize inputs, textareas, selects, and custom ARIA widgets read-only
+    if (tag === "INPUT") {
+      const inputType = (el.getAttribute("type") || el.type || "text").toLowerCase();
+      if (inputType === "hidden") return "";
+
+      if (inputType === "submit" || inputType === "button" || inputType === "reset") {
+        const btnVal = (
+          (typeof el.value === "string" ? el.value : el.getAttribute("value")) ||
+          el.getAttribute("aria-label") ||
+          ""
+        ).trim();
+        return btnVal ? `\n[Button: ${btnVal}]\n` : "";
+      }
+
+      if (inputType === "checkbox" || inputType === "radio") {
+        const isChecked = Boolean(el.checked || el.hasAttribute("checked"));
+        const box = isChecked ? "[x]" : "[ ]";
+        const insideLabel = Boolean(el.closest && el.closest("label"));
+        if (insideLabel) {
+          return `\n${box} `;
+        }
+        const ariaLbl = (el.getAttribute("aria-label") || "").trim();
+        return `\n${box}${ariaLbl ? ` ${ariaLbl}` : ""}\n`;
+      }
+
+      // Never expose raw secrets from password fields
+      const isPassword = inputType === "password";
+      const rawVal = typeof el.value === "string" ? el.value : el.getAttribute("value") || "";
+      const displayVal = isPassword ? (rawVal ? "(redacted)" : "") : rawVal;
+      const placeholder = (el.getAttribute("placeholder") || el.getAttribute("aria-placeholder") || "").trim();
+      const ariaLabel = (el.getAttribute("aria-label") || "").trim();
+      const isRequired = Boolean(
+        el.required || el.hasAttribute("required") || el.getAttribute("aria-required") === "true"
+      );
+      const roleAttr = (el.getAttribute("role") || "").toLowerCase();
+      const hasPopup = (el.getAttribute("aria-haspopup") || "").toLowerCase();
+      const fieldKind = roleAttr === "combobox" || hasPopup === "listbox" ? "combobox" : inputType;
+      const meta = isRequired ? `${fieldKind}, required` : fieldKind;
+
+      const parentLabel = el.closest ? el.closest("label") : null;
+      const parentLabelText = parentLabel
+        ? (parentLabel.textContent || "").replace(/\s+/g, " ").trim().toLowerCase()
+        : "";
+      const parts = [];
+      if (ariaLabel && !parentLabelText.includes(ariaLabel.toLowerCase())) {
+        parts.push(`label="${ariaLabel}"`);
+      }
+      if (displayVal) {
+        parts.push(isPassword ? displayVal : `"${displayVal}"`);
+      }
+      if (placeholder) {
+        parts.push(`placeholder="${placeholder}"`);
+      }
+      if (parts.length === 0) {
+        parts.push("(empty)");
+      }
+      return `\n\`[Input (${meta}): ${parts.join(", ")}]\`\n`;
+    }
+
+    if (tag === "TEXTAREA") {
+      const rawVal = typeof el.value === "string" ? el.value : el.textContent || "";
+      const cleanVal = rawVal.replace(/\s+/g, " ").trim();
+      const placeholder = (el.getAttribute("placeholder") || el.getAttribute("aria-placeholder") || "").trim();
+      const ariaLabel = (el.getAttribute("aria-label") || "").trim();
+      const isRequired = Boolean(
+        el.required || el.hasAttribute("required") || el.getAttribute("aria-required") === "true"
+      );
+      const meta = isRequired ? "required" : "optional";
+      const parentLabel = el.closest ? el.closest("label") : null;
+      const parentLabelText = parentLabel
+        ? (parentLabel.textContent || "").replace(/\s+/g, " ").trim().toLowerCase()
+        : "";
+      const parts = [];
+      if (ariaLabel && !parentLabelText.includes(ariaLabel.toLowerCase())) {
+        parts.push(`label="${ariaLabel}"`);
+      }
+      if (cleanVal) parts.push(`"${cleanVal}"`);
+      if (placeholder) parts.push(`placeholder="${placeholder}"`);
+      if (parts.length === 0) parts.push("(empty)");
+      return `\n\`[Textarea (${meta}): ${parts.join(", ")}]\`\n`;
+    }
+
+    if (tag === "SELECT") {
+      const isRequired = Boolean(
+        el.required || el.hasAttribute("required") || el.getAttribute("aria-required") === "true"
+      );
+      const isMulti = Boolean(el.multiple || el.hasAttribute("multiple"));
+      const ariaLabel = (el.getAttribute("aria-label") || "").trim();
+      const options = Array.from(el.querySelectorAll("option"));
+      const allLabels = [];
+      const selectedLabels = [];
+      for (const opt of options) {
+        const lbl = (opt.textContent || opt.getAttribute("value") || "").replace(/\s+/g, " ").trim();
+        if (!lbl) continue;
+        allLabels.push(lbl);
+        const optVal = opt.getAttribute("value");
+        const isSel = Boolean(
+          opt.selected ||
+            opt.hasAttribute("selected") ||
+            (typeof el.value === "string" && el.value !== "" && (optVal === el.value || lbl === el.value))
+        );
+        if (isSel) selectedLabels.push(lbl);
+      }
+      const typeLabel = isMulti ? "Select (multi)" : "Select";
+      const reqLabel = isRequired ? " (required)" : "";
+      const parts = [];
+      if (ariaLabel) parts.push(`label="${ariaLabel}"`);
+      if (selectedLabels.length > 0) parts.push(`selected="${selectedLabels.join(", ")}"`);
+      if (allLabels.length > 0) {
+        const shown = allLabels.slice(0, 25);
+        const extra = allLabels.length > 25 ? ` (+${allLabels.length - 25} more)` : "";
+        parts.push(`options: ${shown.join(" | ")}${extra}`);
+      } else {
+        parts.push("(no options)");
+      }
+      return `\n\`[${typeLabel}${reqLabel}: ${parts.join("; ")}]\`\n`;
+    }
+
+    // Custom ARIA form controls on non-native elements (e.g. React-Select, Radix, Luma dropdowns)
+    const elRole = (el.getAttribute("role") || "").toLowerCase();
+    const elHasPopup = (el.getAttribute("aria-haspopup") || "").toLowerCase();
+
+    if (elRole === "checkbox" || elRole === "radio" || elRole === "switch") {
+      const checked = el.getAttribute("aria-checked") === "true";
+      const box = checked ? "[x]" : "[ ]";
+      const txt = (renderChildren().replace(/\s+/g, " ").trim() || el.getAttribute("aria-label") || "").trim();
+      return `\n${box}${txt ? ` ${txt}` : ""}\n`;
+    }
+
+    if (elRole === "combobox" || elHasPopup === "listbox") {
+      const isRequired = Boolean(el.getAttribute("aria-required") === "true" || el.hasAttribute("required"));
+      const reqLabel = isRequired ? " (required)" : "";
+      const ariaLabel = (el.getAttribute("aria-label") || "").trim();
+      const ariaPlaceholder = (el.getAttribute("aria-placeholder") || "").trim();
+      const innerTxt = renderChildren().replace(/\s+/g, " ").replace(/`/g, "").trim();
+      const currentDisplay = innerTxt || (ariaPlaceholder ? `placeholder="${ariaPlaceholder}"` : "(empty)");
+      let optionsSuffix = "";
+      const controlledId = el.getAttribute("aria-controls") || el.getAttribute("aria-owns") || "";
+      if (controlledId) {
+        const firstId = controlledId.trim().split(/\s+/)[0];
+        let listboxEl = null;
+        try {
+          listboxEl =
+            typeof document.getElementById === "function"
+              ? document.getElementById(firstId)
+              : document.querySelector(`[id="${firstId}"]`);
+        } catch (_e) {}
+        if (listboxEl && !isElementHidden(listboxEl, false)) {
+          const optNodes = Array.from(listboxEl.querySelectorAll('[role="option"]'));
+          const optTexts = optNodes
+            .map((o) => (o.textContent || "").replace(/\s+/g, " ").trim())
+            .filter(Boolean);
+          if (optTexts.length > 0) {
+            const shown = optTexts.slice(0, 25);
+            const extra = optTexts.length > 25 ? ` (+${optTexts.length - 25} more)` : "";
+            optionsSuffix = `; options: ${shown.join(" | ")}${extra}`;
+          }
+        }
+      }
+      const prefix = ariaLabel ? `label="${ariaLabel}"; ` : "";
+      return `\n\`[Dropdown${reqLabel}: ${prefix}${currentDisplay}${optionsSuffix}]\`\n`;
+    }
+
+    if (el.getAttribute("contenteditable") === "true") {
+      const inner = renderChildren().trim();
+      if (inner) return `\n${inner}\n`;
+      const ph = (el.getAttribute("aria-placeholder") || el.getAttribute("data-placeholder") || "").trim();
+      return ph ? `\n\`[Editable: placeholder="${ph}"]\`\n` : `\n\`[Editable: (empty)]\`\n`;
+    }
+
+    if (tag === "LEGEND") {
+      const text = renderChildren().replace(/\s+/g, " ").trim();
+      return text ? `\n\n**${text}**\n` : "";
+    }
+
     // Block-level layout elements: add newline boundaries so adjacent blocks don't mash words together
     if (
       tag === "DIV" ||
@@ -672,6 +931,9 @@ function extractTabMarkdownReadOnly(maxChars) {
       tag === "MAIN" ||
       tag === "HEADER" ||
       tag === "ASIDE" ||
+      tag === "FORM" ||
+      tag === "FIELDSET" ||
+      tag === "LABEL" ||
       tag === "TR" ||
       tag === "DT" ||
       tag === "DD"
@@ -698,21 +960,25 @@ function extractTabMarkdownReadOnly(maxChars) {
   ];
 
   let bodyMarkdown = "";
+  const selectedContentRoots = [];
   for (const sel of PRIORITY_SELECTORS) {
     const matches = document.querySelectorAll(sel);
     if (matches && matches.length > 0) {
       const candidateParts = [];
+      const candidateRoots = [];
       for (const m of matches) {
         if (!isElementHidden(m, false)) {
           const rendered = nodeToMarkdown(m, 0, true).trim();
           if (rendered.length > 120) {
             candidateParts.push(rendered);
+            candidateRoots.push(m);
           }
         }
       }
       const joined = candidateParts.join("\n\n---\n\n").trim();
       if (joined.length >= 350) {
         bodyMarkdown = joined;
+        selectedContentRoots.push(...candidateRoots);
         break;
       }
     }
@@ -721,9 +987,14 @@ function extractTabMarkdownReadOnly(maxChars) {
   // Fallback to full document.body (skipping nav/footer boilerplate first, then raw innerText if still tiny)
   if (bodyMarkdown.length < 350 && document.body) {
     bodyMarkdown = nodeToMarkdown(document.body, 0, true).trim();
+    selectedContentRoots.length = 0;
+    selectedContentRoots.push(document.body);
   }
   if (bodyMarkdown.length < 200 && document.body) {
     bodyMarkdown = (document.body.innerText || document.body.textContent || "").trim();
+    if (selectedContentRoots.length === 0) {
+      selectedContentRoots.push(document.body);
+    }
   }
 
   // Normalize excessive blank lines
@@ -732,313 +1003,6 @@ function extractTabMarkdownReadOnly(maxChars) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  // 5. Active Overlay / Chat Extraction Pass
-  // Captures expanded floating chat windows (e.g. LinkedIn InMail/messaging overlay), active dialogs,
-  // and drawers rendered outside the <main> container that standard Readability passes miss.
-  // Returns clean Markdown or empty string if no overlays/chats are open.
-  const extractActiveOverlaysMarkdown = () => {
-    try {
-      const overlayBlocks = [];
-      const processedElements = new Set();
-
-      // Candidate overlay selectors targeting expanded chat bubbles, active floating drawers, and visible dialogs
-      const OVERLAY_SELECTORS = [
-        "aside.msg-overlay-container .msg-overlay-conversation-bubble--is-expanded",
-        ".msg-overlay-conversation-bubble--is-expanded",
-        "aside.msg-overlay-container .msg-overlay-conversation-bubble:not(.msg-overlay-conversation-bubble--is-minimized)",
-        '[data-testid*="chat-window"]',
-        '[data-testid*="conversation-overlay"]',
-        '[data-testid*="chat-overlay"]',
-        '.chat-window:not([hidden])',
-        '.chat-overlay:not([hidden])',
-        '[role="dialog"]:not([aria-hidden="true"])',
-        '[role="alertdialog"]:not([aria-hidden="true"])',
-        'dialog[open]',
-      ];
-
-      // Collect all candidate overlay elements across selectors
-      const rawCandidates = [];
-      for (const sel of OVERLAY_SELECTORS) {
-        try {
-          const matches = document.querySelectorAll(sel);
-          for (const el of matches) {
-            rawCandidates.push(el);
-          }
-        } catch (_e) {}
-      }
-
-      for (const el of rawCandidates) {
-        if (!el || el.nodeType !== Node.ELEMENT_NODE) continue;
-        if (processedElements.has(el)) continue;
-
-        // Skip hidden elements (display: none, visibility: hidden, hidden attr)
-        if (isElementHidden(el, false)) continue;
-
-        // Skip collapsed or minimized elements
-        const classStr = (el.className || "").toString().toLowerCase();
-        if (classStr.includes("minimized") || classStr.includes("collapsed")) continue;
-        if (el.getAttribute("aria-expanded") === "false") continue;
-
-        // Filter out non-chat dialogs like cookie/consent banners or main page roots
-        const tag = el.tagName.toUpperCase();
-        if (tag === "BODY" || tag === "MAIN" || tag === "HTML") continue;
-
-        const ariaLabel = (el.getAttribute("aria-label") || "").toLowerCase();
-        const idStr = (el.id || "").toLowerCase();
-
-        // Check if element is a cookie consent / privacy modal
-        if (
-          /cookie|consent|gdpr|onetrust|banner|privacy-modal/i.test(
-            `${classStr} ${idStr} ${ariaLabel}`
-          )
-        ) {
-          continue;
-        }
-
-        // Avoid nested duplicates: if an ancestor is already processed, skip
-        let ancestorProcessed = false;
-        let parent = el.parentElement;
-        while (parent) {
-          if (processedElements.has(parent)) {
-            ancestorProcessed = true;
-            break;
-          }
-          parent = parent.parentElement;
-        }
-        if (ancestorProcessed) continue;
-
-        processedElements.add(el);
-
-        // Step A: Extract Conversation Participant / Title
-        let participant = "";
-        const TITLE_SELECTORS = [
-          "header .msg-overlay-bubble-header__title",
-          ".msg-overlay-bubble-header__title",
-          ".msg-overlay-bubble-header__details h2",
-          "header h2",
-          "header [role='heading']",
-          ".msg-conversation-card__participant-names",
-          "[data-control-name='overlay.open_thread']",
-          "header a[href*='/in/']",
-          "[role='heading']",
-          "h1, h2, h3, h4",
-          "[class*='participant-name']",
-          "[class*='user-name']",
-          "[class*='chat-title']",
-        ];
-
-        for (const tSel of TITLE_SELECTORS) {
-          try {
-            const titleEl = el.querySelector(tSel);
-            if (titleEl && !isElementHidden(titleEl, false)) {
-              const rawTitle = (titleEl.textContent || "").trim();
-              if (rawTitle) {
-                participant = rawTitle;
-                break;
-              }
-            }
-          } catch (_e) {}
-        }
-
-        if (!participant) {
-          participant = (el.getAttribute("aria-label") || "").trim();
-        }
-
-        // Clean status artifacts from participant name (e.g. "Active now", "Status is reachable", "1st degree")
-        participant = participant
-          .replace(/(?:Status is reachable|Status is active|Active now|Available on mobile|Available on desktop)/gi, "")
-          .replace(/,\s*\d+(?:st|nd|rd|th)?\s*(?:degree)?(?:\s+connection)?/gi, "")
-          .replace(/^Conversation with\s+/i, "")
-          .replace(/\s+/g, " ")
-          .trim();
-
-        if (participant.includes("\n")) {
-          participant = participant.split("\n")[0].trim();
-        }
-
-        if (!participant) {
-          participant = "Conversation Participant";
-        }
-
-        // Step B: Extract Message Thread
-        const messages = [];
-
-        // Try candidate message element selectors
-        const MESSAGE_SELECTORS = [
-          ".msg-s-event-listitem",
-          ".msg-s-message-list__event",
-          "[data-event-urn]",
-          ".msg-s-message-group",
-          ".chat-message",
-          ".message-item",
-          "[data-testid*='message' i]",
-          "[class*='message-bubble']",
-          "[class*='chat-bubble']",
-        ];
-
-        let messageElements = [];
-        for (const mSel of MESSAGE_SELECTORS) {
-          try {
-            const found = el.querySelectorAll(mSel);
-            if (found && found.length > 0) {
-              messageElements = Array.from(found);
-              break;
-            }
-          } catch (_e) {}
-        }
-
-        let lastSender = participant;
-        let lastTimestamp = "";
-
-        if (messageElements.length > 0) {
-          for (const mEl of messageElements) {
-            if (isElementHidden(mEl, false)) continue;
-
-            // 1. Resolve Sender
-            let sender = "";
-            const SENDER_SELECTORS = [
-              ".msg-s-message-group__name",
-              ".msg-s-event-listitem__name",
-              "a.msg-s-event-listitem__link",
-              ".msg-s-message-group__profile-link",
-              "[class*='sender-name']",
-              "[class*='author-name']",
-              "[class*='sender']",
-            ];
-
-            for (const sSel of SENDER_SELECTORS) {
-              const sEl = mEl.querySelector(sSel) || mEl.closest(".msg-s-message-group, [class*='message-group']")?.querySelector(sSel);
-              if (sEl) {
-                const sText = (sEl.textContent || "").trim();
-                if (sText) {
-                  sender = sText;
-                  break;
-                }
-              }
-            }
-
-            // Check if message belongs to the current user (viewer/me)
-            const mClass = (mEl.className || "").toString().toLowerCase();
-            const groupEl = mEl.closest(".msg-s-message-group, [class*='message-group']");
-            const gClass = groupEl ? (groupEl.className || "").toString().toLowerCase() : "";
-            const isViewer =
-              mClass.includes("--me") ||
-              mClass.includes("--viewer") ||
-              gClass.includes("--me") ||
-              gClass.includes("--viewer");
-
-            if (!sender) {
-              if (isViewer) {
-                sender = "You";
-              } else if (lastSender) {
-                sender = lastSender;
-              } else {
-                sender = participant;
-              }
-            } else {
-              lastSender = sender;
-            }
-
-            // Clean sender text
-            sender = sender.replace(/\s+/g, " ").trim();
-            if (sender.includes("\n")) sender = sender.split("\n")[0].trim();
-
-            // 2. Resolve Timestamp
-            let timestamp = "";
-            const timeEl =
-              mEl.querySelector("time, .msg-s-event-listitem__timestamp, .msg-s-message-group__timestamp, [class*='timestamp'], [class*='time']") ||
-              groupEl?.querySelector("time, .msg-s-message-group__timestamp, [class*='timestamp']");
-
-            if (timeEl) {
-              timestamp = (timeEl.textContent || timeEl.getAttribute("datetime") || "").replace(/\s+/g, " ").trim();
-              if (timestamp) {
-                lastTimestamp = timestamp;
-              }
-            }
-            if (!timestamp && lastTimestamp) {
-              timestamp = lastTimestamp;
-            }
-
-            // 3. Resolve Subject (for InMail messages)
-            let subjectPrefix = "";
-            const subjEl = mEl.querySelector(".msg-s-event-listitem__subject, [class*='subject']");
-            if (subjEl) {
-              const sTxt = (subjEl.textContent || "").replace(/\s+/g, " ").trim();
-              if (sTxt) subjectPrefix = `**Subject:** ${sTxt}\n\n`;
-            }
-
-            // 4. Resolve Body: Check if mEl contains multiple message bodies (e.g. if grouped)
-            const bodyElements = mEl.querySelectorAll(
-              ".msg-s-event-listitem__body, .msg-s-message-bubble__content, p.msg-s-event-listitem__body"
-            );
-
-            const bodies = bodyElements.length > 0 ? Array.from(bodyElements) : [mEl];
-
-            for (const bEl of bodies) {
-              let bodyText = "";
-              if (bEl !== mEl) {
-                bodyText = nodeToMarkdown(bEl, 0, false).trim();
-              } else {
-                try {
-                  const clone = mEl.cloneNode(true);
-                  const toRemove = clone.querySelectorAll(
-                    "time, [class*='sender'], [class*='timestamp'], [class*='author'], [class*='meta'], header, button"
-                  );
-                  for (const r of toRemove) r.remove();
-                  bodyText = nodeToMarkdown(clone, 0, false).trim();
-                } catch (_e) {
-                  bodyText = nodeToMarkdown(mEl, 0, false).trim();
-                }
-              }
-
-              bodyText = bodyText
-                .replace(/[ \t]+\n/g, "\n")
-                .replace(/\n{3,}/g, "\n\n")
-                .trim();
-
-              if (!bodyText) continue;
-
-              const fullMessageText = subjectPrefix ? `${subjectPrefix}${bodyText}` : bodyText;
-              subjectPrefix = "";
-
-              const quotedBody = fullMessageText
-                .split("\n")
-                .map((line) => (line.trim() ? `> ${line}` : ">"))
-                .join("\n");
-
-              const timeStr = timestamp ? ` (${timestamp})` : "";
-              messages.push(`- **Sender:** ${sender}${timeStr}\n${quotedBody}`);
-            }
-          }
-        } else {
-          // Dialog without message items: extract dialog content directly
-          const rawContent = nodeToMarkdown(el, 0, false).trim();
-          if (rawContent && rawContent.length > 30) {
-            const quotedBody = rawContent
-              .split("\n")
-              .map((line) => (line.trim() ? `> ${line}` : ">"))
-              .join("\n");
-            messages.push(`- **Sender:** ${participant}\n${quotedBody}`);
-          }
-        }
-
-        if (messages.length > 0) {
-          overlayBlocks.push(`### ${participant}\n${messages.join("\n\n")}`);
-        }
-      }
-
-      if (overlayBlocks.length > 0) {
-        return `---\n## Active Chat & Floating Overlays\n\n${overlayBlocks.join("\n\n")}`;
-      }
-      return "";
-    } catch (_err) {
-      return "";
-    }
-  };
-
-  const overlayMarkdown = extractActiveOverlaysMarkdown();
-
-  // 6. Universal Coverage Deduplication & Section Assembly
   // Checks whether `candidateText` is already substantially present in `referenceText`
   // using normalized 5+-char unique token recall (universal, zero site-specific regexes).
   const isSubstantiallyCovered = (candidateText, referenceText) => {
@@ -1067,11 +1031,456 @@ function extractTabMarkdownReadOnly(maxChars) {
     return hits / candWords.length >= 0.55;
   };
 
+  // 5. Active Overlay / Chat / Portal Modal Extraction Pass
+  // Captures expanded floating chat windows (e.g. LinkedIn InMail/messaging overlay), semantic
+  // ARIA/native dialogs, non-ARIA framework portals (e.g. Luma lux-modal, Radix, Tailwind fixed
+  // portals), and sibling <form> containers rendered outside the selected content root.
+  const extractActiveOverlaysMarkdown = () => {
+    try {
+      const chatBlocks = [];
+      const modalBlocks = [];
+      const processedElements = new Set();
+
+      // Collect candidates in strict priority order:
+      // 1. Chat overlays -> 2. Semantic dialogs -> 3. Non-ARIA portals/fixed siblings -> 4. Standalone forms
+      const candidates = [];
+      const pushSelectorMatches = (sel, kind) => {
+        try {
+          const matches = document.querySelectorAll(sel);
+          for (const el of matches) {
+            candidates.push({ el, kind });
+          }
+        } catch (_e) {}
+      };
+
+      const CHAT_SELECTORS = [
+        "aside.msg-overlay-container .msg-overlay-conversation-bubble--is-expanded",
+        ".msg-overlay-conversation-bubble--is-expanded",
+        "aside.msg-overlay-container .msg-overlay-conversation-bubble:not(.msg-overlay-conversation-bubble--is-minimized)",
+        '[data-testid*="chat-window"]',
+        '[data-testid*="conversation-overlay"]',
+        '[data-testid*="chat-overlay"]',
+        '.chat-window:not([hidden])',
+        '.chat-overlay:not([hidden])',
+      ];
+      for (const sel of CHAT_SELECTORS) pushSelectorMatches(sel, "chat");
+
+      const DIALOG_SELECTORS = [
+        '[role="dialog"]:not([aria-hidden="true"])',
+        '[role="alertdialog"]:not([aria-hidden="true"])',
+        '[aria-modal="true"]:not([aria-hidden="true"])',
+        "dialog[open]",
+      ];
+      for (const sel of DIALOG_SELECTORS) pushSelectorMatches(sel, "dialog");
+
+      const PORTAL_SELECTORS = [
+        '[class*="modal"]:not([hidden])',
+        '[class*="Modal"]:not([hidden])',
+        '[class*="dialog"]:not([hidden])',
+        '[class*="Dialog"]:not([hidden])',
+        '[class*="drawer"]:not([hidden])',
+        '[class*="Drawer"]:not([hidden])',
+        '[class*="sheet"]:not([hidden])',
+        '[class*="Sheet"]:not([hidden])',
+        '[class*="overlay"]:not([hidden])',
+        '[class*="Overlay"]:not([hidden])',
+        '[data-testid*="modal"]',
+        '[data-testid*="Modal"]',
+        '[data-testid*="dialog"]',
+        '[data-testid*="Dialog"]',
+        "[data-radix-portal]",
+        "[data-floating-ui-portal]",
+        "[data-portal]",
+      ];
+      for (const sel of PORTAL_SELECTORS) pushSelectorMatches(sel, "portal");
+
+      // Scan direct children of <body>, #__next, #root, and #app for CSS-in-JS portals with hashed class names
+      const portalParents = [document.body];
+      for (const rootSel of ["#__next", "#root", "#app"]) {
+        try {
+          const rEl = document.querySelector(rootSel);
+          if (rEl) portalParents.push(rEl);
+        } catch (_e) {}
+      }
+      for (const p of portalParents) {
+        if (p && p.children) {
+          for (const child of p.children) {
+            if (child && child.nodeType === Node.ELEMENT_NODE) {
+              candidates.push({ el: child, kind: "portal" });
+            }
+          }
+        }
+      }
+
+      pushSelectorMatches("form:not([hidden])", "form");
+
+      for (const candidate of candidates) {
+        const el = candidate.el;
+        const kind = candidate.kind;
+        if (!el || el.nodeType !== Node.ELEMENT_NODE) continue;
+        if (processedElements.has(el)) continue;
+
+        // Skip hidden elements (display: none, visibility: hidden, opacity: 0, hidden attr)
+        if (isElementHidden(el, false)) continue;
+
+        // Skip collapsed or minimized elements
+        const classStr = (el.className || "").toString().toLowerCase();
+        if (classStr.includes("minimized") || classStr.includes("collapsed")) continue;
+        if (el.getAttribute("aria-expanded") === "false") continue;
+
+        // Filter out structural page shells and navigation landmarks
+        const tag = el.tagName.toUpperCase();
+        if (tag === "BODY" || tag === "MAIN" || tag === "HTML" || tag === "NAV" || tag === "HEADER" || tag === "FOOTER") {
+          continue;
+        }
+
+        const ariaLabel = (el.getAttribute("aria-label") || "").toLowerCase();
+        const idStr = (el.id || "").toLowerCase();
+
+        // Check if element is a cookie consent / privacy modal
+        if (
+          /cookie|consent|gdpr|onetrust|privacy-modal|cookie-banner|consent-banner/i.test(
+            `${classStr} ${idStr} ${ariaLabel}`
+          )
+        ) {
+          continue;
+        }
+
+        // Bidirectional deduplication: skip if el is inside a processed element OR wraps a processed element
+        let hasHierarchyConflict = false;
+        for (const prev of processedElements) {
+          if (isAncestorOf(prev, el) || isAncestorOf(el, prev)) {
+            hasHierarchyConflict = true;
+            break;
+          }
+        }
+        if (hasHierarchyConflict) continue;
+
+        const controlsCount = getVisibleFormControls(el).length;
+        const isInsideSelectedRoot = selectedContentRoots.some((r) => isAncestorOf(r, el));
+        let isFixed = false;
+
+        if (kind === "portal" || kind === "form") {
+          // Dedicated chat selectors own chat containers so minimized chat docks are never re-parsed as forms
+          if (classStr.includes("msg-overlay-container") || classStr.includes("chat-window") || classStr.includes("chat-overlay")) {
+            continue;
+          }
+          // Never treat a selected content root or an app wrapper containing a selected content root as a modal
+          if (selectedContentRoots.includes(el) || selectedContentRoots.some((r) => isAncestorOf(el, r))) {
+            continue;
+          }
+
+          try {
+            isFixed = window.getComputedStyle(el).position === "fixed";
+          } catch (_e) {}
+
+          if (kind === "form") {
+            if (isInsideSelectedRoot) continue;
+          } else {
+            if (isInsideSelectedRoot && !isFixed) continue;
+            if (typeof el.getBoundingClientRect === "function") {
+              try {
+                const rect = el.getBoundingClientRect();
+                if (rect.width < 120 || rect.height < 60) continue;
+              } catch (_e) {}
+            }
+            const testIdStr = (el.getAttribute("data-testid") || "").toLowerCase();
+            const hasModalSignal =
+              isFixed ||
+              controlsCount > 0 ||
+              /(?:modal|dialog|drawer|sheet|portal)/i.test(`${classStr} ${idStr} ${testIdStr}`);
+            if (!hasModalSignal) continue;
+          }
+        }
+
+        // Step B probe: identify true chat threads without letting form validation errors trigger chat mode
+        const MESSAGE_SELECTORS = [
+          ".msg-s-event-listitem",
+          ".msg-s-message-list__event",
+          "[data-event-urn]",
+          ".msg-s-message-group",
+          ".chat-message",
+          ".message-item",
+          '[data-testid*="chat-message"]',
+          '[data-testid*="message-item"]',
+          '[data-testid*="message-bubble"]',
+          '[data-testid*="dm-message"]',
+          '[class*="message-bubble"]',
+          '[class*="chat-bubble"]',
+        ];
+
+        let messageElements = [];
+        if (kind === "chat" || controlsCount < 2) {
+          for (const mSel of MESSAGE_SELECTORS) {
+            try {
+              const found = el.querySelectorAll(mSel);
+              if (found && found.length > 0) {
+                messageElements = Array.from(found);
+                break;
+              }
+            } catch (_e) {}
+          }
+        }
+
+        const isChatOverlay = kind === "chat" || (controlsCount < 2 && messageElements.length > 0);
+
+        if (isChatOverlay) {
+          processedElements.add(el);
+
+          // Step A: Extract Conversation Participant / Title
+          let participant = "";
+          const TITLE_SELECTORS = [
+            "header .msg-overlay-bubble-header__title",
+            ".msg-overlay-bubble-header__title",
+            ".msg-overlay-bubble-header__details h2",
+            "header h2",
+            "header [role='heading']",
+            ".msg-conversation-card__participant-names",
+            "[data-control-name='overlay.open_thread']",
+            "header a[href*='/in/']",
+            "[role='heading']",
+            "h1, h2, h3, h4",
+            "[class*='participant-name']",
+            "[class*='user-name']",
+            "[class*='chat-title']",
+          ];
+
+          for (const tSel of TITLE_SELECTORS) {
+            try {
+              const titleEl = el.querySelector(tSel);
+              if (titleEl && !isElementHidden(titleEl, false)) {
+                const rawTitle = (titleEl.textContent || "").trim();
+                if (rawTitle) {
+                  participant = rawTitle;
+                  break;
+                }
+              }
+            } catch (_e) {}
+          }
+
+          if (!participant) {
+            participant = (el.getAttribute("aria-label") || "").trim();
+          }
+
+          // Clean status artifacts from participant name (e.g. "Active now", "Status is reachable", "1st degree")
+          participant = participant
+            .replace(/(?:Status is reachable|Status is active|Active now|Available on mobile|Available on desktop)/gi, "")
+            .replace(/,\s*\d+(?:st|nd|rd|th)?\s*(?:degree)?(?:\s+connection)?/gi, "")
+            .replace(/^Conversation with\s+/i, "")
+            .replace(/\s+/g, " ")
+            .trim();
+
+          if (participant.includes("\n")) {
+            participant = participant.split("\n")[0].trim();
+          }
+
+          if (!participant) {
+            participant = "Conversation Participant";
+          }
+
+          const messages = [];
+          let lastSender = participant;
+          let lastTimestamp = "";
+
+          if (messageElements.length > 0) {
+            for (const mEl of messageElements) {
+              if (isElementHidden(mEl, false)) continue;
+
+              // 1. Resolve Sender
+              let sender = "";
+              const SENDER_SELECTORS = [
+                ".msg-s-message-group__name",
+                ".msg-s-event-listitem__name",
+                "a.msg-s-event-listitem__link",
+                ".msg-s-message-group__profile-link",
+                "[class*='sender-name']",
+                "[class*='author-name']",
+                "[class*='sender']",
+              ];
+
+              for (const sSel of SENDER_SELECTORS) {
+                const sEl = mEl.querySelector(sSel) || mEl.closest(".msg-s-message-group, [class*='message-group']")?.querySelector(sSel);
+                if (sEl) {
+                  const sText = (sEl.textContent || "").trim();
+                  if (sText) {
+                    sender = sText;
+                    break;
+                  }
+                }
+              }
+
+              // Check if message belongs to the current user (viewer/me)
+              const mClass = (mEl.className || "").toString().toLowerCase();
+              const groupEl = mEl.closest(".msg-s-message-group, [class*='message-group']");
+              const gClass = groupEl ? (groupEl.className || "").toString().toLowerCase() : "";
+              const isViewer =
+                mClass.includes("--me") ||
+                mClass.includes("--viewer") ||
+                gClass.includes("--me") ||
+                gClass.includes("--viewer");
+
+              if (!sender) {
+                if (isViewer) {
+                  sender = "You";
+                } else if (lastSender) {
+                  sender = lastSender;
+                } else {
+                  sender = participant;
+                }
+              } else {
+                lastSender = sender;
+              }
+
+              // Clean sender text
+              sender = sender.replace(/\s+/g, " ").trim();
+              if (sender.includes("\n")) sender = sender.split("\n")[0].trim();
+
+              // 2. Resolve Timestamp
+              let timestamp = "";
+              const timeEl =
+                mEl.querySelector("time, .msg-s-event-listitem__timestamp, .msg-s-message-group__timestamp, [class*='timestamp'], [class*='time']") ||
+                groupEl?.querySelector("time, .msg-s-message-group__timestamp, [class*='timestamp']");
+
+              if (timeEl) {
+                timestamp = (timeEl.textContent || timeEl.getAttribute("datetime") || "").replace(/\s+/g, " ").trim();
+                if (timestamp) {
+                  lastTimestamp = timestamp;
+                }
+              }
+              if (!timestamp && lastTimestamp) {
+                timestamp = lastTimestamp;
+              }
+
+              // 3. Resolve Subject (for InMail messages)
+              let subjectPrefix = "";
+              const subjEl = mEl.querySelector(".msg-s-event-listitem__subject, [class*='subject']");
+              if (subjEl) {
+                const sTxt = (subjEl.textContent || "").replace(/\s+/g, " ").trim();
+                if (sTxt) subjectPrefix = `**Subject:** ${sTxt}\n\n`;
+              }
+
+              // 4. Resolve Body: Check if mEl contains multiple message bodies (e.g. if grouped)
+              const bodyElements = mEl.querySelectorAll(
+                ".msg-s-event-listitem__body, .msg-s-message-bubble__content, p.msg-s-event-listitem__body"
+              );
+
+              const bodies = bodyElements.length > 0 ? Array.from(bodyElements) : [mEl];
+
+              for (const bEl of bodies) {
+                let bodyText = "";
+                if (bEl !== mEl) {
+                  bodyText = nodeToMarkdown(bEl, 0, false).trim();
+                } else {
+                  try {
+                    const clone = mEl.cloneNode(true);
+                    const toRemove = clone.querySelectorAll(
+                      "time, [class*='sender'], [class*='timestamp'], [class*='author'], [class*='meta'], header, button"
+                    );
+                    for (const r of toRemove) r.remove();
+                    bodyText = nodeToMarkdown(clone, 0, false).trim();
+                  } catch (_e) {
+                    bodyText = nodeToMarkdown(mEl, 0, false).trim();
+                  }
+                }
+
+                bodyText = bodyText
+                  .replace(/[ \t]+\n/g, "\n")
+                  .replace(/\n{3,}/g, "\n\n")
+                  .trim();
+
+                if (!bodyText) continue;
+
+                const fullMessageText = subjectPrefix ? `${subjectPrefix}${bodyText}` : bodyText;
+                subjectPrefix = "";
+
+                const quotedBody = fullMessageText
+                  .split("\n")
+                  .map((line) => (line.trim() ? `> ${line}` : ">"))
+                  .join("\n");
+
+                const timeStr = timestamp ? ` (${timestamp})` : "";
+                messages.push(`- **Sender:** ${sender}${timeStr}\n${quotedBody}`);
+              }
+            }
+          } else {
+            const rawChatContent = nodeToMarkdown(el, 0, false).trim();
+            if (rawChatContent && rawChatContent.length > 30) {
+              const quotedBody = rawChatContent
+                .split("\n")
+                .map((line) => (line.trim() ? `> ${line}` : ">"))
+                .join("\n");
+              messages.push(`- **Sender:** ${participant}\n${quotedBody}`);
+            }
+          }
+
+          if (messages.length > 0) {
+            chatBlocks.push(`### ${participant}\n${messages.join("\n\n")}`);
+          }
+        } else {
+          // Non-chat modal / dialog / portal / form extraction: render directly as structured Markdown
+          const rawContent = nodeToMarkdown(el, 0, false)
+            .replace(/[ \t]+\n/g, "\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+          const hasControls = controlsCount > 0;
+          if (!rawContent || (rawContent.length < 20 && !hasControls)) continue;
+
+          if (kind === "portal" || kind === "form") {
+            if (!hasControls && isSubstantiallyCovered(rawContent, cleanMarkdown)) continue;
+            // Allow fixed form portals inside a document.body fallback to be promoted when long pages risk truncation
+            const protectFromTruncation = isFixed && hasControls && cleanMarkdown.length > charBudget * 0.7;
+            if (isInsideSelectedRoot && isSubstantiallyCovered(rawContent, cleanMarkdown) && !protectFromTruncation) {
+              continue;
+            }
+          }
+
+          processedElements.add(el);
+
+          let modalTitle = "";
+          const MODAL_TITLE_SELECTORS = ["h1", "h2", "h3", "h4", '[role="heading"]'];
+          for (const tSel of MODAL_TITLE_SELECTORS) {
+            try {
+              const tEl = el.querySelector(tSel);
+              if (tEl && !isElementHidden(tEl, false)) {
+                const txt = (tEl.textContent || "").replace(/\s+/g, " ").trim();
+                if (txt) {
+                  modalTitle = txt;
+                  break;
+                }
+              }
+            } catch (_e) {}
+          }
+          if (!modalTitle) {
+            modalTitle = (el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+          }
+          if (!modalTitle) {
+            modalTitle = "Active Modal";
+          }
+
+          modalBlocks.push(`### ${modalTitle}\n\n${rawContent}`);
+        }
+      }
+
+      return {
+        modalMarkdown:
+          modalBlocks.length > 0 ? `---\n## Active Modal / Dialog\n\n${modalBlocks.join("\n\n")}` : "",
+        chatMarkdown:
+          chatBlocks.length > 0 ? `---\n## Active Chat & Floating Overlays\n\n${chatBlocks.join("\n\n")}` : "",
+      };
+    } catch (_err) {
+      return { modalMarkdown: "", chatMarkdown: "" };
+    }
+  };
+
+  const { modalMarkdown, chatMarkdown } = extractActiveOverlaysMarkdown();
+
+  // 6. Universal Coverage Deduplication, Budget Protection & Section Assembly
   // Prioritize `cleanMarkdown` (live rendered DOM body) first so metadata/JSON-LD never triples
-  // payload size or pushes the bottom of long pages past `charBudget`.
-  const sections = [];
-  if (siteName) sections.push(`**Site:** ${siteName}`);
-  if (cleanMarkdown) sections.push(cleanMarkdown);
+  // payload size, while reserving budget for active modals/overlays so long background pages
+  // cannot truncate away active form dialogs or chat threads.
+  const baseSections = [];
+  if (siteName) baseSections.push(`**Site:** ${siteName}`);
+  if (cleanMarkdown) baseSections.push(cleanMarkdown);
 
   // Track cumulative reference text so accepting JSON-LD also suppresses duplicate metaDescription
   let coverageRef = cleanMarkdown;
@@ -1082,7 +1491,7 @@ function extractTabMarkdownReadOnly(maxChars) {
     const neededForSparse = isSparseDom && !isSubstantiallyCovered(compareTarget, coverageRef);
     const missingSubstantialDesc = entry.descText.length >= 150 && !isSubstantiallyCovered(entry.descText, coverageRef);
     if (neededForSparse || missingSubstantialDesc) {
-      sections.push(entry.block);
+      baseSections.push(entry.block);
       coverageRef = `${coverageRef}\n\n${entry.block}`;
     }
   }
@@ -1091,26 +1500,48 @@ function extractTabMarkdownReadOnly(maxChars) {
     const neededMetaForSparse = isSparseDom && !isSubstantiallyCovered(metaDescription, coverageRef);
     const missingSubstantialMeta = metaDescription.length >= 150 && !isSubstantiallyCovered(metaDescription, coverageRef);
     if (neededMetaForSparse || missingSubstantialMeta) {
-      sections.push(`**Meta Description:** ${metaDescription}`);
+      baseSections.push(`**Meta Description:** ${metaDescription}`);
     }
   }
 
-  if (overlayMarkdown) {
-    sections.push(overlayMarkdown);
+  const overlaySections = [];
+  if (modalMarkdown) overlaySections.push(modalMarkdown);
+  if (chatMarkdown) overlaySections.push(chatMarkdown);
+
+  const baseText = baseSections.filter(Boolean).join("\n\n");
+  const activeOverlayText = overlaySections.filter(Boolean).join("\n\n");
+  const fullText = [baseText, activeOverlayText].filter(Boolean).join("\n\n");
+  const truncated = fullText.length > charBudget;
+
+  let finalMarkdown = fullText;
+  if (truncated) {
+    if (activeOverlayText) {
+      // Reserve up to 60% of charBudget (or unused base space) so active forms/overlays survive truncation
+      const overlayBudget = Math.min(
+        activeOverlayText.length,
+        Math.max(Math.floor(charBudget * 0.6), charBudget - Math.min(baseText.length, Math.floor(charBudget * 0.4)))
+      );
+      const noticeReserve = 95;
+      const baseBudget = Math.max(0, charBudget - overlayBudget - noticeReserve);
+      const keptBase = baseBudget > 0 ? baseText.slice(0, baseBudget).trimEnd() : "";
+      const truncNotice = `... [Background page truncated to preserve active modal/overlay; ${fullText.length} total chars]`;
+      const keptOverlay = activeOverlayText.slice(0, overlayBudget);
+      finalMarkdown = [keptBase, truncNotice, keptOverlay].filter(Boolean).join("\n\n");
+    } else {
+      finalMarkdown = `${fullText.slice(0, charBudget)}\n\n... [Truncated at ${charBudget} chars; ${fullText.length} total chars]`;
+    }
   }
 
-  const fullText = sections.filter(Boolean).join("\n\n");
-  const truncated = fullText.length > charBudget;
-  const finalMarkdown = truncated
-    ? `${fullText.slice(0, charBudget)}\n\n... [Truncated at ${charBudget} chars; ${fullText.length} total chars]`
-    : fullText;
+  const hasFormControls = Boolean(document.body && getVisibleFormControls(document.body).length > 0);
 
   return {
     title: document.title || "",
-    url: window.location.href || "",
+    url: currentUrl,
     markdown: finalMarkdown,
     char_count: fullText.length,
     truncated,
+    is_subframe: isSubframe,
+    has_form_controls: hasFormControls,
   };
 }
 
@@ -1163,14 +1594,27 @@ async function handleReadTabs(params = {}) {
       }
 
       try {
-        const injectionResults = await chrome.scripting.executeScript({
-          target: { tabId: tab.tab_id },
-          func: extractTabMarkdownReadOnly,
-          args: [maxChars],
-        });
+        let injectionResults;
+        try {
+          // Inject across all frames to capture embedded application forms (Greenhouse/Lever/Typeform/Luma)
+          injectionResults = await chrome.scripting.executeScript({
+            target: { tabId: tab.tab_id, allFrames: true },
+            func: extractTabMarkdownReadOnly,
+            args: [maxChars],
+          });
+        } catch (_allFramesErr) {
+          // Fall back to top frame if an iframe policy rejects allFrames injection
+          injectionResults = await chrome.scripting.executeScript({
+            target: { tabId: tab.tab_id },
+            func: extractTabMarkdownReadOnly,
+            args: [maxChars],
+          });
+        }
 
-        const first = injectionResults && injectionResults[0] ? injectionResults[0].result : null;
-        if (!first) {
+        const validFrames = Array.isArray(injectionResults)
+          ? injectionResults.filter((r) => r && r.result)
+          : [];
+        if (validFrames.length === 0) {
           return {
             ...tab,
             ok: false,
@@ -1181,14 +1625,54 @@ async function handleReadTabs(params = {}) {
           };
         }
 
+        const primaryFrame =
+          validFrames.find((r) => r.frameId === 0) ||
+          validFrames.find((r) => !r.result.is_subframe) ||
+          validFrames[0];
+        const first = primaryFrame.result;
+
+        // Merge meaningful subframes while ignoring tiny/empty tracker frames
+        const subframeSections = [];
+        for (const r of validFrames) {
+          if (r === primaryFrame) continue;
+          const sub = r.result;
+          const subMd = (sub.markdown || "").trim();
+          if (!subMd) continue;
+          if (!sub.has_form_controls && subMd.length < 120) continue;
+          const frameLabel = sub.title || sub.url || `frame ${r.frameId ?? "?"}`;
+          subframeSections.push(`---\n## Embedded Frame (${frameLabel})\n\n${subMd}`);
+        }
+
+        let mergedMarkdown = first.markdown || "";
+        let totalCharCount = first.char_count || mergedMarkdown.length;
+        let isTruncated = Boolean(first.truncated);
+
+        if (subframeSections.length > 0) {
+          const combinedFrames = subframeSections.join("\n\n");
+          totalCharCount += combinedFrames.length + 2;
+          if (mergedMarkdown.length + combinedFrames.length + 2 <= maxChars) {
+            mergedMarkdown = mergedMarkdown ? `${mergedMarkdown}\n\n${combinedFrames}` : combinedFrames;
+          } else {
+            isTruncated = true;
+            const frameBudget = Math.min(
+              combinedFrames.length,
+              Math.max(Math.floor(maxChars * 0.6), maxChars - Math.min(mergedMarkdown.length, Math.floor(maxChars * 0.4)))
+            );
+            const primaryBudget = Math.max(0, maxChars - frameBudget - 95);
+            const keptPrimary = primaryBudget > 0 ? mergedMarkdown.slice(0, primaryBudget).trimEnd() : "";
+            const notice = `... [Primary frame truncated to preserve embedded frame content; ${totalCharCount} total chars]`;
+            mergedMarkdown = [keptPrimary, notice, combinedFrames.slice(0, frameBudget)].filter(Boolean).join("\n\n");
+          }
+        }
+
         return {
           ...tab,
           title: first.title || tab.title,
           url: first.url || tab.url,
           ok: true,
-          markdown: first.markdown || "",
-          char_count: first.char_count || 0,
-          truncated: Boolean(first.truncated),
+          markdown: mergedMarkdown,
+          char_count: totalCharCount,
+          truncated: isTruncated,
           error: null,
         };
       } catch (err) {
@@ -1205,6 +1689,7 @@ async function handleReadTabs(params = {}) {
   );
 
   return {
+    bridge_version: BRIDGE_VERSION,
     requested_count: targetTabs.length,
     succeeded_count: results.filter((r) => r.ok).length,
     tabs: results,

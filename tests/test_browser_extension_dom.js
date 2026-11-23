@@ -41,6 +41,15 @@ class MockNode {
     this.parentElement = null;
     this.shadowRoot = null;
     this._text = text;
+    this.style = attrs.style && typeof attrs.style === "object" ? { ...attrs.style } : {};
+    if (attrs.value !== undefined) this.value = String(attrs.value);
+    if (attrs.checked !== undefined) this.checked = Boolean(attrs.checked);
+    if (attrs.selected !== undefined) this.selected = Boolean(attrs.selected);
+    if (attrs.required !== undefined) this.required = Boolean(attrs.required);
+    if (attrs.multiple !== undefined) this.multiple = Boolean(attrs.multiple);
+    if (attrs.rect && typeof attrs.rect === "object") {
+      this.getBoundingClientRect = () => ({ ...attrs.rect });
+    }
     if (attrs.href) this.href = attrs.href;
     if (text) this.appendChild(new MockTextNode(text));
   }
@@ -206,7 +215,7 @@ class MockTextNode {
 global.Node = { ELEMENT_NODE: 1, TEXT_NODE: 3 };
 global.window = {
   location: { href: "https://www.linkedin.com/jobs/view/999" },
-  getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+  getComputedStyle: (el) => ({ display: "block", visibility: "visible", ...(el && el.style ? el.style : {}) }),
 };
 
 // ── Test 1: Page with LinkedIn Expanded Overlay & Messages ──
@@ -378,6 +387,179 @@ global.document = attachDocumentHelpers(root5, "Loading...", body5);
 const result5 = evalFunc(20000);
 if (!result5.markdown.includes("**Meta Description:**")) {
   throw new Error("Sparse SPA shell DOM without JSON-LD MUST include substantial Meta Description");
+}
+
+// ── Test 6: Luma-style non-ARIA fixed portal registration modal + form controls ──
+const root6 = new MockNode("html");
+const body6 = root6.appendChild(new MockNode("body"));
+const next6 = body6.appendChild(new MockNode("div", { id: "__next" }));
+const main6 = next6.appendChild(new MockNode("main"));
+main6.appendChild(new MockNode("h1", {}, "Health Frontier NYC Hackathon"));
+main6.appendChild(
+  new MockNode(
+    "p",
+    {},
+    "AI x Health x Bio Hackathon in New York City. Join 100 engineers, founders, researchers, and builders for a 1.5-day hands-on sprint exploring clinical AI, personal health agents, biology, and reliable AI infrastructure with experienced mentors, curated healthcare datasets, technical demos, and technology partners across New York City."
+  )
+);
+
+const portal6 = body6.appendChild(
+  new MockNode("div", {
+    class: "lux-modal-backdrop",
+    style: { position: "fixed" },
+    rect: { width: 520, height: 680 },
+  })
+);
+portal6.appendChild(new MockNode("h2", {}, "Your Info"));
+portal6.appendChild(new MockNode("p", {}, "William Volodarsky (bill@williamvolodarsky.com)"));
+const form6 = portal6.appendChild(new MockNode("form"));
+
+const lblCompany = form6.appendChild(new MockNode("label", {}, "What company do you work for? *"));
+lblCompany.appendChild(new MockNode("input", { type: "text", required: true, value: "" }));
+
+const lblTitle = form6.appendChild(new MockNode("label", {}, "What is your job title? *"));
+lblTitle.appendChild(new MockNode("input", { type: "text", required: true, value: "" }));
+
+const lblLinkedin = form6.appendChild(new MockNode("label", {}, "What's your LinkedIn profile? *"));
+lblLinkedin.appendChild(
+  new MockNode("input", { type: "url", required: true, value: "https://linkedin.com/in/william" })
+);
+
+const lblGithub = form6.appendChild(
+  new MockNode("label", {}, "What's your Github, Gitlab, Bitbucket or other profile? (N/A if none)")
+);
+lblGithub.appendChild(new MockNode("input", { type: "text", placeholder: "github.com/username" }));
+
+const lblWhy = form6.appendChild(new MockNode("label", {}, "Why do you want to join?"));
+lblWhy.appendChild(
+  new MockNode(
+    "textarea",
+    { required: true, placeholder: "Tell us about your project" },
+    "Building local multi-agent systems"
+  )
+);
+
+const lblLevel = form6.appendChild(new MockNode("label", {}, "Experience Level"));
+const selLevel = lblLevel.appendChild(new MockNode("select", { required: true }));
+selLevel.appendChild(new MockNode("option", { value: "junior" }, "Junior"));
+selLevel.appendChild(new MockNode("option", { value: "senior", selected: true }, "Senior"));
+selLevel.appendChild(new MockNode("option", { value: "staff" }, "Staff"));
+
+const lblTerms = form6.appendChild(new MockNode("label"));
+lblTerms.appendChild(new MockNode("input", { type: "checkbox", checked: true }));
+lblTerms.appendChild(new MockTextNode("Agree to hackathon rules"));
+
+const lblSkills = form6.appendChild(new MockNode("label", {}, "What's your primary skill set? *"));
+lblSkills.appendChild(
+  new MockNode(
+    "div",
+    { role: "combobox", "aria-required": "true", "aria-controls": "skills-lb" },
+    "Select one or more"
+  )
+);
+const listbox6 = portal6.appendChild(new MockNode("div", { id: "skills-lb", role: "listbox" }));
+listbox6.appendChild(new MockNode("div", { role: "option" }, "AI/ML Engineering"));
+listbox6.appendChild(new MockNode("div", { role: "option" }, "Full-Stack"));
+
+const lblPlan = form6.appendChild(new MockNode("label", {}, "How do you plan to participate? *"));
+lblPlan.appendChild(
+  new MockNode("button", { role: "combobox", "aria-haspopup": "listbox", "aria-required": "true" }, "Select an option")
+);
+
+global.document = attachDocumentHelpers(root6, "Health Frontier NYC Hackathon · Luma", body6);
+const result6 = evalFunc(20000);
+if (!result6.markdown.includes("## Active Modal / Dialog")) throw new Error("Test 6 missing Active Modal / Dialog header");
+if (!result6.markdown.includes("### Your Info")) throw new Error("Test 6 missing Your Info modal header");
+if (!result6.markdown.includes("What company do you work for? *")) throw new Error("Test 6 missing company label");
+if (!result6.markdown.includes("What is your job title? *")) throw new Error("Test 6 missing job title label");
+if (!result6.markdown.includes("What's your LinkedIn profile? *")) throw new Error("Test 6 missing LinkedIn label");
+if (!result6.markdown.includes("https://linkedin.com/in/william")) throw new Error("Test 6 missing typed URL value");
+if (!result6.markdown.includes('placeholder="github.com/username"')) throw new Error("Test 6 missing placeholder");
+if (!result6.markdown.includes("Building local multi-agent systems")) throw new Error("Test 6 missing textarea value");
+if (!result6.markdown.includes('selected="Senior"') || !result6.markdown.includes("Junior | Senior | Staff")) {
+  throw new Error("Test 6 missing select value or options");
+}
+if (!result6.markdown.includes("[x] Agree to hackathon rules")) throw new Error("Test 6 missing checked checkbox");
+if (!result6.markdown.includes("Select one or more") || !result6.markdown.includes("AI/ML Engineering | Full-Stack")) {
+  throw new Error("Test 6 missing combobox label or controlled options");
+}
+if (!result6.markdown.includes("Select an option")) throw new Error("Test 6 missing second combobox");
+if (!result6.markdown.includes("Join 100 engineers, founders, researchers")) {
+  throw new Error("Test 6 missing background event description");
+}
+if (result6.markdown.includes("- **Sender:**")) {
+  throw new Error("Test 6 must NOT mislabel registration modal as chat Sender");
+}
+
+// ── Test 7: Form dialog containing `data-testid="error-message"` (must not trigger chat mode) ──
+const root7 = new MockNode("html");
+const body7 = root7.appendChild(new MockNode("body"));
+const main7 = body7.appendChild(new MockNode("main"));
+main7.appendChild(new MockNode("p", {}, "Background application overview content that exceeds minimum length thresholds for semantic primary extraction in Nexus Browser Bridge DOM parsing tests."));
+const dlg7 = body7.appendChild(new MockNode("div", { role: "dialog", "aria-modal": "true" }));
+dlg7.appendChild(new MockNode("h2", {}, "Complete Application"));
+dlg7.appendChild(new MockNode("p", { "data-testid": "error-message" }, "Please fix highlighted fields."));
+const f7 = dlg7.appendChild(new MockNode("form"));
+f7.appendChild(new MockNode("label", {}, "Full Name *")).appendChild(new MockNode("input", { type: "text", required: true }));
+f7.appendChild(new MockNode("label", {}, "Email *")).appendChild(new MockNode("input", { type: "email", required: true }));
+
+global.document = attachDocumentHelpers(root7, "Complete Application", body7);
+const result7 = evalFunc(20000);
+if (!result7.markdown.includes("## Active Modal / Dialog")) throw new Error("Test 7 missing Active Modal / Dialog");
+if (result7.markdown.includes("## Active Chat & Floating Overlays") || result7.markdown.includes("- **Sender:**")) {
+  throw new Error("Test 7 form dialog with error-message testid was hijacked by chat parser");
+}
+if (!result7.markdown.includes("Full Name *") || !result7.markdown.includes("Email *")) {
+  throw new Error("Test 7 dropped form inputs");
+}
+
+// ── Test 8: Truncation budget protection preserves active `aria-modal="true"` form dialog ──
+const root8 = new MockNode("html");
+const body8 = root8.appendChild(new MockNode("body"));
+const main8 = body8.appendChild(new MockNode("main"));
+const longFiller = "Detailed background hackathon logistics and partner descriptions. ".repeat(80);
+main8.appendChild(new MockNode("p", {}, longFiller));
+const dlg8 = body8.appendChild(new MockNode("div", { "aria-modal": "true" }));
+dlg8.appendChild(new MockNode("h2", {}, "Registration Questions"));
+const f8 = dlg8.appendChild(new MockNode("form"));
+f8.appendChild(new MockNode("label", {}, "Target Role *")).appendChild(new MockNode("input", { type: "text", required: true }));
+
+global.document = attachDocumentHelpers(root8, "Long Event Page", body8);
+const result8 = evalFunc(1200);
+if (!result8.truncated) throw new Error("Test 8 expected truncated === true");
+if (!result8.markdown.includes("## Active Modal / Dialog") || !result8.markdown.includes("Target Role *")) {
+  throw new Error("Test 8 truncated away active modal form fields");
+}
+
+// ── Test 9: Closed opacity:0 modal skipped & password field redacted ──
+const root9 = new MockNode("html");
+const body9 = root9.appendChild(new MockNode("body"));
+const main9 = body9.appendChild(new MockNode("main"));
+main9.appendChild(new MockNode("h1", {}, "Account Security"));
+const loginForm9 = main9.appendChild(new MockNode("form"));
+loginForm9.appendChild(new MockNode("label", {}, "Password")).appendChild(
+  new MockNode("input", { type: "password", value: "SuperSecret99!" })
+);
+main9.appendChild(
+  new MockNode(
+    "p",
+    {},
+    "Additional security policy details ensuring the main container passes semantic extraction thresholds cleanly across DOM runs. Two-factor authentication, hardware security keys, session timeouts, and strict password hygiene protect your workspace account against unauthorized access across all connected sessions."
+  )
+);
+const hiddenModal9 = body9.appendChild(
+  new MockNode("div", { class: "lux-modal", style: { position: "fixed", opacity: "0" } })
+);
+hiddenModal9.appendChild(new MockNode("h2", {}, "CLOSED_OPACITY_ZERO_MODAL"));
+hiddenModal9.appendChild(new MockNode("p", {}, "This closed modal content must never appear in extracted markdown."));
+
+global.document = attachDocumentHelpers(root9, "Account Security", body9);
+const result9 = evalFunc(20000);
+if (result9.markdown.includes("CLOSED_OPACITY_ZERO_MODAL")) {
+  throw new Error("Test 9 failed to skip opacity:0 closed modal");
+}
+if (result9.markdown.includes("SuperSecret99!") || !result9.markdown.includes("(redacted)")) {
+  throw new Error("Test 9 failed to redact password input value");
 }
 
 console.log("All Node.js browser extension DOM tests passed successfully!");

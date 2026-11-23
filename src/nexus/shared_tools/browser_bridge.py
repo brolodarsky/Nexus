@@ -31,6 +31,7 @@ FASTAPI_BASE_URL = "http://127.0.0.1:8000/api/browser"
 CLI_WS_HOST = "127.0.0.1"
 CLI_WS_PORT = 8765
 API_WS_PORT = 8000
+EXPECTED_BRIDGE_VERSION = "1.1.0"
 EXTENSION_DIR: Path = PROJECT_ROOT / "src" / "nexus" / "shared_tools" / "browser_extension"
 
 
@@ -84,10 +85,11 @@ async def _execute_via_ephemeral_ws(
     result_future: asyncio.Future[Dict[str, Any]] = loop.create_future()
     request_id = str(uuid.uuid4())
     command_sent = False
+    hello_version: Optional[str] = None
 
     # Handler invoked by `websockets.serve` when the Chrome Extension connects to `/api/browser/ws`
     async def _ws_handler(websocket: ServerConnection) -> None:
-        nonlocal command_sent
+        nonlocal command_sent, hello_version
         try:
             # Send our RPC request immediately upon connection
             if not command_sent:
@@ -108,6 +110,9 @@ async def _execute_via_ephemeral_ws(
                     msg = json.loads(raw_frame)
                 except Exception:
                     continue
+
+                if msg.get("type") == "hello" and isinstance(msg.get("bridge_version"), str):
+                    hello_version = msg.get("bridge_version")
 
                 if msg.get("type") == "response" and msg.get("request_id") == request_id:
                     if not result_future.done():
@@ -156,11 +161,16 @@ async def _execute_via_ephemeral_ws(
                 "ok": False,
                 "error": response.get("error") or f"Chrome Extension reported error for '{action}'.",
             }
-        return {
+        data = response.get("data") or {}
+        loaded_version = (data.get("bridge_version") if isinstance(data, dict) else None) or hello_version
+        result: Dict[str, Any] = {
             "ok": True,
             "transport": f"ephemeral_ws:{CLI_WS_PORT}",
-            "data": response.get("data") or {},
+            "data": data,
         }
+        if loaded_version:
+            result["bridge_version"] = loaded_version
+        return result
     except asyncio.TimeoutError:
         return {
             "ok": False,
@@ -207,14 +217,18 @@ def _dispatch_browser_command(
             if status_resp.status_code == 200:
                 status_json = status_resp.json()
                 if status_json.get("connected"):
+                    loaded_version = (status_json.get("metadata") or {}).get("bridge_version")
                     # FastAPI has an active Chrome Extension socket! Route through REST API.
                     with httpx.Client(timeout=timeout) as api_client:
                         if action == "ping":
-                            return {
+                            ping_out: Dict[str, Any] = {
                                 "ok": True,
                                 "transport": "fastapi:8000",
                                 "data": status_json.get("metadata") or status_json,
                             }
+                            if loaded_version:
+                                ping_out["bridge_version"] = loaded_version
+                            return ping_out
                         elif action == "list_tabs":
                             r = api_client.get(f"{FASTAPI_BASE_URL}/tabs", params=clean_params)
                         elif action == "read_tabs":
@@ -223,11 +237,18 @@ def _dispatch_browser_command(
                             return {"ok": False, "error": f"Unknown action: {action}"}
 
                         if r.status_code == 200:
-                            return {
+                            resp_data = r.json()
+                            eff_version = (
+                                resp_data.get("bridge_version") if isinstance(resp_data, dict) else None
+                            ) or loaded_version
+                            out: Dict[str, Any] = {
                                 "ok": True,
                                 "transport": "fastapi:8000",
-                                "data": r.json(),
+                                "data": resp_data,
                             }
+                            if eff_version:
+                                out["bridge_version"] = eff_version
+                            return out
                         detail = r.json().get("detail") if r.headers.get("content-type", "").startswith("application/json") else r.text
                         return {"ok": False, "error": f"FastAPI browser bridge error ({r.status_code}): {detail}"}
     except Exception:
@@ -254,15 +275,22 @@ def get_bridge_status() -> Dict[str, Any]:
         return {
             "connected": False,
             "mode": "read_only",
+            "expected_bridge_version": EXPECTED_BRIDGE_VERSION,
             "extension_dir": str(EXTENSION_DIR),
             "error": res.get("error"),
         }
+    meta = res.get("data", {}) or {}
+    loaded_version = (meta.get("bridge_version") if isinstance(meta, dict) else None) or res.get("bridge_version")
+    update_required = bool(isinstance(loaded_version, str) and loaded_version and loaded_version != EXPECTED_BRIDGE_VERSION)
     return {
         "connected": True,
         "mode": "read_only",
         "transport": res.get("transport"),
+        "expected_bridge_version": EXPECTED_BRIDGE_VERSION,
+        "loaded_bridge_version": loaded_version,
+        "update_required": update_required,
         "extension_dir": str(EXTENSION_DIR),
-        "metadata": res.get("data", {}),
+        "metadata": meta,
     }
 
 
@@ -419,9 +447,19 @@ def format_tab_reads_as_markdown(result: Dict[str, Any]) -> str:
     if not tabs:
         return "No matching Chrome tabs found to read."
 
-    blocks: List[str] = [
+    header_lines: List[str] = [
         f"# Extracted Chrome Tab Content ({ok_count}/{req_count} tabs read successfully)"
     ]
+    # Surface an explicit reload warning only when the extension reports a mismatched version
+    loaded_version = data.get("bridge_version") or result.get("bridge_version")
+    if isinstance(loaded_version, str) and loaded_version and loaded_version != EXPECTED_BRIDGE_VERSION:
+        header_lines.append(
+            f"\n> ⚠️ **Stale Chrome Extension Detected:** Chrome is running Nexus Browser Bridge "
+            f"`v{loaded_version}` (expected `v{EXPECTED_BRIDGE_VERSION}`). Open `chrome://extensions` "
+            f"and click **Reload** on *Nexus Browser Bridge (Read-Only)* to activate the latest "
+            f"DOM/modal/form extractor."
+        )
+    blocks: List[str] = ["\n".join(header_lines)]
 
     for idx, t in enumerate(tabs, start=1):
         tid = t.get("tab_id")
@@ -530,11 +568,18 @@ def main() -> None:
             print(json.dumps(status, indent=2, ensure_ascii=False))
         elif status.get("connected"):
             meta = status.get("metadata") or {}
+            loaded_ver = status.get("loaded_bridge_version") or "?"
             print(
                 f"✅ Nexus Browser Bridge Connected ({status.get('transport')})\n"
-                f"   Mode: {status.get('mode')}\n"
+                f"   Mode: {status.get('mode')} | Version: v{loaded_ver} (expected v{status.get('expected_bridge_version')})\n"
                 f"   Open Tabs: {meta.get('tab_count', '?')} | Tab Groups: {meta.get('group_count', '?')}"
             )
+            if status.get("update_required"):
+                print(
+                    f"⚠️  Stale Chrome Extension detected: Chrome is running v{loaded_ver} "
+                    f"(expected v{status.get('expected_bridge_version')}).\n"
+                    "   Open chrome://extensions and click Reload on 'Nexus Browser Bridge (Read-Only)'."
+                )
         else:
             print(f"❌ Nexus Browser Bridge Disconnected\n{status.get('error')}")
             sys.exit(1)

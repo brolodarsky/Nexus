@@ -300,3 +300,75 @@ def test_fastapi_browser_router_status_when_disconnected() -> None:
     tabs_res = client.get("/api/browser/tabs")
     assert tabs_res.status_code == 503
     assert "chrome://extensions" in tabs_res.json()["detail"]
+
+
+def test_format_tab_reads_version_drift_warning() -> None:
+    """Emit stale-extension reload callout only when a mismatched bridge_version is reported."""
+    base_tab = {
+        "tab_id": 7,
+        "title": "Luma Event",
+        "url": "https://luma.com/abc",
+        "ok": True,
+        "char_count": 25,
+        "truncated": False,
+        "markdown": "## Your Info\nName",
+    }
+
+    stale_res = {
+        "ok": True,
+        "bridge_version": "1.0.0",
+        "data": {"requested_count": 1, "succeeded_count": 1, "tabs": [base_tab]},
+    }
+    stale_md = browser_bridge.format_tab_reads_as_markdown(stale_res)
+    assert "Stale Chrome Extension Detected" in stale_md
+    assert "v1.0.0" in stale_md
+    assert f"v{browser_bridge.EXPECTED_BRIDGE_VERSION}" in stale_md
+
+    current_res = {
+        "ok": True,
+        "data": {
+            "bridge_version": browser_bridge.EXPECTED_BRIDGE_VERSION,
+            "requested_count": 1,
+            "succeeded_count": 1,
+            "tabs": [base_tab],
+        },
+    }
+    current_md = browser_bridge.format_tab_reads_as_markdown(current_res)
+    assert "Stale Chrome Extension Detected" not in current_md
+
+    omitted_res = {
+        "ok": True,
+        "data": {"requested_count": 1, "succeeded_count": 1, "tabs": [base_tab]},
+    }
+    omitted_md = browser_bridge.format_tab_reads_as_markdown(omitted_res)
+    assert "Stale Chrome Extension Detected" not in omitted_md
+
+
+def test_get_bridge_status_flags_update_required() -> None:
+    """Verify `get_bridge_status()` sets `update_required` accurately from loaded version."""
+    with patch(
+        "nexus.shared_tools.browser_bridge._dispatch_browser_command",
+        return_value={
+            "ok": True,
+            "transport": "fastapi:8000",
+            "data": {"bridge_version": "1.0.0", "tab_count": 4, "group_count": 0},
+        },
+    ):
+        stale_status = browser_bridge.get_bridge_status()
+        assert stale_status["connected"] is True
+        assert stale_status["loaded_bridge_version"] == "1.0.0"
+        assert stale_status["expected_bridge_version"] == browser_bridge.EXPECTED_BRIDGE_VERSION
+        assert stale_status["update_required"] is True
+
+    with patch(
+        "nexus.shared_tools.browser_bridge._dispatch_browser_command",
+        return_value={
+            "ok": True,
+            "transport": "fastapi:8000",
+            "data": {"bridge_version": browser_bridge.EXPECTED_BRIDGE_VERSION, "tab_count": 4, "group_count": 0},
+        },
+    ):
+        fresh_status = browser_bridge.get_bridge_status()
+        assert fresh_status["connected"] is True
+        assert fresh_status["loaded_bridge_version"] == browser_bridge.EXPECTED_BRIDGE_VERSION
+        assert fresh_status["update_required"] is False

@@ -2,8 +2,21 @@
  * popup.js — Status inspector and manual reconnect trigger for the Nexus Browser Bridge popup UI.
  */
 
+// Populate extension manifest version in the popup UI when available
+function renderExtensionVersion() {
+  const versionEl = document.getElementById("ext-version");
+  if (!versionEl) return;
+  try {
+    const manifest = chrome.runtime && chrome.runtime.getManifest ? chrome.runtime.getManifest() : null;
+    versionEl.textContent = manifest && manifest.version ? `v${manifest.version}` : "—";
+  } catch (_err) {
+    versionEl.textContent = "—";
+  }
+}
+
 // Refresh status metrics displayed in popup.html by messaging background.js
 function refreshPopupStatus() {
+  renderExtensionVersion();
   chrome.runtime.sendMessage({ type: "NEXUS_GET_POPUP_STATUS" }, (res) => {
     if (chrome.runtime.lastError || !res) {
       return;
