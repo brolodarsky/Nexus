@@ -133,7 +133,7 @@ _Financial and logistical systems to support a life of freedom._ The "Engine"
 
 ### 3.1.1. Market Research & Future of Work
 - **[[Concept - AI Superagency & The Future of Work]]**
-- **[[Common Employer Skill Requirements]]:** Desired skills from job descriptions.
+- **[[Common Skill Requirements]]:** Desired skills from job descriptions.
 - **📁 Saved Articles:** AI and Job Market research (Linked within [[Concept - AI Superagency & The Future of Work#5. "No-Regret" Strategies for Professionals & Graduates|AI Superagency Synthesis]]).
 - **📁 Saved Job Listings**
 
@@ -350,6 +350,7 @@ _The Content Log & Reference_
 - **Project - Domain Portfolio**: Management and monetization of SiliSlick.com and others.
 - **Todo**: Project - Silislick Overall Optimization
 - **[[Project - Silislick Web Optimization]]**: Modernizing the family business website, fixing SEO, and upgrading aesthetics.
+- **[[Project - Silislick Fulfillment & Inventory Automation]]:** Inventory ledger reconciliation and multi-channel fulfillment workflow automation for Amazon and Walmart.
 
 ### 6.1.4. Script Attic
 - Inactive tools, experiments, and one-off Python scripts.
@@ -366,10 +367,11 @@ _The Content Log & Reference_
 - **[[Overview - AI Agents]]**
 - **Architectures:** Shift from conversational ReAct loops to Stateful Orchestration (State Machines, Flow Engineering, Reflexion).
 - **Memory & State:** Persistent state management, token-efficiency optimizations, and GraphRAG.
-	- **[[Concept - Cognitive Boundaries & Event-Driven Agent Memory]]:** Neuroscience Event Segmentation Theory (EST), Von Neumann hardware mapping (ALU/RAM/Disk), two-phase sleep consolidation, and impedance matching.
+	- **[[Concept - Cognitive Boundaries & Event-Driven Memory]]:** Neuroscience Event Segmentation Theory (EST), Von Neumann hardware mapping (ALU/RAM/Disk), two-phase sleep consolidation, and impedance matching.
 	- **[[Concept - Cognitive Impedance Matching & AI System Coupling]]**
 #### Agent Tool Use & Integration (The "Hands")
 - **[[Function Calling & Structured Outputs]]:** The foundational bridge between LLMs and code execution (JSON schema enforcement).
+- **[[Concept - Decision Models]]:** Non-autoregressive closed-set evaluation, low-latency intent routing, and agent control planes.
 - **[[Concept - Tool Context & Instruction Architecture in Nexus]]:** Four-layer separation between bound `@tool` mechanics, `[CLI]` catalog discovery, on-demand autopoietic `Protocol - *.md` playbooks, and `Master`/`Section Instructions`.
 - **Tool Protocols:** **[[Concept - Model Context Protocol (MCP)]]:** Universal open standard for providing models with secure data context and tool access.
 	- **[[Concept - CLI vs MCP for AI Agents]]**
@@ -397,6 +399,7 @@ _The Content Log & Reference_
 	- **[[Article - Agent Harness Engineering vs. Loop Engineering vs. Graph Engineering]]**
 	- **[[Article - The Impedance Mismatch of Human-AI Systems]]**
 	- **[[Article - We Analyzed 534 Agentic AI Engineering Jobs. Here's the LangChain Market]]**
+	- **[[Article - Gemini Decisions API - Fast Multimodal Decisions]]**
 	- **[[Capture - YouTube - CLI vs MCP for AI Agents]]**
 
 ### 6.2.2. Language Models & Production RAG
