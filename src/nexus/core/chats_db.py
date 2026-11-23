@@ -290,6 +290,10 @@ def delete_conversation(conversation_id: str):
         conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
         conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
         conn.commit()
+    # Purge any cached instruction-hydration ledger entries for this thread and its `:subagent-*` children.
+    from nexus.core.instruction_guard import clear_seen_instructions
+
+    clear_seen_instructions(conversation_id)
 
 # `*` enforces keyword-only optional guards so legacy positional callers `update_conversation_title(id, title)` remain compatible
 def update_conversation_title(

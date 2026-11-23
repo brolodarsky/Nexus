@@ -11,6 +11,7 @@ import sqlite3
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+import yaml
 
 from nexus.core.constants import IGNORE_DIRS, VAULT_PATH
 
@@ -182,6 +183,333 @@ def _parse_frontmatter_tags(content: str) -> list:
         return tags
 
     return []
+
+
+# Compiled frontmatter fence regex: captures YAML block between leading `---` fences (`re.DOTALL` lets `.` span newlines).
+_FRONTMATTER_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---(?:\r?\n|$)", re.DOTALL)
+# ATX heading regex: matches `#` through `######`, capturing hashes and heading text while stripping trailing `#` closes.
+_ATX_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*$")
+# Fenced code block delimiter regex: matches leading `` ``` `` or `~~~` (3+ identical chars) to ignore `#` inside code.
+_CODE_FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
+# Obsidian callout opener regex: matches `> [!note]`, `> [!warning]`, `> [!abstract]`, etc.
+_CALLOUT_OPENER_RE = re.compile(r"^>\s*\[![A-Za-z0-9_-]+\]")
+
+
+# `content: str` is raw Markdown note text.
+# -> Tuple[Dict[str, Any], int] returns `(parsed_yaml_dict, fm_end_line_1idx)` where `fm_end_line_1idx` is 0 if absent.
+def parse_frontmatter(content: str) -> Tuple[Dict[str, Any], int]:
+    """Deterministically parses YAML frontmatter via PyYAML and returns `(frontmatter_dict, closing_fence_line_1idx)`."""
+    if not content:
+        return {}, 0
+
+    # Strip an optional UTF-8 Byte Order Mark (`\ufeff`) so Windows-saved notes still match leading `---`.
+    normalized = content.lstrip("\ufeff")
+    match = _FRONTMATTER_RE.match(normalized)
+    if not match:
+        return {}, 0
+
+    # `splitlines()` drops a trailing newline, so `len(prefix.splitlines())` equals the 1-indexed closing `---` line.
+    fm_end_line = len(normalized[: match.end()].splitlines())
+    raw_yaml = match.group(1)
+    try:
+        parsed = yaml.safe_load(raw_yaml)
+    except yaml.YAMLError:
+        return {}, fm_end_line
+
+    if isinstance(parsed, dict):
+        return parsed, fm_end_line
+    return {}, fm_end_line
+
+
+def _extract_instructions_regex_fallback(frontmatter_body: str) -> List[str]:
+    """Regex fallback for `instructions:` when PyYAML rejects unquoted colons or malformed YAML inside frontmatter."""
+    if not frontmatter_body:
+        return []
+
+    # Case 1: Inline YAML array syntax (`instructions: [Rule 1, Rule 2]`).
+    inline_match = re.search(r"^instructions:\s*\[([^\]]*)\]", frontmatter_body, re.MULTILINE)
+    if inline_match:
+        items = []
+        for raw_item in inline_match.group(1).split(","):
+            cleaned = raw_item.strip().strip('"').strip("'").strip()
+            if cleaned:
+                items.append(cleaned)
+        return items
+
+    # Case 2: Multi-line YAML bullet list syntax (`instructions:\n  - Rule 1`).
+    list_match = re.search(r"^instructions:\s*\r?\n((?:\s*-\s+.*\r?\n?)+)", frontmatter_body, re.MULTILINE)
+    if list_match:
+        items = []
+        for raw_line in list_match.group(1).splitlines():
+            stripped = raw_line.strip()
+            if stripped.startswith("- "):
+                val = stripped[2:].strip()
+                if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                    val = val[1:-1].strip()
+                if val:
+                    items.append(val)
+        return items
+
+    # Case 3: Single-line scalar (`instructions: Always keep synced.`).
+    scalar_match = re.search(r"^instructions:\s*(.+)$", frontmatter_body, re.MULTILINE)
+    if scalar_match:
+        val = scalar_match.group(1).strip()
+        if val and not val.startswith("["):
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                val = val[1:-1].strip()
+            return [val] if val else []
+
+    return []
+
+
+# `content: str` is raw Markdown note text.
+# -> Tuple[List[str], int] returns normalized `instructions:` rule strings plus the 1-indexed closing frontmatter line.
+def extract_frontmatter_instructions(content: str) -> Tuple[List[str], int]:
+    """Extracts and normalizes document-level `instructions:` contracts from YAML frontmatter (with regex fallback)."""
+    fm, fm_end_line = parse_frontmatter(content)
+
+    if not fm and fm_end_line > 0:
+        normalized = content.lstrip("\ufeff")
+        match = _FRONTMATTER_RE.match(normalized)
+        if match:
+            return _extract_instructions_regex_fallback(match.group(1)), fm_end_line
+        return [], fm_end_line
+
+    raw_val = fm.get("instructions")
+    if raw_val is None:
+        return [], fm_end_line
+
+    if isinstance(raw_val, str):
+        cleaned = raw_val.strip()
+        return ([cleaned] if cleaned else []), fm_end_line
+
+    if isinstance(raw_val, list):
+        items: List[str] = []
+        for entry in raw_val:
+            if isinstance(entry, dict):
+                # PyYAML parses unquoted `- Rule: detail` bullets as 1-key dicts; reconstruct clean text.
+                for k, v in entry.items():
+                    text_part = f"{k}: {v}" if v is not None else f"{k}:"
+                    if text_part.strip():
+                        items.append(text_part.strip())
+            elif entry is not None:
+                cleaned = str(entry).strip()
+                if cleaned:
+                    items.append(cleaned)
+        return items, fm_end_line
+
+    if isinstance(raw_val, dict):
+        items = []
+        for key, val in raw_val.items():
+            if val is not None and str(val).strip():
+                items.append(f"{key}: {str(val).strip()}")
+        return items, fm_end_line
+
+    return [], fm_end_line
+
+
+def _is_plain_lead_in_boundary(line: str) -> bool:
+    """Returns True when a line following a 1-line heading rule is EOF, blank, heading, table, HR, or list item."""
+    if not line:
+        return True
+    if line.startswith(("#", "|", "---", "***", "- ", "* ", "+ ")):
+        return True
+    return bool(re.match(r"^\d+[.)]\s", line))
+
+
+def _extract_inline_heading_rule_with_span(
+    lines: List[str],
+    heading_idx: int,
+) -> Tuple[Optional[str], Optional[int]]:
+    """Extracts an inline directive immediately beneath a heading and returns `(rule_text, 1idx_end_line)`."""
+    n_lines = len(lines)
+    j = heading_idx + 1
+    blank_count = 0
+
+    # Skip at most 1 blank line between a heading and an explicit italic/callout directive.
+    while j < n_lines and not lines[j].strip():
+        blank_count += 1
+        if blank_count > 1:
+            return None, None
+        j += 1
+
+    if j >= n_lines:
+        return None, None
+
+    s = lines[j].strip()
+    if not s:
+        return None, None
+
+    # Case A: Single-asterisk (`*...*`) or single-underscore (`_..._`) italic directive (excluding `* ` bullets and `**bold**`).
+    is_single_star_italic = (
+        s.startswith("*")
+        and not s.startswith(("* ", "**"))
+        and s.endswith("*")
+        and not re.fullmatch(r"\*+", s)
+        and len(s) > 2
+    )
+    is_single_under_italic = (
+        s.startswith("_")
+        and not s.startswith(("_ ", "__"))
+        and s.endswith("_")
+        and not re.fullmatch(r"_+", s)
+        and len(s) > 2
+    )
+    if is_single_star_italic or is_single_under_italic:
+        return s[:400], j + 1
+
+    # Case B: Obsidian callout block (`> [!note]`, `> [!warning]`, `> [!abstract]`, etc.) up to 4 lines / 400 chars.
+    if _CALLOUT_OPENER_RE.match(s):
+        collected: List[str] = [s]
+        total_len = len(s)
+        end_idx = j
+        k = j + 1
+        while k < n_lines and len(collected) < 4:
+            nxt = lines[k].strip()
+            if not nxt.startswith(">"):
+                break
+            if total_len + 1 + len(nxt) > 400:
+                break
+            collected.append(nxt)
+            total_len += 1 + len(nxt)
+            end_idx = k
+            k += 1
+        return "\n".join(collected), end_idx + 1
+
+    # Case C: Immediate 1-line plain lead-in rule directly below heading (0 blank lines, e.g. `## Active\nReserved strictly for...`).
+    if blank_count == 0 and len(s) <= 350:
+        disallowed_prefixes = ("#", "- ", "* ", "+ ", "|", "```", "~~~", "---", "***", ">", "**")
+        if not s.startswith(disallowed_prefixes) and not re.match(r"^\d+[.)]\s", s):
+            next_stripped = lines[j + 1].strip() if (j + 1) < n_lines else ""
+            if _is_plain_lead_in_boundary(next_stripped):
+                return s, j + 1
+
+    return None, None
+
+
+def _extract_inline_heading_rule(lines: List[str], heading_idx: int) -> Optional[str]:
+    """Detects an italic directive, Obsidian callout, or 1-line lead-in rule immediately beneath a heading."""
+    rule_text, _ = _extract_inline_heading_rule_with_span(lines, heading_idx)
+    return rule_text
+
+
+# `content: str` is raw Markdown note text.
+# -> List[Dict[str, Any]] returns headings in file order with `level`, `text`, `raw_heading`, `line`, `inline_rule`, `rule_end_line`.
+def extract_all_headings_with_rules(content: str) -> List[Dict[str, Any]]:
+    """Scans Markdown headings (skipping frontmatter and fenced code blocks) alongside any inline heading rules."""
+    if not content:
+        return []
+
+    _, fm_end_line = parse_frontmatter(content)
+    lines = content.splitlines()
+    headings: List[Dict[str, Any]] = []
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+
+    for idx, raw_line in enumerate(lines):
+        line_num = idx + 1
+        # Skip YAML frontmatter lines (`1..fm_end_line`) so YAML comments or `---` never parse as body headings.
+        if line_num <= fm_end_line:
+            continue
+
+        stripped = raw_line.strip()
+        fence_match = _CODE_FENCE_RE.match(raw_line)
+        if fence_match:
+            marker = fence_match.group(1)
+            if not in_fence:
+                in_fence = True
+                fence_char = marker[0]
+                fence_len = len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_len and stripped == marker:
+                in_fence = False
+                fence_char = ""
+                fence_len = 0
+            continue
+
+        if in_fence:
+            continue
+
+        h_match = _ATX_HEADING_RE.match(stripped)
+        if not h_match:
+            continue
+
+        hashes, text = h_match.group(1), h_match.group(2).strip()
+        inline_rule, rule_end_line = _extract_inline_heading_rule_with_span(lines, idx)
+        headings.append(
+            {
+                "level": len(hashes),
+                "text": text,
+                "raw_heading": stripped,
+                "line": line_num,
+                "inline_rule": inline_rule,
+                "rule_end_line": rule_end_line,
+            }
+        )
+
+    return headings
+
+
+# `target_line_1idx: int` is the 1-indexed line whose enclosing heading stack is needed.
+# `inclusive: bool = False` includes a heading sitting exactly on `target_line_1idx` when True (write gate) vs strictly `<` (partial read).
+def extract_heading_context_for_line(
+    content: str,
+    target_line_1idx: int,
+    inclusive: bool = False,
+) -> List[Dict[str, Any]]:
+    """Returns the active ancestor heading stack (outermost to innermost) enclosing `target_line_1idx`."""
+    if target_line_1idx <= 0:
+        return []
+
+    stack: List[Dict[str, Any]] = []
+    for heading in extract_all_headings_with_rules(content):
+        h_line = heading["line"]
+        if h_line < target_line_1idx:
+            # Pop headings at equal or deeper level (`>=`) so ended sibling/child sections unwind cleanly.
+            while stack and stack[-1]["level"] >= heading["level"]:
+                stack.pop()
+            stack.append(heading)
+        elif h_line == target_line_1idx:
+            # If `target_line_1idx` is itself a heading, still unwind ended siblings before optionally pushing it.
+            while stack and stack[-1]["level"] >= heading["level"]:
+                stack.pop()
+            if inclusive:
+                stack.append(heading)
+            break
+        else:
+            break
+    return stack
+
+
+def format_partial_read_context(
+    content: str,
+    start_line_1idx: int,
+    end_line_1idx: int,
+) -> str:
+    """Formats missing frontmatter `instructions:` and enclosing heading rules to prepend on sliced `read_file` reads."""
+    fm_instructions, fm_end_line = extract_frontmatter_instructions(content)
+    # Include frontmatter instructions whenever the slice starts past line 1 OR ends before the closing `---` fence.
+    include_fm = bool(fm_instructions) and (start_line_1idx > 1 or end_line_1idx < fm_end_line)
+    enclosing = extract_heading_context_for_line(content, start_line_1idx, inclusive=False) if start_line_1idx > 1 else []
+
+    if not include_fm and not enclosing:
+        return ""
+
+    parts: List[str] = ["[Document Context — Always obey when reading or editing this slice]"]
+    if include_fm:
+        parts.append("Document Instructions (frontmatter):")
+        for rule in fm_instructions:
+            parts.append(f"  - {rule}")
+    if enclosing:
+        parts.append("Enclosing Section Path:")
+        for heading in enclosing:
+            rule = heading.get("inline_rule")
+            if rule:
+                formatted_rule = rule.replace("\n", "\n      ")
+                parts.append(f"  - `{heading['raw_heading']}` (L{heading['line']}) — {formatted_rule}")
+            else:
+                parts.append(f"  - `{heading['raw_heading']}` (L{heading['line']})")
+    return "\n".join(parts)
 
 
 # Optional[int] (int | None) allows callers to optionally slice a specific 1-indexed line range (start_line..end_line) for large files.
@@ -380,6 +708,9 @@ def read_note_content(
             s_idx = max(0, (start_line - 1) if start_line and start_line > 0 else 0)
             e_idx = min(total_lines, end_line if end_line is not None else total_lines)
             selected = "\n".join(all_lines[s_idx:e_idx])
+            ctx_banner = format_partial_read_context(content, s_idx + 1, e_idx)
+            if ctx_banner:
+                return f"--- File: {rel_path} (lines {s_idx + 1}-{e_idx} of {total_lines}) ---\n{ctx_banner}\n\n{selected}"
             return f"--- File: {rel_path} (lines {s_idx + 1}-{e_idx} of {total_lines}) ---\n\n{selected}"
 
         return f"--- File: {rel_path} ---\n\n" + content

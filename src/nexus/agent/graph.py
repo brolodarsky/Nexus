@@ -27,6 +27,7 @@ import sqlite3
 # threading: Provides thread-safe locking (`Lock`) for assigning unique serial numbers to parallel subagents
 import threading
 import time
+import uuid
 from pathlib import Path
 # Typing primitives:
 # - TypedDict: Enforces key-value types for the LangGraph state dictionary
@@ -74,6 +75,11 @@ from nexus.core.hitl_queue import (
     get_hitl_execution_context,
     reset_hitl_execution_context,
     set_hitl_execution_context,
+)
+from nexus.core.instruction_guard import (
+    clear_seen_instructions,
+    reset_instruction_batch_id,
+    set_instruction_batch_id,
 )
 from nexus.core.trace import (
     RESULT_TRUNCATE_LEN,
@@ -742,6 +748,7 @@ def spawn_subagent(
     AND/OR per-conversation external capture keys (`"cache://tab/<slug>"`, `"cache://web/<slug>"`, `"cache://email/<id>"`, `"cache://"` manifest, or cached URLs)
     via `context_files`. Python resolves them directly (zero Commander context bloat, zero extra subagent tool turns)
     and prepends `# Pre-Hydrated Disk Context` to the subagent's initial prompt.
+    Governing ancestor `Section Instructions.md` files referenced by `context_files` or `task_prompt` are also discovered and pre-hydrated automatically.
     If any path or cache key cannot be resolved, `spawn_subagent` fails fast before calling the LLM
     and surfaces actual sibling files or available `cache://` keys in this conversation.
 
@@ -814,25 +821,28 @@ def spawn_subagent(
     deadline = t0 + subagent_timeout_s
 
     try:
-        # Resolve and pre-hydrate any requested `context_files` before building/invoking the subagent LLM.
-        # If any path is hallucinated/missing on disk, fail fast and surface real sibling files to the Commander.
+        # Resolve explicit `context_files` AND auto-discovered ancestor `Section Instructions.md` files before Turn 1.
+        # If any explicit path is hallucinated/missing on disk, fail fast and surface real sibling files to the Commander.
         effective_task_prompt = task_prompt
-        if context_files:
-            prehydrated_block, hydration_error = hydrate_subagent_context_files(context_files)
-            if hydration_error:
-                err_report = (
-                    f"❌ Subagent #{serial} ({effective_tier} · {sub_model_name}) aborted before execution:\n\n"
-                    f"{hydration_error}"
-                )
-                local_tracer.tool_error("spawn_subagent", err_report)
-                local_tracer.agent_end("Aborted (fail-fast): unresolved context_files")
-                return err_report
-            if prehydrated_block:
-                effective_task_prompt = (
-                    f"{prehydrated_block}\n\n"
-                    f"---\n\n"
-                    f"# Assigned Subagent Task\n\n{task_prompt}"
-                )
+        prehydrated_block, hydration_error = hydrate_subagent_context_files(
+            context_files or [],
+            task_prompt=task_prompt,
+            auto_discover_section_instructions=True,
+        )
+        if hydration_error:
+            err_report = (
+                f"❌ Subagent #{serial} ({effective_tier} · {sub_model_name}) aborted before execution:\n\n"
+                f"{hydration_error}"
+            )
+            local_tracer.tool_error("spawn_subagent", err_report)
+            local_tracer.agent_end("Aborted (fail-fast): unresolved context_files")
+            return err_report
+        if prehydrated_block:
+            effective_task_prompt = (
+                f"{prehydrated_block}\n\n"
+                f"---\n\n"
+                f"# Assigned Subagent Task\n\n{task_prompt}"
+            )
 
         # Build an ephemeral, stateless subagent client (no checkpointer needed; lives only for this subtask)
         sub_base_llm = get_chat_model(tier=sub_tier_arg, temperature=0.0)
@@ -983,6 +993,8 @@ def spawn_subagent(
         local_tracer.agent_end(f"Failed after {elapsed_sub:.1f}s: {exc}")
         return err_report
     finally:
+        # Prune ephemeral subagent instruction-ledger entries before restoring parent execution scope.
+        clear_seen_instructions(sub_thread_id)
         reset_hitl_execution_context(sub_ctx_token)
         reset_trace_thread_id(trace_token)
 
@@ -1028,9 +1040,12 @@ def _invoke_tool_node_resilient(
        `ToolNode.invoke()` raises `RuntimeError('cannot schedule new futures after shutdown')`; running tools
        sequentially on the current OS thread lets synchronous operations complete cleanly.
     """
+    # Bind one batch UUID before `copy_context()` so parallel tool calls in a single `ToolNode` step
+    # share the same batch tag and cannot bypass the write gate using a sibling read in the same turn.
+    batch_token = set_instruction_batch_id(uuid.uuid4().hex)
     try:
         if timeout_seconds is not None and timeout_seconds > 0:
-            # Copy ContextVars into the timeout wrapper thread so trace_thread_id and HITL context propagate cleanly
+            # Copy ContextVars into the timeout wrapper thread so trace_thread_id, HITL context, and batch_id propagate
             ctx = contextvars.copy_context()
             executor = ThreadPoolExecutor(max_workers=1)
             future = executor.submit(ctx.run, node.invoke, state_or_input)
@@ -1084,6 +1099,8 @@ def _invoke_tool_node_resilient(
                     )
                 )
         return {"messages": fallback_outputs}
+    finally:
+        reset_instruction_batch_id(batch_token)
 
 
 # ── Parent Agent Tool & Model Binding ────────────────────────────────────────

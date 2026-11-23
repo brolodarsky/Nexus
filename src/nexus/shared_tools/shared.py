@@ -92,6 +92,7 @@ def read_vault_file_with_hitl_overlay(
     end_line: Optional[int] = None,
     start_page: Optional[int] = None,
     end_page: Optional[int] = None,
+    record_seen: bool = True,
 ) -> str:
     """Resolve and read a Vault note (with HITL overlays) or per-conversation `cache://` capture."""
     from nexus.core.conversation_cache import (
@@ -101,7 +102,8 @@ def read_vault_file_with_hitl_overlay(
         is_cache_ref,
     )
     from nexus.core.hitl_queue import get_pending_for_file
-    from nexus.shared_tools.vault_reader import read_note_content, resolve_vault_note_path
+    from nexus.core.instruction_guard import record_read_instructions
+    from nexus.shared_tools.vault_reader import format_partial_read_context, read_note_content, resolve_vault_note_path
 
     cleaned_ref = (file_path or "").strip()
     # 0. Support per-conversation external capture lookups (`cache://`, `cache://<key>`, or cached URLs)
@@ -135,6 +137,9 @@ def read_vault_file_with_hitl_overlay(
         staged_text: str = pending_tx["proposed_content"]
         tx_id = pending_tx.get("id")
         target_name = pending_tx.get("target_file", lookup_target)
+        norm_target_rel = target_name.replace("\\", "/")
+        if norm_target_rel.startswith("Vault/"):
+            norm_target_rel = norm_target_rel[len("Vault/") :]
         action_type = pending_tx.get("action_type", "")
 
         # Branch on staged action type to display high-signal context
@@ -145,6 +150,14 @@ def read_vault_file_with_hitl_overlay(
                 f"Awaiting human approval]\n\n"
             )
             return f"{banner}--- {target_name} (Content prior to proposed deletion) ---\n{orig_text}"
+
+        if record_seen:
+            record_read_instructions(
+                norm_target_rel,
+                staged_text,
+                start_line=start_line,
+                end_line=end_line,
+            )
 
         if action_type in ("move", "move_file"):
             dest_name = pending_tx.get("destination_file", "unknown")
@@ -157,7 +170,11 @@ def read_vault_file_with_hitl_overlay(
                 s_idx = max(0, (start_line or 1) - 1)
                 e_idx = min(len(lines), end_line or len(lines))
                 sliced = "\n".join(f"{i + 1}: {lines[i]}" for i in range(s_idx, e_idx))
-                return f"{banner}--- {target_name} → {dest_name} (Lines {s_idx + 1}-{e_idx} of {len(lines)}) ---\n{sliced}"
+                ctx_banner = format_partial_read_context(staged_text, s_idx + 1, e_idx)
+                header_line = f"--- {target_name} → {dest_name} (Lines {s_idx + 1}-{e_idx} of {len(lines)}) ---"
+                if ctx_banner:
+                    return f"{banner}{header_line}\n{ctx_banner}\n\n{sliced}"
+                return f"{banner}{header_line}\n{sliced}"
             return f"{banner}--- {target_name} → {dest_name} ---\n{staged_text}"
 
         banner = (
@@ -169,11 +186,15 @@ def read_vault_file_with_hitl_overlay(
             s_idx = max(0, (start_line or 1) - 1)
             e_idx = min(len(lines), end_line or len(lines))
             sliced = "\n".join(f"{i + 1}: {lines[i]}" for i in range(s_idx, e_idx))
-            return f"{banner}--- {target_name} (Lines {s_idx + 1}-{e_idx} of {len(lines)}) ---\n{sliced}"
+            ctx_banner = format_partial_read_context(staged_text, s_idx + 1, e_idx)
+            header_line = f"--- {target_name} (Lines {s_idx + 1}-{e_idx} of {len(lines)}) ---"
+            if ctx_banner:
+                return f"{banner}{header_line}\n{ctx_banner}\n\n{sliced}"
+            return f"{banner}{header_line}\n{sliced}"
         return f"{banner}--- {target_name} ---\n{staged_text}"
 
     # 2. Otherwise read directly from disk
-    return read_note_content(
+    disk_result = read_note_content(
         note_path=file_path,
         domain_path=None,
         start_line=start_line,
@@ -181,12 +202,36 @@ def read_vault_file_with_hitl_overlay(
         start_page=start_page,
         end_page=end_page,
     )
+    if (
+        record_seen
+        and resolved_path is not None
+        and resolved_path.suffix.lower() != ".pdf"
+        and not disk_result.startswith(("Error", "File not found", "Multiple files found"))
+    ):
+        try:
+            rel_vault_path = str(resolved_path.relative_to(VAULT_PATH.resolve())).replace("\\", "/")
+            raw_disk_text = resolved_path.read_text(encoding="utf-8")
+            record_read_instructions(
+                rel_vault_path,
+                raw_disk_text,
+                start_line=start_line,
+                end_line=end_line,
+            )
+        except (OSError, UnicodeDecodeError):
+            pass
+    return disk_result
 
 
-# `context_files: List[str]` lists Vault paths, unique note titles, or `cache://...` captures to pre-hydrate.
+# `context_files: Optional[List[str]]` lists Vault paths, unique note titles, or `cache://...` captures to pre-hydrate.
+# `task_prompt: Optional[str]` enables deterministic auto-discovery of touched `Section Instructions.md` files.
 # -> tuple[Optional[str], Optional[str]] returns (prehydrated_markdown, None) on success or (None, fail_fast_error) if any path fails.
-def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[str], Optional[str]]:
-    """Pre-hydrates Vault files and per-conversation `cache://` captures for `spawn_subagent` with fail-fast checks."""
+def hydrate_subagent_context_files(
+    context_files: Optional[List[str]],
+    *,
+    task_prompt: Optional[str] = None,
+    auto_discover_section_instructions: bool = True,
+) -> tuple[Optional[str], Optional[str]]:
+    """Pre-hydrates Vault files, auto-discovered `Section Instructions.md`, and `cache://` captures for `spawn_subagent`."""
     from nexus.core.conversation_cache import (
         format_captures_manifest,
         get_active_conversation_id,
@@ -194,9 +239,14 @@ def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[s
         is_cache_ref,
     )
     from nexus.core.hitl_queue import get_pending_for_file
+    from nexus.core.instruction_guard import (
+        discover_section_instructions_for_subagent,
+        read_raw_vault_text_with_hitl,
+        record_read_instructions,
+    )
     from nexus.shared_tools.vault_reader import find_nearest_directory_and_matches, resolve_vault_note_path
 
-    if not context_files:
+    if not context_files and not (auto_discover_section_instructions and (task_prompt or "").strip()):
         return None, None
 
     active_convo = get_active_conversation_id()
@@ -204,7 +254,7 @@ def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[s
     # Deduplicate requested paths while preserving caller order so identical files are never injected twice.
     seen_refs: set[str] = set()
     ordered_refs: List[str] = []
-    for raw in context_files:
+    for raw in (context_files or []):
         cleaned = (raw or "").strip()
         key = cleaned.lower()
         if not cleaned:
@@ -217,7 +267,10 @@ def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[s
     resolved_sections: List[str] = []
     seen_resolved_labels: set[str] = set()
     failure_blocks: List[str] = []
+    resolved_vault_rel_paths: List[str] = []
+    prehydrated_records: List[tuple[str, str]] = []
 
+    # Step 1: Resolve explicit `context_files` (with fail-fast diagnostics before any LLM call).
     for ref in ordered_refs:
         if not ref:
             failure_blocks.append("- `<empty string>`: Error: Path cannot be empty.")
@@ -263,23 +316,33 @@ def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[s
             rel_label = str(resolved_path.relative_to(VAULT_PATH.resolve())).replace("\\", "/")
             if rel_label.lower() in seen_resolved_labels:
                 continue
-            content = read_vault_file_with_hitl_overlay(file_path=ref)
+            content = read_vault_file_with_hitl_overlay(file_path=ref, record_seen=False)
             if content.startswith(("Error reading file", "Error reading PDF")):
                 failure_blocks.append(f"- `{ref}`: {content}")
                 continue
             seen_resolved_labels.add(rel_label.lower())
             resolved_sections.append(f"## `{rel_label}`\n\n{content}")
+            resolved_vault_rel_paths.append(rel_label)
+            raw_text = read_raw_vault_text_with_hitl(rel_label, vault_path=VAULT_PATH)
+            if raw_text is not None:
+                prehydrated_records.append((rel_label, raw_text))
             continue
 
         # Allow newly staged HITL `create_file` notes that are not yet committed to disk.
         pending_tx = get_pending_for_file(ref)
         if pending_tx and pending_tx.get("proposed_content") is not None:
             rel_label = pending_tx.get("target_file", ref)
-            if rel_label.lower() in seen_resolved_labels:
+            norm_rel = rel_label.replace("\\", "/")
+            if norm_rel.startswith("Vault/"):
+                norm_rel = norm_rel[len("Vault/") :]
+            if norm_rel.lower() in seen_resolved_labels or rel_label.lower() in seen_resolved_labels:
                 continue
-            content = read_vault_file_with_hitl_overlay(file_path=ref)
+            content = read_vault_file_with_hitl_overlay(file_path=ref, record_seen=False)
             seen_resolved_labels.add(rel_label.lower())
+            seen_resolved_labels.add(norm_rel.lower())
             resolved_sections.append(f"## `{rel_label}`\n\n{content}")
+            resolved_vault_rel_paths.append(norm_rel)
+            prehydrated_records.append((norm_rel, str(pending_tx["proposed_content"])))
             continue
 
         # Fail-fast hallucination catch: surface nearest directory contents and similar filenames on disk.
@@ -296,6 +359,7 @@ def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[s
                 msg_lines.append(f"  Closest matching Vault files on disk: {similar_list}")
         failure_blocks.append("\n".join(msg_lines))
 
+    # Step 2: Fail fast on invalid explicit `context_files` before auto-discovery or ledger writes.
     if failure_blocks:
         error_report = (
             "❌ Fail-Fast Context Hydration Error: One or more `context_files` passed to `spawn_subagent` "
@@ -305,6 +369,36 @@ def hydrate_subagent_context_files(context_files: List[str]) -> tuple[Optional[s
         )
         return None, error_report
 
+    # Step 3: Auto-discover governing `Section Instructions.md` files from `context_files` and `task_prompt`.
+    if auto_discover_section_instructions:
+        discovered_sections = discover_section_instructions_for_subagent(
+            task_prompt or "",
+            resolved_context_rel_paths=resolved_vault_rel_paths,
+            vault_path=VAULT_PATH,
+        )
+        for sec_rel in discovered_sections:
+            if sec_rel.lower() in seen_resolved_labels:
+                continue
+            sec_content = read_vault_file_with_hitl_overlay(file_path=sec_rel, record_seen=False)
+            if sec_content.startswith(("Error", "File not found", "Multiple files found")):
+                continue
+            seen_resolved_labels.add(sec_rel.lower())
+            resolved_sections.append(
+                f"## `{sec_rel}` *(Auto-Hydrated Section Instructions)*\n\n{sec_content}"
+            )
+            raw_sec = read_raw_vault_text_with_hitl(sec_rel, vault_path=VAULT_PATH)
+            if raw_sec is not None:
+                prehydrated_records.append((sec_rel, raw_sec))
+
+    # Step 4: Return None when neither explicit `context_files` nor governed section instructions applied.
+    if not resolved_sections:
+        return None, None
+
+    # Step 5: Mark all pre-hydrated files & section instructions as seen before Turn 1 so Turn-1 writes pass cleanly.
+    for rel_label, raw_text in prehydrated_records:
+        record_read_instructions(rel_label, raw_text, prehydrated=True)
+
+    # Step 6: Assemble the `# Pre-Hydrated Disk Context` block prepended to the subagent's `HumanMessage`.
     prehydrated_block = (
         "# Pre-Hydrated Disk Context\n\n"
         "The following Vault files and/or cached external captures were resolved directly before execution:\n\n"
@@ -325,6 +419,7 @@ def read_file(
 ) -> str:
     """Read a Vault note (including pending HITL edits) or a per-conversation cached external capture (`cache://...`).
 
+    Sliced reads automatically prepend frontmatter `instructions:` and enclosing heading rules.
     CONTEXT HYGIENE DIRECTIVE: Reading 1–2 specific notes directly for quick queries is encouraged.
     However, when researching across >2 files or auditing a section, DO NOT call `read_file` repeatedly
     in the primary thread. Offload the inspection to parallel `spawn_subagent(task_prompt, context_files=...)`
@@ -488,6 +583,7 @@ def modify_file(
 ) -> str:
     """Surgically modify an existing (or pending staged) Vault note by replacing an exact `target` block with `replacement`.
 
+    If governing `Section Instructions.md`, frontmatter `instructions:`, or inline section rules were not yet read in this scope, the first write blocks with those rules until retried.
     CUMULATIVE OVERLAY STACKING: If this note already has a pending transaction in the HITL queue (`hitl.db`),
     `modify_file` automatically applies your `target -> replacement` edit on top of the pending `proposed_content`
     and updates the single HITL card in place (preserving the true on-disk baseline and appending your reasoning).
@@ -583,6 +679,20 @@ def modify_file(
                 f"Call `read_file` to inspect the exact current lines and whitespace before calling `modify_file`."
             )
 
+        # Write-time instruction hydration gate: block until ancestor Section Instructions, frontmatter, & inline rules are seen.
+        from nexus.core.instruction_guard import check_write_instruction_gate
+
+        rel_for_gate = hitl_target_file[len("Vault/") :] if hitl_target_file.startswith("Vault/") else hitl_target_file
+        gate_msg = check_write_instruction_gate(
+            rel_for_gate,
+            working_base=working_base,
+            target_text=target,
+            is_create=False,
+            vault_path=VAULT_PATH,
+        )
+        if gate_msg is not None:
+            return gate_msg
+
         tx_id = add_transaction(
             agent_name="nexus_agent",
             action_type=action_type,
@@ -612,6 +722,7 @@ def create_file(
 ) -> str:
     """Propose creating a brand-new note in the Vault (staged to the HITL review queue).
 
+    If ancestor `Section Instructions.md` (or overwritten file `instructions:`) were not yet read in this scope, the first write blocks with those rules until retried.
     Fails if the file already exists unless `overwrite=True` (for existing files, always prefer `modify_file`).
     Ensure new notes include standard YAML frontmatter (`aliases`, `tags`, `type`) and a `**Back to:**` header bar.
     When archiving external content (job listings, webpages, emails), embed `{{cache:<type>/<slug>}}`
@@ -660,6 +771,19 @@ def create_file(
                 original_content = full_path.read_text(encoding="utf-8")
             except Exception:
                 original_content = None
+
+        # Write-time instruction hydration gate: block until ancestor `Section Instructions.md` (and overwritten frontmatter) are seen.
+        from nexus.core.instruction_guard import check_write_instruction_gate
+
+        gate_msg = check_write_instruction_gate(
+            clean_rel,
+            working_base=original_content,
+            target_text=None,
+            is_create=True,
+            vault_path=VAULT_PATH,
+        )
+        if gate_msg is not None:
+            return gate_msg
 
         tx_id = add_transaction(
             agent_name="nexus_agent",
