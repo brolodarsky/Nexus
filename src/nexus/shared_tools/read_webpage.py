@@ -12,10 +12,11 @@ import json
 import re
 import sys
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 import trafilatura
+from lxml import html as lxml_html
 
 from nexus.core.conversation_cache import (
     get_active_conversation_id,
@@ -49,7 +50,8 @@ def _fetch_html(url: str, timeout: float = 15.0) -> Optional[str]:
 
 
 # Converts JSON-LD/meta HTML snippets (including entity-escaped `&lt;p&gt;`) to clean Markdown.
-def _html_to_markdown(raw_html: str) -> str:
+# `base_url`: Optional page URL used to resolve relative `<img src>` paths into absolute URLs.
+def _html_to_markdown(raw_html: str, base_url: str = "") -> str:
     """Converts HTML markup (unescaping entities if needed) into clean Markdown."""
     if not raw_html:
         return ""
@@ -69,6 +71,40 @@ def _html_to_markdown(raw_html: str) -> str:
         return f"\n\n{'#' * level} {inner}\n\n" if inner else "\n\n"
 
     text = re.sub(r"<h([1-6])[^>]*>(.*?)</h\1>", _heading_repl, text, flags=re.IGNORECASE | re.DOTALL)
+
+    # Convert `<img ...>` tags with accessible text (`alt`, `aria-label`, `title`) into Markdown images
+    def _img_repl(match: re.Match[str]) -> str:
+        tag_html = match.group(0)
+        raw_src = ""
+        for src_attr in ("data-src", "src"):
+            src_match = re.search(
+                rf"""\b{src_attr}=["']([^"']+)["']""",
+                tag_html,
+                flags=re.IGNORECASE,
+            )
+            if src_match:
+                cand = html_lib.unescape(src_match.group(1)).strip()
+                if cand and not cand.lower().startswith(("data:", "javascript:")):
+                    raw_src = cand
+                    break
+        if not raw_src:
+            return ""
+        desc_candidates = []
+        for attr in ("alt", "aria-label", "title"):
+            attr_match = re.search(
+                rf"""\b{attr}=["']([^"']*)["']""",
+                tag_html,
+                flags=re.IGNORECASE,
+            )
+            if attr_match:
+                desc_candidates.append(attr_match.group(1))
+        description = _join_unique_descriptions(desc_candidates)
+        if not description:
+            return ""
+        resolved_src = urljoin(base_url, raw_src) if base_url else raw_src
+        return f"![{description}]({resolved_src})"
+
+    text = re.sub(r"<img\b[^>]*>", _img_repl, text, flags=re.IGNORECASE)
 
     # Convert anchor links `<a href="...">label</a>` into `[label](url)` when href is an HTTP link
     def _link_repl(match: re.Match[str]) -> str:
@@ -149,9 +185,269 @@ def _extract_html_title(raw_html: str, fallback_url: str = "") -> str:
     return "Web Capture"
 
 
+# ── Accessibility Visual Metadata Extraction ─────────────────────────────────
+
+# Normalizes HTML entities, collapses whitespace, and escapes brackets so strings stay safe inside `![...](...)`.
+def _clean_visual_text(text: Optional[str]) -> str:
+    """Unescapes HTML entities, collapses whitespace, and neutralizes Markdown link brackets."""
+    if not text:
+        return ""
+    cleaned = re.sub(r"\s+", " ", html_lib.unescape(text)).strip()
+    return cleaned.replace("[", "(").replace("]", ")")
+
+
+# Resolves an `<img ...>` element's real URL across `src`, lazy-load attributes, `srcset`, and `<picture><source>`.
+def _resolve_image_src(el: Any, base_url: str) -> str:
+    """Extracts the primary non-data image URL and resolves relative paths against `base_url`."""
+    candidates: List[str] = []
+    for attr in ("src", "data-src", "data-lazy-src", "data-original", "data-url"):
+        val = (el.get(attr) or "").strip()
+        if val:
+            candidates.append(val)
+
+    # Check responsive `srcset` attributes (and parent `<picture><source>`) when direct `src` is missing or a `data:` placeholder
+    srcset_vals: List[str] = []
+    for attr in ("srcset", "data-srcset"):
+        val = (el.get(attr) or "").strip()
+        if val:
+            srcset_vals.append(val)
+    parent = el.getparent()
+    if parent is not None and str(getattr(parent, "tag", "")).lower() == "picture":
+        for child in parent:
+            if str(getattr(child, "tag", "")).lower() == "source":
+                for attr in ("srcset", "data-srcset"):
+                    val = (child.get(attr) or "").strip()
+                    if val:
+                        srcset_vals.append(val)
+
+    for srcset in srcset_vals:
+        # Pick the last candidate (typically highest resolution) whose URL is not a `data:` placeholder
+        entries = [part.strip().split()[0] for part in srcset.split(",") if part.strip()]
+        for entry in reversed(entries):
+            if entry:
+                candidates.append(entry)
+
+    for raw_url in candidates:
+        low = raw_url.lower()
+        if low.startswith(("data:", "javascript:", "about:")):
+            continue
+        return urljoin(base_url, raw_url) if base_url else raw_url
+    return ""
+
+
+# Checks whether an element or any ancestor is hidden or boilerplate chrome (`nav`, `footer`, `aria-hidden="true"`, etc.).
+def _is_skipped_visual_node(el: Any) -> bool:
+    """Returns True when `el` sits inside non-content chrome or is explicitly hidden/presentational."""
+    curr = el
+    while curr is not None:
+        tag = str(getattr(curr, "tag", "")).lower()
+        if tag in ("nav", "footer", "noscript", "template"):
+            return True
+        if curr.get("hidden") is not None or (curr.get("aria-hidden") or "").strip().lower() == "true":
+            return True
+        role = (curr.get("role") or "").strip().lower()
+        if role in ("presentation", "none"):
+            return True
+        curr = curr.getparent()
+    return False
+
+
+# Joins non-empty candidate strings while discarding case-insensitive duplicates or substrings already captured.
+def _join_unique_descriptions(candidates: List[Optional[str]]) -> str:
+    """Normalizes and deduplicates accessible text fragments into a single ` — `-joined string."""
+    parts: List[str] = []
+    for raw in candidates:
+        cleaned = _clean_visual_text(raw)
+        if not cleaned:
+            continue
+        low = cleaned.lower()
+        if any(low == p.lower() or low in p.lower() for p in parts):
+            continue
+        parts.append(cleaned)
+    return " — ".join(parts)
+
+
+# Looks up space-separated element IDs (`aria-labelledby` / `aria-describedby`) in `doc` and joins their text.
+def _collect_aria_refs(doc: Any, attr_val: str) -> str:
+    """Resolves space-separated DOM IDs from `aria-labelledby`/`aria-describedby` into plain text."""
+    if not attr_val:
+        return ""
+    texts: List[str] = []
+    for ref_id in attr_val.split():
+        try:
+            target = doc.get_element_by_id(ref_id)
+        except KeyError:
+            continue
+        txt = _clean_visual_text(target.text_content() if hasattr(target, "text_content") else "")
+        if txt and txt.lower() not in {t.lower() for t in texts}:
+            texts.append(txt)
+    return " ".join(texts)
+
+
+# Collects `aria-label`, `aria-labelledby`, and `aria-describedby` strings for either `<img>` or `<svg>`.
+def _collect_element_aria(doc: Any, el: Any) -> tuple[str, str]:
+    """Returns `(aria_label, aria_refs_text)` for `el`."""
+    aria_label = _clean_visual_text(el.get("aria-label"))
+    aria_refs = _clean_visual_text(
+        " ".join(
+            part
+            for part in (
+                _collect_aria_refs(doc, el.get("aria-labelledby") or ""),
+                _collect_aria_refs(doc, el.get("aria-describedby") or ""),
+            )
+            if part
+        )
+    )
+    return aria_label, aria_refs
+
+
+# Walks enclosing ancestors to find an associated `<figcaption>` inside a `<figure>` container.
+def _find_figcaption(el: Any) -> str:
+    """Returns normalized `<figcaption>` text if `el` is wrapped in a `<figure>`, else empty string."""
+    curr = el.getparent()
+    while curr is not None:
+        if str(getattr(curr, "tag", "")).lower() == "figure":
+            for cap in curr.xpath(".//figcaption"):
+                txt = _clean_visual_text(cap.text_content() if hasattr(cap, "text_content") else "")
+                if txt:
+                    return txt
+            return ""
+        curr = curr.getparent()
+    return ""
+
+
+# Detects tiny 1x1/2x2 tracking pixels or explicit tracking filenames without altering substantive diagrams.
+def _is_tracking_pixel(el: Any, resolved_src: str) -> bool:
+    """Returns True for `<=2px` HTML-sized elements or spacer/pixel URLs."""
+    for dim_attr in ("width", "height"):
+        raw_dim = (el.get(dim_attr) or "").strip().rstrip("px")
+        if raw_dim.isdigit() and int(raw_dim) <= 2:
+            return True
+    path_low = urlsplit(resolved_src).path.lower()
+    return any(tok in path_low for tok in ("/pixel.", "/1x1.", "spacer.gif", "blank.gif"))
+
+
+# Extracts accessible descriptions (`alt`, `aria-label`, `aria-labelledby`, `aria-describedby`, `title`, `<figcaption>`)
+# from substantive `<img>` and `<svg role="img">` elements in `raw_html`.
+def _extract_accessible_visuals(raw_html: str, base_url: str = "") -> List[Dict[str, str]]:
+    """Parses `raw_html` via `lxml.html` and returns deduplicated accessible image/SVG metadata dicts."""
+    if not raw_html or ("<img" not in raw_html.lower() and "<svg" not in raw_html.lower()):
+        return []
+    try:
+        # Strip any leading XML encoding declaration since `raw_html` is already a decoded Unicode string
+        sanitized_html = re.sub(r"^\s*<\?xml[^>]*\?>", "", raw_html, flags=re.IGNORECASE)
+        doc = lxml_html.fromstring(sanitized_html)
+    except Exception:
+        return []
+
+    visuals: List[Dict[str, str]] = []
+    seen_by_url: Dict[str, int] = {}
+    seen_svgs: set[str] = set()
+
+    for el in doc.iter("img", "svg"):
+        tag = str(getattr(el, "tag", "")).lower()
+        if _is_skipped_visual_node(el):
+            continue
+
+        figcaption = _find_figcaption(el)
+        aria_label, aria_refs = _collect_element_aria(doc, el)
+
+        if tag == "img":
+            resolved_src = _resolve_image_src(el, base_url)
+            if not resolved_src or _is_tracking_pixel(el, resolved_src):
+                continue
+
+            alt_raw = el.get("alt")
+            alt_txt = _clean_visual_text(alt_raw)
+            title_txt = _clean_visual_text(el.get("title"))
+
+            # WCAG treats explicit `alt=""` with no other accessible label/caption as purely decorative
+            if alt_raw is not None and not alt_txt and not (aria_label or aria_refs or title_txt or figcaption):
+                continue
+
+            description = _join_unique_descriptions([alt_txt, aria_label, aria_refs, title_txt, figcaption])
+            if not description:
+                continue
+
+            if resolved_src in seen_by_url:
+                idx = seen_by_url[resolved_src]
+                if len(description) > len(visuals[idx]["description"]):
+                    visuals[idx]["description"] = description
+            else:
+                seen_by_url[resolved_src] = len(visuals)
+                visuals.append({"kind": "img", "url": resolved_src, "description": description})
+
+        elif tag == "svg":
+            role = (el.get("role") or "").strip().lower()
+            # Restrict `<svg>` capture to semantic graphics (`role="img"` or `<figure>`-wrapped) to avoid UI icon spam
+            if role != "img" and not figcaption:
+                continue
+            svg_title = ""
+            for child in el:
+                if str(getattr(child, "tag", "")).lower().endswith("title"):
+                    svg_title = _clean_visual_text(child.text_content() if hasattr(child, "text_content") else "")
+                    if svg_title:
+                        break
+
+            description = _join_unique_descriptions([aria_label, aria_refs, svg_title, figcaption])
+            if not description:
+                continue
+            key = description.lower()
+            if key not in seen_svgs:
+                seen_svgs.add(key)
+                visuals.append({"kind": "svg", "url": "", "description": description})
+
+    return visuals
+
+
+# Upgrades inline `trafilatura` image links with full accessible descriptions/absolute URLs, strips decorative
+# empty `![](...)` placeholders, and appends any substantive `<figure>`/`<svg>` visuals omitted from the main pass.
+def _enrich_markdown_with_visuals(markdown: str, raw_html: str, base_url: str = "") -> str:
+    """Reconciles extracted Markdown images against DOM accessibility metadata from `raw_html`."""
+    visuals = _extract_accessible_visuals(raw_html, base_url=base_url)
+    by_url: Dict[str, str] = {v["url"]: v["description"] for v in visuals if v["kind"] == "img" and v["url"]}
+    used_urls: set[str] = set()
+
+    def _md_img_repl(match: re.Match[str]) -> str:
+        alt_text = (match.group(1) or "").strip()
+        raw_src = (match.group(2) or "").strip()
+        low_src = raw_src.lower()
+        if not raw_src or low_src.startswith(("data:", "javascript:")):
+            return ""
+        resolved_src = urljoin(base_url, raw_src) if base_url else raw_src
+        if resolved_src in by_url:
+            used_urls.add(resolved_src)
+            return f"![{by_url[resolved_src]}]({resolved_src})"
+        # Strip empty-alt decorative/tracking images (`![](url)`) that lacked accessibility metadata
+        if not alt_text:
+            return ""
+        return f"![{alt_text}]({resolved_src})"
+
+    enriched = re.sub(
+        r"""!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)""",
+        _md_img_repl,
+        markdown,
+    )
+
+    body_lower = enriched.lower()
+    remaining_lines: List[str] = []
+    for v in visuals:
+        if v["kind"] == "img":
+            if v["url"] not in used_urls:
+                remaining_lines.append(f"- ![{v['description']}]({v['url']})")
+        elif v["kind"] == "svg":
+            if v["description"].lower() not in body_lower:
+                remaining_lines.append(f"- [SVG Diagram: {v['description']}]")
+
+    enriched = re.sub(r"\n{3,}", "\n\n", enriched).strip()
+    if remaining_lines:
+        enriched = enriched + "\n\n## Visuals (Accessibility Metadata)\n" + "\n".join(remaining_lines)
+    return enriched
+
+
 # ── Universal JSON-LD & Meta Fallback (for Static SPA Shells) ────────────────
 
-def _extract_jsonld_content(raw_html: str) -> Optional[str]:
+def _extract_jsonld_content(raw_html: str, base_url: str = "") -> Optional[str]:
     """Extracts structured Schema.org content (`JobPosting`, `Article`, etc.) from JSON-LD `<script>` tags."""
     if not raw_html:
         return None
@@ -215,7 +511,7 @@ def _extract_jsonld_content(raw_html: str) -> Optional[str]:
                 salary_str = f"{curr} {val}".strip()
 
         raw_body = str(item.get("articleBody") or item.get("description") or "")
-        body_md = _html_to_markdown(raw_body)
+        body_md = _html_to_markdown(raw_body, base_url=base_url)
         if len(body_md) < _MIN_VALID_LEN or _is_spa_shell(body_md):
             continue
 
@@ -231,7 +527,7 @@ def _extract_jsonld_content(raw_html: str) -> Optional[str]:
     return None
 
 
-def _extract_meta_description(raw_html: str) -> Optional[str]:
+def _extract_meta_description(raw_html: str, base_url: str = "") -> Optional[str]:
     """Extracts `<meta name="description">` or `og:description` if substantial (>=250 chars)."""
     if not raw_html:
         return None
@@ -241,7 +537,7 @@ def _extract_meta_description(raw_html: str) -> Optional[str]:
     ):
         match = re.search(pattern, raw_html, flags=re.IGNORECASE)
         if match:
-            text = _html_to_markdown(html_lib.unescape(match.group(1)))
+            text = _html_to_markdown(html_lib.unescape(match.group(1)), base_url=base_url)
             if len(text) >= _MIN_VALID_LEN and not _is_spa_shell(text):
                 return text
     return None
@@ -283,16 +579,24 @@ def scrape_url_with_cache(
         if downloaded:
             extracted = trafilatura.extract(
                 downloaded,
+                url=cleaned_url,
                 output_format=output_format,
                 include_comments=False,
                 include_tables=True,
                 include_links=True,
+                include_images=True,
             )
             if extracted and len(extracted.strip()) >= _MIN_VALID_LEN and not _is_spa_shell(extracted):
                 final_content = extracted.strip()
             else:
                 # Universal fallback for static SPA shells containing JSON-LD or `<meta>` text
-                final_content = _extract_jsonld_content(downloaded) or _extract_meta_description(downloaded)
+                final_content = (
+                    _extract_jsonld_content(downloaded, base_url=cleaned_url)
+                    or _extract_meta_description(downloaded, base_url=cleaned_url)
+                )
+
+            if final_content and output_format == "markdown":
+                final_content = _enrich_markdown_with_visuals(final_content, downloaded, base_url=cleaned_url)
 
         if final_content:
             cache_key: Optional[str] = None

@@ -336,6 +336,81 @@ def test_read_webpage_universal_cache_hit_trafilatura_and_spa_jsonld_fallback(
         reset_hitl_execution_context(tok)
 
 
+def test_read_webpage_extracts_accessible_images_and_filters_noise(
+    isolated_env: dict[str, Path],
+) -> None:
+    """Verify `read_webpage` enriches inline images with accessibility metadata, handles JSON-LD images, and strips noise."""
+    rich_html = """
+    <html>
+      <head><title>Visual Systems Guide</title></head>
+      <body>
+        <nav><img src="/nav-logo.png" alt="Site Navigation Logo" /></nav>
+        <article>
+          <h1>Visual Systems</h1>
+          <p>Detailed systems architecture overview covering write-ahead logging, checkpointing, and replication flows across nodes.</p>
+          <figure>
+            <img src="/images/wal-flow.png" alt="WAL checkpoint diagram" />
+            <figcaption>Figure 1: Pages flush from WAL to main DB.</figcaption>
+          </figure>
+          <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" data-src="/images/lazy-arch.webp" aria-label="Lazy-loaded replication topology" />
+          <svg role="img" aria-label="P99 latency breakdown"><title>P99 latency breakdown</title></svg>
+          <img src="/pixel.gif" alt="" width="1" height="1" />
+          <p>Additional technical explanation ensuring extraction length cleanly passes validation thresholds in trafilatura.</p>
+        </article>
+      </body>
+    </html>
+    """
+    trafilatura_md = (
+        "# Visual Systems\n\n"
+        "Detailed systems architecture overview covering write-ahead logging, checkpointing, and replication flows across nodes.\n\n"
+        "![WAL checkpoint diagram](/images/wal-flow.png)\n\n"
+        "![](/pixel.gif)\n\n"
+        "Additional technical explanation ensuring extraction length cleanly passes validation thresholds in trafilatura."
+    )
+
+    tok = set_hitl_execution_context(conversation_id="conv-img", thread_id="conv-img")
+    try:
+        with (
+            patch.object(read_webpage.trafilatura, "fetch_url", return_value=rich_html),
+            patch.object(read_webpage.trafilatura, "extract", return_value=trafilatura_md),
+        ):
+            out, key = read_webpage.scrape_url_with_cache("https://blog.example.com/posts/visual-systems")
+
+        assert out is not None
+        assert key == "cache://web/visual-systems-guide"
+        # Inline image upgraded with figcaption and resolved to absolute URL
+        assert "![WAL checkpoint diagram — Figure 1: Pages flush from WAL to main DB.](https://blog.example.com/images/wal-flow.png)" in out
+        # Lazy-loaded data-src image and semantic SVG captured in appendix
+        assert "## Visuals (Accessibility Metadata)" in out
+        assert "![Lazy-loaded replication topology](https://blog.example.com/images/lazy-arch.webp)" in out
+        assert "[SVG Diagram: P99 latency breakdown]" in out
+        # Nav logo and 1x1 empty-alt tracking pixel excluded
+        assert "nav-logo.png" not in out
+        assert "pixel.gif" not in out
+
+        # Verify JSON-LD fallback preserves lazy/relative `<img>` tags with accessible text
+        desc = (
+            "<p>"
+            + ("Platform architecture role details with embedded diagram context for candidates. " * 5)
+            + '<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="/assets/org-chart.png" alt="Engineering org chart" />'
+            + "</p>"
+        )
+        spa_html = (
+            "<html><head><title>SPA With Diagram</title>"
+            f'<script type="application/ld+json">{json.dumps({"@type": "JobPosting", "title": "Staff Infra", "description": desc})}</script>'
+            "</head><body>You need to enable JavaScript to run this app.</body></html>"
+        )
+        with (
+            patch.object(read_webpage.trafilatura, "fetch_url", return_value=spa_html),
+            patch.object(read_webpage.trafilatura, "extract", return_value="You need to enable JavaScript to run this app."),
+        ):
+            spa_out, _ = read_webpage.scrape_url_with_cache("https://jobs.example.io/roles/staff-infra")
+        assert spa_out is not None
+        assert "![Engineering org chart](https://jobs.example.io/assets/org-chart.png)" in spa_out
+    finally:
+        reset_hitl_execution_context(tok)
+
+
 def test_run_shared_tool_cli_propagates_conversation_id(
     isolated_env: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
