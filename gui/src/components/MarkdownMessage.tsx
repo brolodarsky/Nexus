@@ -476,6 +476,51 @@ export function splitFencedCodeBlocks(raw: string): CodeBlockSegment[] {
   return segments;
 }
 
+// escapeInlineMathDollars: Rewrites escaped literal currency `\$` inside `$...$` inline math spans to `{\char36}`.
+// Why: micromark-extension-math (remark-math) scans `$...$` with zero backslash-escape awareness and terminates
+// the math span at the first `$`, so `$\ge\$160\text{k}$` breaks into `\ge\` (KaTeX parse error) + `160\text{k}$`.
+// Replacing `\$` with `{\char36}` removes the literal `$` before remark-math tokenizes while rendering `$` in KaTeX.
+function escapeInlineMathDollars(inner: string): string {
+  // Consume `\\` as an escaped pair first so `\\$` remains `\\` + `$` rather than mutating an escaped backslash
+  return inner.replace(/\\([\s\S])/g, (match, ch: string) => (ch === "$" ? "{\\char36}" : match));
+}
+
+// Converts Obsidian `[[Target|Alias]]` / `[[Target]]` syntax and backtick-wrapped `.md` note filenames
+// into `#wikilink:` links so VaultNotePill handles all Vault note references uniformly.
+function convertObsidianNoteLinks(text: string): string {
+  // A. Match backtick-wrapped wikilinks (`[[target|alias]]` or ``[[target]]``) OR bare wikilinks ([[target|alias]] or [[target]])
+  let result = text.replace(
+    /`{1,2}\s*\[\[([^\]|]+)(?:\|([^\]]+))?\]\]\s*`{1,2}|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+    (_match, t1?: string, a1?: string, t2?: string, a2?: string) => {
+      const target = (t1 || t2 || "").trim();
+      const alias = (a1 || a2 || "").trim();
+      const rawDisplay = alias || target.split("/").pop() || target;
+      const display = formatNoteDisplay(rawDisplay);
+      const encodedTarget = encodeURIComponent(target);
+      return `[${display}](#wikilink:${encodedTarget})`;
+    }
+  );
+
+  // B. Convert backtick-wrapped Markdown note titles (e.g. `1.1. Section Instructions.md`, `Plan.md`, `Tasks.md`, `Toilet/Kohler.md`)
+  //    into #wikilink: links so all note titles and paths share the unified VaultNotePill representation instead of splitting
+  //    between inline code boxes and Vault pills. Excludes CLI commands and wildcard/placeholder patterns (`Project - *.md`, `<Name>.md`).
+  result = result.replace(
+    /`([^`\n*?<>"{}$]+\.md)`/g,
+    (match, noteFile: string) => {
+      const trimmed = noteFile.trim();
+      if (/^(python|uv|git|npm|node|npx|pip|pytest|ruff)\b/i.test(trimmed) || trimmed.startsWith("-")) {
+        return match;
+      }
+      const cleanTarget = trimmed.replace(/^(\/?Vault\/|\.\/)/i, "");
+      const display = formatNoteDisplay(cleanTarget.split("/").pop() || cleanTarget);
+      const encodedTarget = encodeURIComponent(cleanTarget);
+      return `[${display}](#wikilink:${encodedTarget})`;
+    }
+  );
+
+  return result;
+}
+
 // Converts Obsidian `[[Target|Alias]]` / `[[Target]]` syntax, backticked `.md` note titles (`Plan.md`),
 // escapes conversational currency figures, heals malformed/nested code fences, and normalizes LaTeX math delimiters outside of fenced code blocks.
 export function preprocessObsidianMarkdown(raw: string): string {
@@ -495,9 +540,12 @@ export function preprocessObsidianMarkdown(raw: string): string {
       // 1. Escape conversational currency amounts ($150k, $41.20, $50–$100) before math delimiter evaluation
       let processed = escapeProseCurrency(segment.text);
 
-      // 2. Normalize LaTeX delimiter variants \(...\) -> $...$ and \[...\] -> $$...$$
+      // 2. Normalize LaTeX delimiter variants \(...\) -> $...$ (trimming inner padding) and \[...\] -> $$...$$
       processed = processed
-        .replace(/\\\(([\s\S]*?)\\\)/g, (_m, inner) => `$${inner}$`)
+        .replace(/\\\(([\s\S]*?)\\\)/g, (match, inner: string) => {
+          const trimmed = inner.trim();
+          return trimmed ? `$${trimmed}$` : match;
+        })
         .replace(/\\\[([\s\S]*?)\\\]/g, (_m, inner) => `\n$$\n${inner.trim()}\n$$\n`);
 
       // 3. Auto-escape unescaped underscores inside \text{...} in math so snake_case identifiers don't fail in KaTeX
@@ -505,54 +553,38 @@ export function preprocessObsidianMarkdown(raw: string): string {
         return `\\text{${inner.replace(/(?<!\\)_/g, "\\_")}}`;
       });
 
-      // 4. Split by display math ($$...$$) and inline math ($...$) so prose-specific link and arrow replacements
-      //    only execute on plain conversational text and never mutate KaTeX math expressions
-      const mathSegments = processed.split(/(\$\$[\s\S]*?\$\$|(?<!\\)\$(?!\s)[^$\n]+?(?<!\s)\$)/g);
+      // 4. Split by inline code spans, display math ($$...$$), and escape-aware inline math ($...$) using a single
+      //    capturing group so odd indices hold protected/math tokens and even indices hold plain prose.
+      //    Note: `(?:\\.|[^$\\\n])+?` keeps `\$` paired inside `$...$` instead of closing early at the escaped dollar.
+      const mathSegments = processed.split(
+        /(``(?:[^`\n]|`(?!`))+``|`[^`\n]+`|\$\$[\s\S]*?\$\$|(?<!\\)\$(?!\$)(?!\s)(?:\\.|[^$\\\n])+?(?<!\s)\$(?!\$))/g
+      );
 
       return mathSegments
         .map((subSegment, mathIndex) => {
-          // Odd indices are math blocks ($$...$$ or $...$)
+          // Odd indices are inline code, display math ($$...$$), or inline math ($...$)
           if (mathIndex % 2 === 1) {
+            if (subSegment.startsWith("`") && subSegment.endsWith("`")) {
+              // Preserve raw LaTeX/arrows inside inline code while still converting backticked Obsidian note links
+              return convertObsidianNoteLinks(subSegment);
+            }
+            if (subSegment.startsWith("$$") && subSegment.endsWith("$$") && subSegment.length >= 4) {
+              // Display math blocks handle `\$` safely inside `$$...$$`
+              return subSegment;
+            }
+            if (subSegment.startsWith("$") && subSegment.endsWith("$") && subSegment.length >= 2) {
+              // Rewrite `\$` -> `{\char36}` inside inline math so remark-math does not truncate at `\$`
+              const inner = subSegment.slice(1, -1);
+              return `$${escapeInlineMathDollars(inner)}$`;
+            }
             return subSegment;
           }
 
-          // A. Match backtick-wrapped wikilinks (`[[target|alias]]` or ``[[target]]``) OR bare wikilinks ([[target|alias]] or [[target]])
-          let prose = subSegment.replace(
-            /`{1,2}\s*\[\[([^\]|]+)(?:\|([^\]]+))?\]\]\s*`{1,2}|\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
-            (_match, t1?: string, a1?: string, t2?: string, a2?: string) => {
-              const target = (t1 || t2 || "").trim();
-              const alias = (a1 || a2 || "").trim();
-              const rawDisplay = alias || target.split("/").pop() || target;
-              const display = formatNoteDisplay(rawDisplay);
-              const encodedTarget = encodeURIComponent(target);
-              return `[${display}](#wikilink:${encodedTarget})`;
-            }
-          );
-
-          // B. Convert backtick-wrapped Markdown note titles (e.g. `1.1. Section Instructions.md`, `Plan.md`, `Tasks.md`, `Toilet/Kohler.md`)
-          //    into #wikilink: links so all note titles and paths share the unified VaultNotePill representation instead of splitting
-          //    between inline code boxes and Vault pills. Excludes CLI commands and wildcard/placeholder patterns (`Project - *.md`, `<Name>.md`).
-          prose = prose.replace(
-            /`([^`\n*?<>"{}$]+\.md)`/g,
-            (match, noteFile: string) => {
-              const trimmed = noteFile.trim();
-              if (/^(python|uv|git|npm|node|npx|pip|pytest|ruff)\b/i.test(trimmed) || trimmed.startsWith("-")) {
-                return match;
-              }
-              const cleanTarget = trimmed.replace(/^(\/?Vault\/|\.\/)/i, "");
-              const display = formatNoteDisplay(cleanTarget.split("/").pop() || cleanTarget);
-              const encodedTarget = encodeURIComponent(cleanTarget);
-              return `[${display}](#wikilink:${encodedTarget})`;
-            }
-          );
-
-          // C. Convert bare LaTeX arrow/operator commands in prose (e.g. `Step 1 \rightarrow Step 2`)
-          prose = prose.replace(
+          // Plain prose: convert bare Obsidian links and bare LaTeX arrow/operator commands (e.g. `Step 1 \rightarrow Step 2`)
+          return convertObsidianNoteLinks(subSegment).replace(
             BARE_PROSE_LATEX_PATTERN,
             (match) => PROSE_LATEX_SYMBOLS[match] ?? match
           );
-
-          return prose;
         })
         .join("");
     })
@@ -572,7 +604,7 @@ const REHYPE_PLUGINS: PluggableList = [[rehypeKatex, { strict: false, throwOnErr
 
 // MARKDOWN_COMPONENTS: Module-level static custom element renderer map for ReactMarkdown.
 // Keeping this object reference stable avoids tearing down and remounting DOM subtrees when parent components re-render.
-const MARKDOWN_COMPONENTS: Components = {
+export const MARKDOWN_COMPONENTS: Components = {
   h1: ({ children }) => (
     <h1 className="text-xl md:text-2xl font-bold tracking-tight text-text-primary mt-6 mb-3 pb-2 border-b border-border-subtle first:mt-0">
       {children}
@@ -597,10 +629,13 @@ const MARKDOWN_COMPONENTS: Components = {
   ul: ({ children }) => <ul className="list-disc pl-5 space-y-1.5 my-2 marker:text-accent-cyan/70">{children}</ul>,
   ol: ({ children }) => <ol className="list-decimal pl-5 space-y-1.5 my-2 marker:text-accent-cyan/80 font-medium">{children}</ol>,
   li: ({ children, className }) => {
-    // If remark-gfm parsed a task checkbox item, remove the bullet styling so checkboxes align neatly
+    // If remark-gfm parsed a task checkbox item, remove the bullet styling and position the checkbox
+    // in the parent list's `pl-5` gutter via `relative` + `absolute` instead of `display: flex`.
+    // Why: `flex` on `<li>` turns every inline text node, `<strong>`, `<code>`, and `<VaultNotePill>`
+    // into a separate side-by-side column (and breaks loose multi-paragraph or nested sublists).
     const isTask = Boolean(className?.includes("task-list-item"));
     return (
-      <li className={`leading-relaxed text-text-primary/95 pl-0.5 ${isTask ? "list-none -ml-4 flex items-baseline gap-2" : ""}`}>
+      <li className={`leading-relaxed text-text-primary/95 pl-0.5 ${isTask ? "list-none relative" : ""}`}>
         {children}
       </li>
     );
@@ -721,12 +756,14 @@ const MARKDOWN_COMPONENTS: Components = {
   td: ({ children }) => <td className="px-3.5 py-2.5 border-t border-border-subtle/50">{children}</td>,
   input: ({ checked, type }) => {
     if (type === "checkbox") {
+      // Positioned in the parent `ul`/`ol` `pl-5` (1.25rem) left gutter relative to `<li class="relative">`
+      // so wrapped text aligns cleanly at the hanging margin without turning `<li>` into a flex row.
       return (
         <input
           type="checkbox"
           checked={checked}
           readOnly
-          className="mr-2 rounded border-border-subtle bg-bg-secondary accent-cyan-400 align-middle cursor-default"
+          className="absolute -left-[1.2rem] top-[0.32em] h-3.5 w-3.5 rounded border-border-subtle bg-bg-secondary accent-cyan-400 cursor-default"
         />
       );
     }

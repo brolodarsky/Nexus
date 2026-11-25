@@ -32,9 +32,17 @@ const origLoad = Module._load;
 Module._load = function (request, parent, isMain) {
   if (["react", "next/link", "react-markdown", "remark-gfm", "remark-math", "rehype-katex", "unified"].includes(request)) {
     const noop = () => null;
+    const createElement = (type, props, ...children) => ({
+      type,
+      props: { ...(props || {}), children: children.length <= 1 ? children[0] : children },
+    });
     return {
       __esModule: true,
-      default: noop,
+      default: {
+        createElement,
+        Children: { toArray: (c) => (Array.isArray(c) ? c : c ? [c] : []) },
+        isValidElement: () => false,
+      },
       memo: (component) => component,
       useMemo: (factory) => factory(),
       createContext: () => ({}),
@@ -46,7 +54,7 @@ Module._load = function (request, parent, isMain) {
 
 const mod = new Module("MarkdownMessage.js");
 mod._compile(compiled, "MarkdownMessage.js");
-const { preprocessObsidianMarkdown } = mod.exports;
+const { preprocessObsidianMarkdown, MARKDOWN_COMPONENTS } = mod.exports;
 
 (async () => {
   // Verify KaTeX CSS/JS alignment (must both resolve to 0.16.x with no nested rehype-katex override)
@@ -131,6 +139,57 @@ const { preprocessObsidianMarkdown } = mod.exports;
   const protectedText = preprocessObsidianMarkdown("Use `$50` in bash and $$2^{\\Omega(n)}$$ in display math.");
   assert(protectedText.includes("`$50`"), `Inline code span was mutated: ${protectedText}`);
   assert(protectedText.includes("$$2^{\\Omega(n)}$$"), `Display math was mutated: ${protectedText}`);
+
+  // 5. Escaped currency `\$` inside inline math (screenshot 1 & real Vault notes)
+  const seniorFilterLine = "the **strict $\\ge\\$160\\text{k}$ base-floor senior filter**";
+  const seniorFilterRes = await renderAst(seniorFilterLine);
+  assert(
+    seniorFilterRes.pre.includes("$\\ge{\\char36}160\\text{k}$"),
+    `Expected \\$ inside inline math to rewrite to {\\char36}, got: ${seniorFilterRes.pre}`
+  );
+  assert(seniorFilterRes.json.includes('"katex"'), "Expected KaTeX output for $\\ge\\$160\\text{k}$");
+  assert(!seniorFilterRes.json.includes("katex-error"), `Unexpected KaTeX error node: ${seniorFilterRes.json}`);
+  assert(!seniorFilterRes.json.includes("#cc0000"), `Unexpected KaTeX error color: ${seniorFilterRes.json}`);
+  assert(
+    !seniorFilterRes.json.includes('"value":"160\\\\text{k}$'),
+    `Trailing math fragment leaked into prose: ${seniorFilterRes.json}`
+  );
+
+  for (const input of [
+    "**Rate:** \\$60.00/hr on W2 ($\\approx \\$124,800$/year base). Matches the $100K–$130K market target band.",
+    "| **Total** | **$\\approx \\mathbf{\\$30,000 – \\$50,000+/year}$** | **$\\approx \\mathbf{\\$30,000 – \\$35,000/year}$** |",
+    "$180 \\text{ input tokens} \\times \\$0.075/\\text{M} + 6 \\text{ output tokens} \\times \\$0.30/\\text{M} \\approx \\mathbf{\\$0.0000153}$",
+    "$\\text{cost: \\$160k}$",
+    "\\(\\ge \\$160\\text{k}\\)",
+    "\\( \\ge \\$160\\text{k} \\)",
+    "$\\$$",
+  ]) {
+    const res = await renderAst(input);
+    assert(res.json.includes('"katex"'), `Expected KaTeX output for: ${input} (pre=${res.pre})`);
+    assert(!res.json.includes("katex-error"), `Unexpected KaTeX error for: ${input} (pre=${res.pre})`);
+    assert(!res.json.includes("#cc0000"), `Unexpected KaTeX error color for: ${input} (pre=${res.pre})`);
+  }
+
+  // 6. Inline code protection for LaTeX examples vs backticked Obsidian note links
+  const codeAndLinks = preprocessObsidianMarkdown(
+    "Use `$\\ge \\$160\\text{k}$` and `\\rightarrow` verbatim; see `Gameplan.md`, `[[Tasks|My Tasks]]`, and [[Daily Schedule]]."
+  );
+  assert(codeAndLinks.includes("`$\\ge \\$160\\text{k}$`"), `Inline code math example was mutated: ${codeAndLinks}`);
+  assert(codeAndLinks.includes("`\\rightarrow`"), `Inline code arrow example was mutated: ${codeAndLinks}`);
+  assert(codeAndLinks.includes("[Gameplan](#wikilink:Gameplan.md)"), `Backticked .md note link failed: ${codeAndLinks}`);
+  assert(codeAndLinks.includes("[My Tasks](#wikilink:Tasks)"), `Backticked wikilink failed: ${codeAndLinks}`);
+  assert(codeAndLinks.includes("[Daily Schedule](#wikilink:Daily%20Schedule)"), `Bare wikilink failed: ${codeAndLinks}`);
+
+  // 7. Task-list layout regression guard (screenshots 2 & 3): `li.task-list-item` must NOT use `flex`
+  const taskLiEl = MARKDOWN_COMPONENTS.li({ className: "task-list-item", children: "item" });
+  const taskLiTokens = String(taskLiEl.props.className || "").split(/\s+/).filter(Boolean);
+  assert(taskLiTokens.includes("list-none"), `Expected list-none on task-list-item: ${taskLiEl.props.className}`);
+  assert(taskLiTokens.includes("relative"), `Expected relative on task-list-item: ${taskLiEl.props.className}`);
+  assert(!taskLiTokens.includes("flex"), `task-list-item must not use flex (splits inline spans into columns): ${taskLiEl.props.className}`);
+
+  const checkboxEl = MARKDOWN_COMPONENTS.input({ type: "checkbox", checked: true });
+  const checkboxTokens = String(checkboxEl.props.className || "").split(/\s+/).filter(Boolean);
+  assert(checkboxTokens.includes("absolute"), `Expected absolute gutter positioning on task checkbox: ${checkboxEl.props.className}`);
 
   console.log("test_markdown_math.js: all assertions passed.");
 })();

@@ -126,7 +126,7 @@ export default function PinnedNotesReader({
       </aside>
 
       {/* ── Right Pane: Full Document Reader ──────────────────────────────── */}
-      <main className="flex-1 glass-card border border-border-subtle rounded-2xl flex flex-col overflow-hidden bg-bg-card">
+      <main className="flex-1 min-w-0 glass-card border border-border-subtle rounded-2xl flex flex-col overflow-hidden bg-bg-card">
         {activeReaderPath && activeNote ? (
           <>
             {/* Reader Header */}
