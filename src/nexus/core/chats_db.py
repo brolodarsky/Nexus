@@ -49,7 +49,9 @@ def init_db():
                 parent_message_id INTEGER,
                 branch_mode TEXT,
                 merged_at TEXT,
-                title_source TEXT DEFAULT 'placeholder'
+                title_source TEXT DEFAULT 'placeholder',
+                last_model_tier TEXT,
+                last_model_name TEXT
             )
         """)
         conn.execute("""
@@ -154,6 +156,46 @@ def init_db():
         # Track title provenance ('placeholder' | 'auto' | 'manual' | 'legacy') so background auto-titling never clobbers user edits
         if "title_source" not in conv_cols:
             conn.execute("ALTER TABLE conversations ADD COLUMN title_source TEXT DEFAULT 'legacy'")
+        # Track the last model tier & concrete model identifier used in each conversation for UI restoration and cache consistency
+        added_last_model_cols = False
+        if "last_model_tier" not in conv_cols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN last_model_tier TEXT")
+            added_last_model_cols = True
+        if "last_model_name" not in conv_cols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN last_model_name TEXT")
+            added_last_model_cols = True
+
+        # Index (conversation_id, id) so chronological history reads and latest-model lookups stay fast
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages (conversation_id, id)"
+        )
+
+        # One-time backfill for existing databases upgraded with `last_model_*` columns:
+        # populate each conversation from its newest message carrying model metadata
+        if added_last_model_cols:
+            conn.execute(
+                """
+                UPDATE conversations
+                SET
+                    last_model_tier = (
+                        SELECT m.model_tier
+                        FROM messages m
+                        WHERE m.conversation_id = conversations.id
+                          AND (m.model_name IS NOT NULL OR m.model_tier IS NOT NULL)
+                        ORDER BY m.id DESC
+                        LIMIT 1
+                    ),
+                    last_model_name = (
+                        SELECT m.model_name
+                        FROM messages m
+                        WHERE m.conversation_id = conversations.id
+                          AND (m.model_name IS NOT NULL OR m.model_tier IS NOT NULL)
+                        ORDER BY m.id DESC
+                        LIMIT 1
+                    )
+                WHERE last_model_tier IS NULL AND last_model_name IS NULL
+                """
+            )
 
         # Per-conversation external capture cache (`conversation_cache.py`), kept independent of FK
         # cascade so CLI/eval `"nexus_primary"` runs can store captures while `delete_conversation` purges explicitly.
@@ -187,7 +229,12 @@ def init_db():
 
 init_db()
 
-def create_conversation(title: str = "New Chat", title_source: str = "placeholder") -> str:
+def create_conversation(
+    title: str = "New Chat",
+    title_source: str = "placeholder",
+    last_model_tier: str | None = None,
+    last_model_name: str | None = None,
+) -> str:
     """
     Creates a new root conversation row in `chats.db`.
 
@@ -195,13 +242,20 @@ def create_conversation(title: str = "New Chat", title_source: str = "placeholde
       title: Initial display title (typically `"New Chat"` or a truncated first-prompt placeholder).
       title_source: Provenance tag (`"placeholder"`, `"auto"`, or `"manual"`). Defaults to `"placeholder"`
                     so background Turn-1 auto-titling upgrades it safely without overwriting manual edits.
+      last_model_tier: Optional initial model capability tier (`"strong"`, `"medium"`, `"low"`) selected for the thread.
+      last_model_name: Optional concrete model identifier (e.g. `"claude-opus-5-5"`) selected for the thread.
     """
     conv_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO conversations (id, title, created_at, last_updated, title_source) VALUES (?, ?, ?, ?, ?)",
-            (conv_id, title, now, now, title_source),
+            """
+            INSERT INTO conversations (
+                id, title, created_at, last_updated, title_source, last_model_tier, last_model_name
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (conv_id, title, now, now, title_source, last_model_tier, last_model_name),
         )
         conn.commit()
     return conv_id
@@ -213,6 +267,8 @@ def create_branch_conversation(
     parent_message_id: int | None = None,
     branch_mode: str = "tangent",
     title_source: str = "placeholder",
+    last_model_tier: str | None = None,
+    last_model_name: str | None = None,
 ) -> str:
     """
     Creates a new branched child conversation in `chats.db` linked to its parent thread and fork message.
@@ -223,6 +279,8 @@ def create_branch_conversation(
       parent_message_id: Optional SQLite `messages.id` in the parent conversation where the fork occurred.
       branch_mode: Either `'tangent'` (context-sliced fresh ALU) or `'fork'` (full history clone up to branch point).
       title_source: Provenance tag (`"placeholder"` for auto-derived branch snippets, `"manual"` for explicit titles).
+      last_model_tier: Optional inherited model tier from the parent conversation or fork slice.
+      last_model_name: Optional inherited concrete model identifier from the parent conversation or fork slice.
 
     Returns:
       The newly generated UUID string for the child conversation.
@@ -234,11 +292,23 @@ def create_branch_conversation(
             """
             INSERT INTO conversations (
                 id, title, created_at, last_updated,
-                parent_conversation_id, parent_message_id, branch_mode, merged_at, title_source
+                parent_conversation_id, parent_message_id, branch_mode, merged_at, title_source,
+                last_model_tier, last_model_name
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
             """,
-            (conv_id, title, now, now, parent_conversation_id, parent_message_id, branch_mode, title_source),
+            (
+                conv_id,
+                title,
+                now,
+                now,
+                parent_conversation_id,
+                parent_message_id,
+                branch_mode,
+                title_source,
+                last_model_tier,
+                last_model_name,
+            ),
         )
         conn.commit()
     return conv_id
@@ -379,7 +449,15 @@ def log_message(
                 VALUES (?, ?)
             """, (msg_id, trace_json))
 
-        conn.execute("UPDATE conversations SET last_updated = ? WHERE id = ?", (now, conversation_id))
+        # Only overwrite remembered model metadata when this message actually carries model attribution;
+        # synthetic entries (`branch_context`, `branch_merge`) and error logs pass None and must preserve prior state
+        if model_tier or model_name:
+            conn.execute(
+                "UPDATE conversations SET last_updated = ?, last_model_tier = ?, last_model_name = ? WHERE id = ?",
+                (now, model_tier, model_name, conversation_id),
+            )
+        else:
+            conn.execute("UPDATE conversations SET last_updated = ? WHERE id = ?", (now, conversation_id))
         conn.commit()
         return msg_id
 
@@ -553,9 +631,26 @@ def revert_last_turn(conversation_id: str) -> dict | None:
             # Purge corresponding diagnostic traces from message_traces table
             conn.execute(f"DELETE FROM message_traces WHERE message_id IN ({placeholders})", ids_to_delete)
             conn.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", ids_to_delete)
-            # Update last_updated timestamp on parent conversation row
+            # Recompute remembered model from the newest remaining message carrying model metadata (or NULL if empty)
+            latest_model_row = conn.execute(
+                """
+                SELECT model_tier, model_name
+                FROM messages
+                WHERE conversation_id = ?
+                  AND (model_name IS NOT NULL OR model_tier IS NOT NULL)
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (conversation_id,),
+            ).fetchone()
+            next_tier = latest_model_row["model_tier"] if latest_model_row else None
+            next_name = latest_model_row["model_name"] if latest_model_row else None
+            # Update last_updated timestamp and restored model metadata on parent conversation row
             now = datetime.now(timezone.utc).isoformat()
-            conn.execute("UPDATE conversations SET last_updated = ? WHERE id = ?", (now, conversation_id))
+            conn.execute(
+                "UPDATE conversations SET last_updated = ?, last_model_tier = ?, last_model_name = ? WHERE id = ?",
+                (now, next_tier, next_name, conversation_id),
+            )
             conn.commit()
 
             return {

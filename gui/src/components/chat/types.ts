@@ -37,6 +37,14 @@ export interface Message {
 // LocalStorage key for remembering the user's selected model tier across page reloads
 export const MODEL_STORAGE_KEY = "nexus_chat_model_tier";
 
+// Central migration table mapping retired Anthropic 4.5 IDs (in localStorage or legacy chats.db records) to 5.5 successors
+export const RETIRED_MODEL_REPLACEMENTS: Record<string, string> = {
+  "claude-sonnet-4-5": "claude-sonnet-5-5",
+  "claude-sonnet-4.5": "claude-sonnet-5-5",
+  "claude-opus-4-5": "claude-opus-5-5",
+  "claude-opus-4.5": "claude-opus-5-5",
+};
+
 // LocalStorage key for preserving unsubmitted chat prompt drafts across Nexus tab navigation and reloads (legacy single-draft key)
 export const CHAT_DRAFT_STORAGE_KEY = "nexus_chat_input_draft";
 
@@ -232,6 +240,186 @@ export const FALLBACK_MODELS: ModelOption[] = [
     },
   },
 ];
+
+// RunModelRef: lightweight metadata describing an active or fallback turn's model selection
+// - tier: normalized capability tier ("strong" | "medium" | "low") or dropdown option ID (e.g. "claude-haiku-5-5")
+// - name: concrete backend model identifier (e.g. "claude-haiku-5-5", "gemini-3.8-flash")
+// - label: optional server-formatted display label (e.g. "Fast · claude-haiku-5-5")
+export interface RunModelRef {
+  tier?: string | null;
+  name?: string | null;
+  label?: string | null;
+}
+
+/**
+ * Resolves a `ModelOption` from the catalog by prioritizing concrete model name over tier ID.
+ * Why: Gemini entries use tier strings as their option `id` (`"strong"`, `"low"`), whereas Anthropic
+ * entries use model IDs (`"claude-opus-5-5"`, `"claude-haiku-5-5"`) with `tier: "strong" | "low"`.
+ * A single `.find()` checking `m.model_name === ref.name || m.id === ref.tier` short-circuits on
+ * Gemini's `"low"` / `"strong"` entry first and mislabels Anthropic turns.
+ *
+ * - modelOptions: Ordered `ModelOption[]` catalog from `GET /api/agents/models` (or `FALLBACK_MODELS`).
+ * - ref: Optional model reference carrying `name` and/or `tier` (`Pick<RunModelRef, "name" | "tier">`).
+ * - Returns: Matching `ModelOption` if found, or `undefined`.
+ */
+export function resolveModelOption(
+  modelOptions: ModelOption[],
+  ref?: Pick<RunModelRef, "name" | "tier"> | null
+): ModelOption | undefined {
+  if (!ref) return undefined;
+  // Pass 1: When a concrete model name is present, match only by `model_name` or `id` — never fall back to `tier`
+  // so an unlisted/custom model is never misattributed to a different provider sharing the same capability tier.
+  if (ref.name) {
+    return modelOptions.find((m) => m.model_name === ref.name || m.id === ref.name);
+  }
+  // Pass 2: Only when no concrete model name exists, resolve by option `id` (e.g. `"strong"`, `"low"`).
+  if (ref.tier) {
+    return modelOptions.find((m) => m.id === ref.tier);
+  }
+  return undefined;
+}
+
+/**
+ * Resolves a conversation's remembered `(modelName, modelTier)` to a selectable dropdown `ModelOption.id`.
+ * Prioritizes concrete model names (plus retired 4.5 -> 5.5 migrations) and never falls back to `tier`
+ * when an explicit `name` is present so unlisted/other-provider models are never misattributed.
+ *
+ * - modelOptions: Ordered `ModelOption[]` catalog from `GET /api/agents/models` (or `FALLBACK_MODELS`).
+ * - ref: Optional remembered model reference (`Pick<RunModelRef, "name" | "tier">`).
+ * - Returns: Matching `ModelOption.id` string (e.g. `"strong"`, `"gemini-4-hydrogen"`, `"claude-haiku-5-5"`), or `null`.
+ */
+export function resolveConversationModelSelection(
+  modelOptions: ModelOption[],
+  ref?: Pick<RunModelRef, "name" | "tier"> | null
+): string | null {
+  if (!ref || modelOptions.length === 0) return null;
+  const trimmedName = ref.name?.trim() || null;
+  const trimmedTier = ref.tier?.trim() || null;
+  if (!trimmedName && !trimmedTier) return null;
+
+  // Pass 1: Direct name-first lookup via shared `resolveModelOption`
+  const direct = resolveModelOption(modelOptions, { name: trimmedName, tier: trimmedTier });
+  if (direct) return direct.id;
+
+  // Pass 2: When a concrete name exists, check retired-model migrations and case-insensitive exact IDs;
+  // deliberately return `null` on miss so cross-provider tier names never match the wrong provider
+  if (trimmedName) {
+    const lowerName = trimmedName.toLowerCase();
+    const replaced = RETIRED_MODEL_REPLACEMENTS[lowerName];
+    if (replaced) {
+      const migrated = modelOptions.find((m) => m.model_name === replaced || m.id === replaced);
+      if (migrated) return migrated.id;
+    }
+    const caseInsensitive = modelOptions.find(
+      (m) => m.model_name.toLowerCase() === lowerName || m.id.toLowerCase() === lowerName
+    );
+    return caseInsensitive ? caseInsensitive.id : null;
+  }
+
+  // Pass 3: Tier-only legacy fallback (only reached when `trimmedName` is absent)
+  if (trimmedTier) {
+    const lowerTier = trimmedTier.toLowerCase();
+    const replaced = RETIRED_MODEL_REPLACEMENTS[lowerTier];
+    if (replaced) {
+      const migrated = modelOptions.find((m) => m.model_name === replaced || m.id === replaced);
+      if (migrated) return migrated.id;
+    }
+    const caseInsensitiveTier = modelOptions.find((m) => m.id.toLowerCase() === lowerTier);
+    return caseInsensitiveTier ? caseInsensitiveTier.id : null;
+  }
+
+  return null;
+}
+
+/**
+ * Scans raw `ChatHistoryEntry[]` in reverse chronological order to find the newest message
+ * carrying model metadata (checking explicit SQLite columns first, then persisted trace events).
+ * Skips trailing synthetic entries (`branch_merge`, `branch_context`) that have no model attribution.
+ *
+ * - history: Chronological `ChatHistoryEntry[]` loaded from `GET /api/agents/ask/history`.
+ * - Returns: `{ name, tier }` of the last used model, or `null` if no message records model metadata.
+ */
+export function extractLastUsedModelFromHistory(
+  history: ChatHistoryEntry[]
+): Pick<RunModelRef, "name" | "tier"> | null {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const entry = history[i];
+    const extracted = extractTurnModelInfo(entry.trace);
+    const modelName = entry.model_name ?? extracted.modelName;
+    const modelTier = entry.model_tier ?? extracted.modelTier;
+    if (modelName || modelTier) {
+      return { name: modelName, tier: modelTier };
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolves the human-readable model label displayed in the live streaming status banner.
+ *
+ * - activeRunModel: Active streaming/re-attached turn's model metadata, or `null` when idle.
+ * - modelOptions: Ordered `ModelOption[]` catalog used to look up friendly UI labels.
+ * - fallbackLabel: Selected composer model label used if no active run metadata is present.
+ * - Returns: Human-readable model label (e.g. `"Claude Haiku 5.5"`).
+ */
+export function resolveLiveModelLabel(
+  activeRunModel: RunModelRef | null,
+  modelOptions: ModelOption[],
+  fallbackLabel: string
+): string {
+  if (!activeRunModel) return fallbackLabel;
+  const matched = resolveModelOption(modelOptions, activeRunModel);
+  // Nullish coalescing (`??`) falls back through catalog label -> server label -> raw model name -> composer label
+  return matched?.label ?? activeRunModel.label ?? activeRunModel.name ?? fallbackLabel;
+}
+
+// Human-readable display labels for retired or non-catalog model identifiers stored in historical message records
+const LEGACY_MODEL_LABELS: Record<string, string> = {
+  "claude-opus-4-5": "Claude Opus 4.5",
+  "claude-sonnet-4-5": "Claude Sonnet 4.5",
+  "gpt-5.6-sol": "GPT-5.6 Sol",
+  "gpt-5.6-terra": "GPT-5.6 Terra",
+  "gpt-5.4-mini": "GPT-5.4 Mini",
+};
+
+/**
+ * Formats a concrete model name or tier into a clean uppercase badge label for message metadata pills.
+ * Resolves catalog labels via `resolveModelOption` first, then legacy aliases, then slug humanization.
+ *
+ * - modelName: Concrete backend model identifier (e.g., `"claude-haiku-5-5"`).
+ * - modelTier: Capability tier fallback (`"strong"`, `"medium"`, `"low"`) when `modelName` is absent.
+ * - modelOptions: Ordered `ModelOption[]` catalog used for friendly label lookup (defaults to `FALLBACK_MODELS`).
+ * - Returns: Uppercase display label (e.g., `"CLAUDE HAIKU 5.5"`), or `null` when both inputs are empty.
+ */
+export function formatModelBadgeLabel(
+  modelName?: string | null,
+  modelTier?: string | null,
+  modelOptions: ModelOption[] = FALLBACK_MODELS
+): string | null {
+  if (!modelName && !modelTier) return null;
+
+  // Match concrete model name first so cross-provider tiers (e.g. Anthropic "low" vs Gemini "low") never collide
+  const matched = resolveModelOption(modelOptions, { name: modelName, tier: modelTier });
+  if (matched?.label) {
+    return matched.label.toUpperCase();
+  }
+
+  const trimmedName = modelName?.trim();
+  if (trimmedName) {
+    const legacyLabel = LEGACY_MODEL_LABELS[trimmedName.toLowerCase()];
+    if (legacyLabel) {
+      return legacyLabel.toUpperCase();
+    }
+    // Convert dashed version suffixes (`-2-5`) to dotted notation (` 2.5`) and remaining separators to spaces
+    return trimmedName
+      .replace(/-(\d+)-(\d+)(?=$|-)/g, " $1.$2")
+      .replace(/[-_]+/g, " ")
+      .toUpperCase();
+  }
+
+  const trimmedTier = modelTier?.trim();
+  return trimmedTier ? trimmedTier.toUpperCase() : null;
+}
 
 // Extracts the model tier and model name executed during a turn from either explicit fields or persisted trace events
 export function extractTurnModelInfo(

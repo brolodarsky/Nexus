@@ -9,6 +9,7 @@ Validates:
   6. Bounded string summaries in `AgentTracer` prevent multi-megabyte string duplication.
   7. `GET /api/agents/messages/{message_id}/trace` API endpoint returns on-demand telemetry.
 """
+import sqlite3
 import uuid
 from pathlib import Path
 import pytest
@@ -20,6 +21,7 @@ from nexus.core.chats_db import (
     create_conversation,
     delete_conversation,
     get_chat_history,
+    get_conversation,
     get_message_trace,
     init_db,
     log_message,
@@ -237,3 +239,144 @@ def test_agent_tracer_bounded_string_summaries():
         assert len(call_evt["message"]) < 500
     finally:
         unsub()
+
+
+def test_conversations_table_has_last_model_columns():
+    """Verify conversations table includes last_model_tier and last_model_name columns."""
+    init_db()
+    with _get_conn() as conn:
+        cols = [col[1] for col in conn.execute("PRAGMA table_info(conversations)").fetchall()]
+        assert "last_model_tier" in cols
+        assert "last_model_name" in cols
+
+
+def test_legacy_conversations_migration_backfills_last_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify init_db() migrates legacy databases and backfills last_model_* from the latest attributed message."""
+    legacy_db = tmp_path / "legacy_chats.db"
+    conn = sqlite3.connect(legacy_db)
+    conn.execute("""
+        CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            created_at TEXT,
+            last_updated TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT,
+            role TEXT,
+            content TEXT,
+            agent TEXT,
+            domain TEXT,
+            confidence REAL,
+            trace TEXT,
+            timestamp TEXT,
+            images TEXT,
+            model_tier TEXT,
+            model_name TEXT,
+            cost_usd REAL,
+            has_trace INTEGER DEFAULT 0
+        )
+    """)
+    # Conv A: switched from Argon -> Haiku 5.5
+    conn.execute("INSERT INTO conversations (id, title, created_at, last_updated) VALUES ('conv-a', 'A', 't1', 't2')")
+    conn.execute(
+        "INSERT INTO messages (conversation_id, role, content, model_tier, model_name, timestamp) VALUES ('conv-a', 'assistant', 'r1', 'strong', 'gemini-4-argon', 't1')"
+    )
+    conn.execute(
+        "INSERT INTO messages (conversation_id, role, content, model_tier, model_name, timestamp) VALUES ('conv-a', 'assistant', 'r2', 'low', 'claude-haiku-5-5', 't2')"
+    )
+    # Conv B: Argon turn followed by a synthetic branch_merge entry with NULL model metadata
+    conn.execute("INSERT INTO conversations (id, title, created_at, last_updated) VALUES ('conv-b', 'B', 't1', 't3')")
+    conn.execute(
+        "INSERT INTO messages (conversation_id, role, content, model_tier, model_name, timestamp) VALUES ('conv-b', 'assistant', 'r1', 'strong', 'gemini-4-argon', 't1')"
+    )
+    conn.execute(
+        "INSERT INTO messages (conversation_id, role, content, agent, model_tier, model_name, timestamp) VALUES ('conv-b', 'assistant', 'merged', 'branch_merge', NULL, NULL, 't3')"
+    )
+    # Conv C: empty conversation
+    conn.execute("INSERT INTO conversations (id, title, created_at, last_updated) VALUES ('conv-c', 'C', 't1', 't1')")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(chats_db, "DB_PATH", legacy_db)
+    init_db()
+
+    conv_a = get_conversation("conv-a")
+    conv_b = get_conversation("conv-b")
+    conv_c = get_conversation("conv-c")
+    assert conv_a is not None and conv_a["last_model_tier"] == "low" and conv_a["last_model_name"] == "claude-haiku-5-5"
+    assert conv_b is not None and conv_b["last_model_tier"] == "strong" and conv_b["last_model_name"] == "gemini-4-argon"
+    assert conv_c is not None and conv_c["last_model_tier"] is None and conv_c["last_model_name"] is None
+
+
+def test_log_message_updates_and_preserves_last_model(temp_conv):
+    """Verify log_message records model metadata on conversations and skips clobbering on metadata-less entries."""
+    log_message(
+        role="assistant",
+        content="Sonnet turn",
+        conversation_id=temp_conv,
+        model_tier="medium",
+        model_name="claude-sonnet-5-5",
+    )
+    conv = get_conversation(temp_conv)
+    assert conv is not None
+    assert conv["last_model_tier"] == "medium"
+    assert conv["last_model_name"] == "claude-sonnet-5-5"
+
+    # Synthetic or error message without model metadata must preserve the remembered model
+    log_message(
+        role="assistant",
+        content="Error or synthetic note",
+        agent="branch_merge",
+        conversation_id=temp_conv,
+    )
+    conv_after = get_conversation(temp_conv)
+    assert conv_after is not None
+    assert conv_after["last_model_tier"] == "medium"
+    assert conv_after["last_model_name"] == "claude-sonnet-5-5"
+
+
+def test_revert_last_turn_restores_previous_last_model(temp_conv):
+    """Verify revert_last_turn recalculates last_model_* from the newest remaining attributed message."""
+    log_message(role="user", content="Q1", conversation_id=temp_conv, model_tier="strong", model_name="gemini-4-argon")
+    log_message(role="assistant", content="A1", conversation_id=temp_conv, model_tier="strong", model_name="gemini-4-argon")
+    log_message(role="user", content="Q2", conversation_id=temp_conv, model_tier="low", model_name="claude-haiku-5-5")
+    log_message(role="assistant", content="A2", conversation_id=temp_conv, model_tier="low", model_name="claude-haiku-5-5")
+
+    assert get_conversation(temp_conv)["last_model_name"] == "claude-haiku-5-5"
+
+    revert_last_turn(temp_conv)
+    conv_after_one = get_conversation(temp_conv)
+    assert conv_after_one["last_model_tier"] == "strong"
+    assert conv_after_one["last_model_name"] == "gemini-4-argon"
+
+    revert_last_turn(temp_conv)
+    conv_after_all = get_conversation(temp_conv)
+    assert conv_after_all["last_model_tier"] is None
+    assert conv_after_all["last_model_name"] is None
+
+
+def test_create_and_list_conversations_last_model_api():
+    """Verify POST/GET /api/agents/ask/conversations round-trips optional initial remembered model metadata."""
+    create_res = client.post(
+        "/api/agents/ask/conversations",
+        json={
+            "title": "Model Seeded Thread",
+            "last_model_tier": "strong",
+            "last_model_name": "claude-opus-5-5",
+        },
+    )
+    assert create_res.status_code == 200
+    conv_id = create_res.json()["conversation_id"]
+    try:
+        list_res = client.get("/api/agents/ask/conversations")
+        assert list_res.status_code == 200
+        match = next((c for c in list_res.json() if c["id"] == conv_id), None)
+        assert match is not None
+        assert match["last_model_tier"] == "strong"
+        assert match["last_model_name"] == "claude-opus-5-5"
+    finally:
+        delete_conversation(conv_id)

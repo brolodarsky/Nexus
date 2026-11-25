@@ -427,12 +427,18 @@ async def list_conversations():
 # Pydantic schema for creating a new conversation
 class CreateConversationRequest(BaseModel):
     title: str = "New Chat"
+    last_model_tier: Optional[str] = None
+    last_model_name: Optional[str] = None
 
-# Creates a new conversation thread with an initial title
+# Creates a new conversation thread with an initial title and optional remembered model metadata
 @router.post("/ask/conversations")
 async def create_new_conversation(req: CreateConversationRequest):
     """Generates a UUID and initializes a new thread in chats.db."""
-    conv_id = create_conversation(req.title)
+    conv_id = create_conversation(
+        req.title,
+        last_model_tier=req.last_model_tier,
+        last_model_name=req.last_model_name,
+    )
     return {"conversation_id": conv_id}
 
 # Deletes a conversation and cascades to delete all its messages
@@ -556,12 +562,16 @@ async def ask_brain(request: AskRequest):
     try:
         t0 = time.time()
         conversation_id = request.conversation_id
+        # Resolve requested model upfront so user message row and conversation record immediately reflect the turn's model
+        resolved_model = resolve_model_config(request.model_tier)
         # Phase 1: Persist user message to SQLite chats.db before running agents
         log_message(
             role="user",
             content=effective_query,
             conversation_id=conversation_id,
             images=request.images,
+            model_tier=resolved_model.get("tier"),
+            model_name=resolved_model.get("model_name"),
         )
         
         # Subscribe to trace_bus so synchronous `/ask` also captures 100% of LLM & Subagent trace steps scoped to this conversation
@@ -945,11 +955,14 @@ async def ask_brain_stream(request: AskRequest, req: Request):
     register_cancel_event(conversation_id, cancel_event)
 
     # Persist the initiating user message before starting the worker so reloading/switching threads immediately shows it
+    # and records the active turn's model on the conversation before assistant completion
     user_msg_id = log_message(
         role="user",
         content=effective_query,
         conversation_id=conversation_id,
         images=request.images,
+        model_tier=resolved_model.get("tier"),
+        model_name=resolved_model.get("model_name"),
     )
 
     active_run = ActiveRun(

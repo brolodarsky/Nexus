@@ -351,12 +351,27 @@ def fork_conversation(
     # Mark explicit user-supplied titles as "manual" so background auto-titling never overwrites them
     branch_title_source = "manual" if (title and title.strip()) else "placeholder"
 
+    # Inherit the newest executed model from the forked slice (falling back to parent conversation metadata)
+    # so switching into the child branch preserves prompt-cache and model continuity
+    inherited_tier: Optional[str] = None
+    inherited_name: Optional[str] = None
+    for msg in reversed(sliced_history):
+        if msg.get("model_name") or msg.get("model_tier"):
+            inherited_tier = msg.get("model_tier")
+            inherited_name = msg.get("model_name")
+            break
+    if not inherited_tier and not inherited_name:
+        inherited_tier = parent_conv.get("last_model_tier")
+        inherited_name = parent_conv.get("last_model_name")
+
     child_conv_id = create_branch_conversation(
         title=branch_title,
         parent_conversation_id=parent_conversation_id,
         parent_message_id=resolved_fork_msg_id,
         branch_mode=effective_mode,
         title_source=branch_title_source,
+        last_model_tier=inherited_tier,
+        last_model_name=inherited_name,
     )
     # Snapshot parent's external capture cache into the child branch so cache:// refs remain resolvable
     inherit_captures(parent_conversation_id, child_conv_id)
@@ -374,6 +389,9 @@ def fork_conversation(
                 trace=msg.get("trace"),
                 conversation_id=child_conv_id,
                 images=msg.get("images"),
+                model_tier=msg.get("model_tier"),
+                model_name=msg.get("model_name"),
+                cost_usd=msg.get("cost_usd"),
             )
     else:
         # Tangent mode (Context-Sliced ALU):
@@ -408,6 +426,9 @@ def fork_conversation(
                 trace=msg.get("trace"),
                 conversation_id=child_conv_id,
                 images=msg.get("images"),
+                model_tier=msg.get("model_tier"),
+                model_name=msg.get("model_name"),
+                cost_usd=msg.get("cost_usd"),
             )
 
     child_history = get_chat_history(child_conv_id)
@@ -519,6 +540,9 @@ def spawn_seeded_conversation(
             branch_mode=effective_branch_mode,
             # Mark agent-curated category names as `"manual"` so Turn-1 auto-titling preserves them
             title_source="manual",
+            # Inherit parent conversation's remembered model for seamless cache/provider continuity
+            last_model_tier=parent_conv.get("last_model_tier"),
+            last_model_name=parent_conv.get("last_model_name"),
         )
         parent_label = parent_conv.get("title") or "Parent Chat"
         formatted_brief = (

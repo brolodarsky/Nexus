@@ -530,3 +530,101 @@ def test_spawn_conversation_target_section_and_broken_path_lint_pass(
     clean_convs = [c for c in chats_db.get_conversations() if c.get("title") == "🌿 Job Sprint — Verified Refs"]
     assert len(clean_convs) == 1
     seeded_parent_conv["created_ids"].append(clean_convs[0]["id"])
+
+
+def test_branch_and_merge_preserve_remembered_model(client):
+    """Verify fork, tangent, and nested seeded branches inherit last_model_* and merge preserves parent's model."""
+    created_ids: list[str] = []
+    parent_id = create_conversation(title="Model Inheritance Parent")
+    created_ids.append(parent_id)
+
+    try:
+        log_message(
+            role="user",
+            content="Turn 1 prompt",
+            conversation_id=parent_id,
+            model_tier="strong",
+            model_name="claude-opus-5-5",
+        )
+        m2 = log_message(
+            role="assistant",
+            content="Turn 1 reply",
+            agent="nexus",
+            conversation_id=parent_id,
+            model_tier="strong",
+            model_name="claude-opus-5-5",
+        )
+        log_message(
+            role="user",
+            content="Turn 2 prompt",
+            conversation_id=parent_id,
+            model_tier="low",
+            model_name="gemini-4-hydrogen",
+        )
+        m4 = log_message(
+            role="assistant",
+            content="Turn 2 reply",
+            agent="nexus",
+            conversation_id=parent_id,
+            model_tier="low",
+            model_name="gemini-4-hydrogen",
+        )
+
+        # 1. Fork at Turn 1 inherits Opus 5.5 and preserves message-level model columns
+        fork_res = client.post(
+            f"/api/agents/ask/conversations/{parent_id}/branch",
+            json={"parent_message_id": m2, "branch_mode": "fork", "title": "Opus Fork"},
+        )
+        assert fork_res.status_code == 200
+        fork_data = fork_res.json()
+        fork_id = fork_data["conversation_id"]
+        created_ids.append(fork_id)
+        assert fork_data["conversation"]["last_model_tier"] == "strong"
+        assert fork_data["conversation"]["last_model_name"] == "claude-opus-5-5"
+        fork_history = get_chat_history(fork_id)
+        assert fork_history[-1]["model_name"] == "claude-opus-5-5"
+        assert fork_history[-1]["model_tier"] == "strong"
+
+        # 2. Tangent at Turn 2 inherits Hydrogen and preserves focal message model columns
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = AIMessage(content="Brief parent summary.")
+        with patch("nexus.core.chat_branching.get_chat_model", return_value=mock_llm):
+            tangent_res = client.post(
+                f"/api/agents/ask/conversations/{parent_id}/branch",
+                json={"parent_message_id": m4, "branch_mode": "tangent", "title": "Hydrogen Tangent"},
+            )
+        assert tangent_res.status_code == 200
+        tangent_data = tangent_res.json()
+        tangent_id = tangent_data["conversation_id"]
+        created_ids.append(tangent_id)
+        assert tangent_data["conversation"]["last_model_tier"] == "low"
+        assert tangent_data["conversation"]["last_model_name"] == "gemini-4-hydrogen"
+        tangent_history = get_chat_history(tangent_id)
+        assert tangent_history[-1]["model_name"] == "gemini-4-hydrogen"
+
+        # 3. Nested seeded conversation inherits parent's latest remembered model (Hydrogen)
+        seeded = spawn_seeded_conversation(
+            title="Nested Topic",
+            context_brief="Focused context brief.",
+            parent_conversation_id=parent_id,
+            nest_under_parent=True,
+        )
+        seeded_id = seeded["conversation_id"]
+        created_ids.append(seeded_id)
+        assert seeded["conversation"]["last_model_tier"] == "low"
+        assert seeded["conversation"]["last_model_name"] == "gemini-4-hydrogen"
+
+        # 4. Distilling & merging Opus fork back into parent must NOT overwrite parent's Hydrogen model
+        mock_merge_llm = MagicMock()
+        mock_merge_llm.invoke.return_value = AIMessage(content="Distilled findings.")
+        with patch("nexus.core.chat_branching.get_chat_model", return_value=mock_merge_llm):
+            merge_res = client.post(f"/api/agents/ask/conversations/{fork_id}/merge", json={})
+        assert merge_res.status_code == 200
+        parent_after = get_conversation(parent_id)
+        assert parent_after is not None
+        assert parent_after["last_model_tier"] == "low"
+        assert parent_after["last_model_name"] == "gemini-4-hydrogen"
+    finally:
+        for cid in created_ids:
+            rollback_checkpoints_for_thread(cid)
+            delete_conversation(cid)

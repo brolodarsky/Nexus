@@ -3,7 +3,7 @@
 
 /**
  * ChatMessageItem.tsx — Renders an individual user or assistant message bubble in the Chat thread.
- * Includes agent routing badges, executed model tier pills, rich GFM + Wiki-Link Markdown,
+ * Includes system branch badges, clean uppercase executed model pills, rich GFM + Wiki-Link Markdown,
  * and collapsible execution trace panels (`ThinkingPanel`).
  */
 
@@ -15,7 +15,13 @@ import { resolveImageUrl, type BranchMode, type Conversation } from "@/lib/api";
 // ThinkingPanel: Lossless agent execution trace viewer with Graph View, full step payloads, and raw JSON
 import { ThinkingPanel } from "@/components/AgentTraceVisualizer";
 import MessageBranchTrigger from "./MessageBranchTrigger";
-import { copyTextToClipboard, extractTurnCost, formatShortId, type Message } from "./types";
+import {
+  copyTextToClipboard,
+  extractTurnCost,
+  formatModelBadgeLabel,
+  formatShortId,
+  type Message,
+} from "./types";
 
 // ChatMessageItemProps: props for rendering a single conversation turn bubble
 // - message: Message object containing role, markdown content, agent/model metadata, and optional trace events
@@ -116,6 +122,25 @@ const ChatMessageItem = memo(function ChatMessageItem({
     [message.costUsd, message.trace, message.modelName, message.modelTier]
   );
 
+  // Suppress the redundant default "Head Agent" badge on standard turns while preserving synthetic branch badges
+  // ("branch_context" / "branch_merge") and any non-default legacy specialist identifiers
+  const isBranchSystemBadge =
+    message.agent === "branch_context" || message.agent === "branch_merge";
+  const isDefaultHeadAgent =
+    !message.agent ||
+    message.agent === "nexus" ||
+    message.agent === "NexusAgent" ||
+    message.agent === "Head Agent";
+  const showAgentBadge = isBranchSystemBadge || !isDefaultHeadAgent;
+  const modelBadgeLabel = useMemo(
+    () => formatModelBadgeLabel(message.modelName, message.modelTier),
+    [message.modelName, message.modelTier]
+  );
+  const showCostBadge = effectiveCost != null && effectiveCost > 0;
+  const showRevertButton = Boolean(isLastTurn && onRevertTurn);
+  const showHeaderRow =
+    !isUser && (showAgentBadge || Boolean(modelBadgeLabel) || showCostBadge || showRevertButton);
+
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -126,62 +151,49 @@ const ChatMessageItem = memo(function ChatMessageItem({
             : "max-w-3xl glass-card text-text-primary"
           }`}
       >
-        {/* Assistant routing & model execution metadata pills */}
-        {!isUser && message.agent && (
+        {/* Assistant metadata pills (branch context/merge badges, clean uppercase model pill, cost, and revert action) */}
+        {showHeaderRow && (
           <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
-            <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.65rem] font-mono font-medium border ${
-                message.agent === "branch_context" || message.agent === "branch_merge"
-                  ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-300"
-                  : "bg-accent-cyan/10 border-accent-cyan/20 text-accent-cyan"
-              }`}
-            >
+            {showAgentBadge && (
               <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  message.agent === "branch_context" || message.agent === "branch_merge"
-                    ? "bg-emerald-400"
-                    : "bg-accent-cyan"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.65rem] font-mono font-medium border ${
+                  isBranchSystemBadge
+                    ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-300"
+                    : "bg-accent-cyan/10 border-accent-cyan/20 text-accent-cyan"
                 }`}
-              />
-              {message.agent === "branch_context"
-                ? "🌿 Parent Context Brief"
-                : message.agent === "branch_merge"
-                  ? "🌿 Distilled Branch Merge"
-                  : message.agent === "nexus" || message.agent === "NexusAgent"
-                    ? "Head Agent"
-                    : message.agent || "Head Agent"}
-              {message.domain && (
-                <span className="text-text-muted font-sans">• {message.domain}</span>
-              )}
-              {message.confidence != null &&
-                message.agent !== "branch_context" &&
-                message.agent !== "branch_merge" && (
-                  <span className="text-text-muted font-sans">
-                    • {Math.round(message.confidence * 100)}%
-                  </span>
-                )}
-            </span>
-
-            {(message.modelName || message.modelTier) && (
-              <span
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-mono border ${message.modelTier === "strong"
-                  ? "bg-accent-violet/15 border-accent-violet/30 text-purple-300"
-                  : "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-                  }`}
-                title={`Executed on ${message.modelName ?? message.modelTier} (${message.modelTier ?? "default"} tier)`}
               >
-                <span>
-                  {message.modelTier === "strong"
-                    ? "🧠"
-                    : message.modelTier === "medium"
-                      ? "⚖️"
-                      : "⚡"}
-                </span>
-                <span>{message.modelName ?? message.modelTier}</span>
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isBranchSystemBadge ? "bg-emerald-400" : "bg-accent-cyan"
+                  }`}
+                />
+                {message.agent === "branch_context"
+                  ? "🌿 Parent Context Brief"
+                  : message.agent === "branch_merge"
+                    ? "🌿 Distilled Branch Merge"
+                    : message.agent}
+                {message.domain && (
+                  <span className="text-text-muted font-sans">• {message.domain}</span>
+                )}
               </span>
             )}
 
-            {effectiveCost != null && effectiveCost > 0 && (
+            {modelBadgeLabel && (
+              <span
+                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[0.65rem] font-mono font-medium uppercase tracking-wider border ${
+                  message.modelTier === "strong"
+                    ? "bg-accent-violet/15 border-accent-violet/30 text-purple-300"
+                    : message.modelTier === "medium"
+                      ? "bg-accent-cyan/10 border-accent-cyan/25 text-accent-cyan"
+                      : "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                }`}
+                title={`Executed on ${message.modelName ?? message.modelTier} (${message.modelTier ?? "default"} tier)`}
+              >
+                {modelBadgeLabel}
+              </span>
+            )}
+
+            {showCostBadge && (
               <span
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.65rem] font-mono border bg-amber-500/10 border-amber-500/30 text-amber-300"
                 title={`Estimated inference cost: $${effectiveCost.toFixed(4)} USD`}
@@ -191,7 +203,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
               </span>
             )}
 
-            {isLastTurn && onRevertTurn && (
+            {showRevertButton && (
               <button
                 type="button"
                 onClick={onRevertTurn}

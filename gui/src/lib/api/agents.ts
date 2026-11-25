@@ -77,6 +77,8 @@ export interface Conversation {
   branch_mode?: "tangent" | "fork" | string | null; // Branching mode ('tangent' fresh ALU vs 'fork' full clone)
   merged_at?: string | null;             // ISO-8601 timestamp when distilled and merged back to parent
   title_source?: "placeholder" | "auto" | "manual" | "legacy" | string | null; // Provenance tracking whether AI auto-title ran or user renamed manually
+  last_model_tier?: string | null;       // Remembered capability tier ("strong", "medium", "low") from the latest turn
+  last_model_name?: string | null;       // Remembered concrete model identifier (e.g. "claude-opus-5-5", "gemini-4-argon") from the latest turn
 }
 
 // Interface representing an isolated subagent lifecycle within a structured run snapshot
@@ -190,11 +192,19 @@ export async function getConversations(): Promise<Conversation[]> {
   return apiFetch<Conversation[]>("/api/agents/ask/conversations");
 }
 
-// Creates a new conversation thread entry in chats.db
-export async function createConversation(title: string = "New Chat"): Promise<{ conversation_id: string }> {
+// Creates a new conversation thread entry in chats.db (optionally seeding its remembered model metadata)
+export async function createConversation(
+  title: string = "New Chat",
+  lastModel?: { tier?: string | null; name?: string | null }
+): Promise<{ conversation_id: string }> {
   return apiFetch<{ conversation_id: string }>("/api/agents/ask/conversations", {
     method: "POST",
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({
+      title,
+      // Conditional spread omits nullish model fields so payloads stay minimal for callers passing only `title`
+      ...(lastModel?.tier ? { last_model_tier: lastModel.tier } : {}),
+      ...(lastModel?.name ? { last_model_name: lastModel.name } : {}),
+    }),
   });
 }
 

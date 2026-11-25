@@ -41,6 +41,7 @@ import {
   useChatBranching,
   FALLBACK_MODELS,
   MODEL_STORAGE_KEY,
+  RETIRED_MODEL_REPLACEMENTS,
   ACTIVE_CONV_STORAGE_KEY,
   CHAT_SIDEBAR_COLLAPSED_KEY,
   CHAT_INPUT_COLLAPSED_KEY,
@@ -48,10 +49,15 @@ import {
   loadPersistedDrafts,
   persistDrafts,
   extractTurnModelInfo,
+  extractLastUsedModelFromHistory,
   extractTurnCost,
   mapHistoryEntriesToMessages,
+  resolveModelOption,
+  resolveConversationModelSelection,
+  resolveLiveModelLabel,
   type Message,
   type ChatDraftMap,
+  type RunModelRef,
 } from "@/components/chat";
 
 // Compares SQLite history records against currently rendered messages so focus/poll reconciliations skip no-op re-renders
@@ -93,11 +99,7 @@ export default function ChatPage() {
   // activeRunIds: UUIDs of conversations currently executing a background turn on the server (shown as pulsing dots in sidebar)
   const [activeRunIds, setActiveRunIds] = useState<string[]>([]);
   // activeRunModel: model metadata for the currently streaming/re-attached turn so status banner matches even across switches
-  const [activeRunModel, setActiveRunModel] = useState<{
-    tier?: string | null;
-    name?: string | null;
-    label?: string | null;
-  } | null>(null);
+  const [activeRunModel, setActiveRunModel] = useState<RunModelRef | null>(null);
   // Per-conversation external capture cache state for live ChatHeader count badge and read-only modal
   const [cacheCaptures, setCacheCaptures] = useState<ConversationCaptureSummary[]>([]);
   const [isCacheModalOpen, setIsCacheModalOpen] = useState<boolean>(false);
@@ -112,6 +114,10 @@ export default function ChatPage() {
   // modelOptionsRef / selectedModelTierRef: mirror model state for stable stream callbacks
   const modelOptionsRef = useRef<ModelOption[]>(FALLBACK_MODELS);
   const selectedModelTierRef = useRef<string>("strong");
+  // conversationsRef: mirror of `conversations` so mount/switch callbacks read latest list synchronously
+  const conversationsRef = useRef<Conversation[]>([]);
+  // userOverrodeModelRef: tracks whether user manually picked a model in the active thread so async loads don't clobber it
+  const userOverrodeModelRef = useRef<boolean>(false);
   // lastSseActivityAtRef: tracks timestamp of last received SSE chunk/heartbeat to detect half-open or tab-frozen sockets
   const lastSseActivityAtRef = useRef<number>(0);
   // lastCompletedTurnRef: suppresses redundant polling reconciliations right after a clean live 'done' / 'sync_required'
@@ -167,6 +173,10 @@ export default function ChatPage() {
     selectedModelTierRef.current = selectedModelTier;
   }, [selectedModelTier]);
 
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
   // Programmatically sets the composer input value and increments `inputSyncId` so `ChatInputBar` snaps to `nextText`
   const setProgrammaticInput = useCallback((nextText: string) => {
     currentInputRef.current = nextText;
@@ -192,6 +202,18 @@ export default function ChatPage() {
   const handleRemoveImage = useCallback((index: number) => {
     setPendingImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
+
+  // Applies a conversation's remembered model to the UI selector without overwriting the user's global MODEL_STORAGE_KEY
+  const applyConversationModel = useCallback(
+    (ref: Pick<RunModelRef, "name" | "tier"> | null | undefined, options?: ModelOption[]): boolean => {
+      const matchedId = resolveConversationModelSelection(options ?? modelOptionsRef.current, ref);
+      if (!matchedId) return false;
+      selectedModelTierRef.current = matchedId;
+      setSelectedModelTier(matchedId);
+      return true;
+    },
+    []
+  );
 
   // Fetch conversations, selectable model catalog, and restore draft state on mount
   useEffect(() => {
@@ -249,29 +271,49 @@ export default function ChatPage() {
     getAvailableModels()
       .then((catalog) => {
         if (catalog.models && catalog.models.length > 0) {
+          modelOptionsRef.current = catalog.models;
           setModelOptions(catalog.models);
         }
-        // Migrate retired Anthropic 4.5 localStorage IDs to their 5.5 successors and fall back to backend default_tier if unmapped
-        const retiredAnthropicReplacements: Record<string, string> = {
-          "claude-sonnet-4-5": "claude-sonnet-5-5",
-          "claude-sonnet-4.5": "claude-sonnet-5-5",
-          "claude-opus-4-5": "claude-opus-5-5",
-          "claude-opus-4.5": "claude-opus-5-5",
-        };
+        const effectiveOptions =
+          catalog.models && catalog.models.length > 0 ? catalog.models : modelOptionsRef.current;
+
+        // If conversations resolved first, prefer the active thread's remembered model over global localStorage fallback
+        let appliedConversationModel = false;
+        if (!userOverrodeModelRef.current) {
+          const currentConvId = activeConvIdRef.current;
+          const activeConvRecord = currentConvId
+            ? conversationsRef.current.find((c) => c.id === currentConvId)
+            : undefined;
+          if (activeConvRecord) {
+            appliedConversationModel = applyConversationModel(
+              { name: activeConvRecord.last_model_name, tier: activeConvRecord.last_model_tier },
+              effectiveOptions
+            );
+          }
+        }
+
+        // Migrate retired Anthropic 4.5 localStorage IDs to 5.5 successors and fall back to backend default_tier if unmapped
         try {
           const savedTier = localStorage.getItem(MODEL_STORAGE_KEY);
-          const migratedTier = savedTier ? retiredAnthropicReplacements[savedTier] : undefined;
-          if (migratedTier && catalog.models.some((m) => m.id === migratedTier)) {
-            setSelectedModelTier(migratedTier);
+          const migratedTier = savedTier ? RETIRED_MODEL_REPLACEMENTS[savedTier.toLowerCase()] : undefined;
+          if (migratedTier && effectiveOptions.some((m) => m.id === migratedTier)) {
             localStorage.setItem(MODEL_STORAGE_KEY, migratedTier);
+            if (!appliedConversationModel && !userOverrodeModelRef.current) {
+              selectedModelTierRef.current = migratedTier;
+              setSelectedModelTier(migratedTier);
+            }
           } else if (
-            (!savedTier || !catalog.models.some((m) => m.id === savedTier)) &&
+            !appliedConversationModel &&
+            !userOverrodeModelRef.current &&
+            (!savedTier || !effectiveOptions.some((m) => m.id === savedTier)) &&
             catalog.default_tier
           ) {
+            selectedModelTierRef.current = catalog.default_tier;
             setSelectedModelTier(catalog.default_tier);
           }
         } catch {
-          if (catalog.default_tier) {
+          if (!appliedConversationModel && !userOverrodeModelRef.current && catalog.default_tier) {
+            selectedModelTierRef.current = catalog.default_tier;
             setSelectedModelTier(catalog.default_tier);
           }
         }
@@ -284,6 +326,7 @@ export default function ChatPage() {
 
     getConversations()
       .then((convos) => {
+        conversationsRef.current = convos;
         setConversations(convos);
         if (convos.length > 0) {
           // By default, select the most recent conversation (convos[0] sorted by last_updated DESC in SQLite)
@@ -300,6 +343,15 @@ export default function ChatPage() {
           activeConvIdRef.current = targetId;
           setActiveConvId(targetId);
           setProgrammaticInput(draftsRef.current[targetId] ?? "");
+          if (!userOverrodeModelRef.current) {
+            const targetConv = convos.find((c) => c.id === targetId);
+            if (targetConv) {
+              applyConversationModel(
+                { name: targetConv.last_model_name, tier: targetConv.last_model_tier },
+                modelOptionsRef.current
+              );
+            }
+          }
           try {
             localStorage.setItem(ACTIVE_CONV_STORAGE_KEY, targetId);
           } catch {
@@ -317,10 +369,12 @@ export default function ChatPage() {
         console.error("Failed to load conversations:", err);
         isInitialLoadDoneRef.current = true;
       });
-  }, [setProgrammaticInput]);
+  }, [setProgrammaticInput, applyConversationModel]);
 
-  // Persist user's per-turn model selection preference and keep input focused for immediate typing
+  // Persist user's per-turn model selection preference and mark manual override for the active thread
   const handleSelectModelTier = useCallback((tierId: string) => {
+    userOverrodeModelRef.current = true;
+    selectedModelTierRef.current = tierId;
     setSelectedModelTier(tierId);
     try {
       localStorage.setItem(MODEL_STORAGE_KEY, tierId);
@@ -334,6 +388,7 @@ export default function ChatPage() {
   const reloadVisibleConversations = useCallback(() => {
     return getConversations().then((list) => {
       const visible = list.filter((c) => !deletedConvIdsRef.current.has(c.id));
+      conversationsRef.current = visible;
       setConversations(visible);
       return visible;
     });
@@ -526,8 +581,12 @@ export default function ChatPage() {
 
             const currentOptions = modelOptionsRef.current;
             const fallbackTier = attemptOptions?.fallbackModelTier ?? selectedModelTierRef.current;
+            // Match concrete model name before tier ID so cross-provider tiers (e.g. Anthropic "low" vs Gemini "low") never collide
             const matchedOpt =
-              currentOptions.find((m) => m.id === fallbackTier) ?? currentOptions[0];
+              resolveModelOption(currentOptions, {
+                name: attemptOptions?.fallbackModelName,
+                tier: fallbackTier,
+              }) ?? currentOptions[0];
             const { modelTier, modelName } = extractTurnModelInfo(
               liveTraceRef.current,
               (doneEvt.model_tier as string | null) ?? null,
@@ -571,6 +630,15 @@ export default function ChatPage() {
             lastCompletedTurnRef.current = { convId: targetConvId, at: Date.now() };
             finishLocalStream(true);
             inputRef.current?.focus();
+            setConversations((prev) => {
+              const next = prev.map((c) =>
+                c.id === targetConvId
+                  ? { ...c, last_model_tier: effectiveTier, last_model_name: effectiveName }
+                  : c
+              );
+              conversationsRef.current = next;
+              return next;
+            });
             refreshConversationsAndSyncTitles([targetConvId]);
             void refreshConversationCaptures(targetConvId);
           },
@@ -667,8 +735,12 @@ export default function ChatPage() {
             if (!recovered && activeStreamConvIdRef.current === targetConvId) {
               const currentOptions = modelOptionsRef.current;
               const fallbackTier = attemptOptions?.fallbackModelTier ?? selectedModelTierRef.current;
+              // Match concrete model name before tier ID so cross-provider tiers (e.g. Anthropic "low" vs Gemini "low") never collide
               const matchedOpt =
-                currentOptions.find((m) => m.id === fallbackTier) ?? currentOptions[0];
+                resolveModelOption(currentOptions, {
+                  name: attemptOptions?.fallbackModelName,
+                  tier: fallbackTier,
+                }) ?? currentOptions[0];
               const errorMsg: Message = {
                 role: "assistant",
                 content: `❌ ${errorMessage}`,
@@ -696,7 +768,7 @@ export default function ChatPage() {
     async (
       convId: string,
       isCancelled?: () => boolean,
-      options?: { forceReattach?: boolean }
+      options?: { forceReattach?: boolean; syncModelFromRemote?: boolean }
     ) => {
       if (deletedConvIdsRef.current.has(convId)) return;
       try {
@@ -730,6 +802,26 @@ export default function ChatPage() {
               typeof m.id === "number" &&
               m.id > activeStatus.user_message_id!
           );
+
+        // Sync remembered model from active run or fresh server history only on thread switches/initial load
+        // (never on background polls or window focus, and never overriding a manual dropdown pick)
+        if (options?.syncModelFromRemote && !userOverrodeModelRef.current) {
+          if (
+            activeStatus.active &&
+            !alreadyCommittedAssistant &&
+            (activeStatus.model_name || activeStatus.model_tier)
+          ) {
+            applyConversationModel(
+              { name: activeStatus.model_name, tier: activeStatus.model_tier },
+              modelOptionsRef.current
+            );
+          } else {
+            const lastFromHistory = extractLastUsedModelFromHistory(history);
+            if (lastFromHistory) {
+              applyConversationModel(lastFromHistory, modelOptionsRef.current);
+            }
+          }
+        }
 
         if (activeStatus.active && !alreadyCommittedAssistant) {
           // Guard against racing with an already healthy stream on this same conversation unless caller requested stale recovery
@@ -785,7 +877,7 @@ export default function ChatPage() {
         }
       }
     },
-    [createStreamCallbacks, refreshConversationCaptures]
+    [createStreamCallbacks, refreshConversationCaptures, applyConversationModel]
   );
 
   // Reset cache modal & list when switching threads, then load lightweight metadata for the active thread
@@ -825,7 +917,7 @@ export default function ChatPage() {
     }
 
     let cancelled = false;
-    void syncConversation(activeConvId, () => cancelled);
+    void syncConversation(activeConvId, () => cancelled, { syncModelFromRemote: true });
     return () => {
       cancelled = true;
     };
@@ -1087,7 +1179,15 @@ export default function ChatPage() {
       setProgrammaticInput(nextDraft);
       setPendingImages([]);
 
-      // 3. Switch active thread and persist selection
+      // 3. Switch active thread, restore its remembered model selector, and persist selection
+      userOverrodeModelRef.current = false;
+      const targetConv = conversationsRef.current.find((c) => c.id === newConvId);
+      if (targetConv) {
+        applyConversationModel(
+          { name: targetConv.last_model_name, tier: targetConv.last_model_tier },
+          modelOptionsRef.current
+        );
+      }
       activeConvIdRef.current = newConvId;
       setActiveConvId(newConvId);
       try {
@@ -1097,7 +1197,7 @@ export default function ChatPage() {
       }
       inputRef.current?.focus();
     },
-    [activeConvId, setProgrammaticInput]
+    [activeConvId, setProgrammaticInput, applyConversationModel]
   );
 
   // Starts a fresh blank conversation thread, preserving the outgoing thread's draft and restoring the new chat draft (if any)
@@ -1181,7 +1281,11 @@ export default function ChatPage() {
       const remainingConvs = conversations.filter(
         (c) => c.id !== id && !deletedConvIdsRef.current.has(c.id)
       );
-      setConversations((prev) => prev.filter((c) => c.id !== id));
+      setConversations((prev) => {
+        const next = prev.filter((c) => c.id !== id);
+        conversationsRef.current = next;
+        return next;
+      });
 
       if (draftPersistTimerRef.current) {
         clearTimeout(draftPersistTimerRef.current);
@@ -1196,7 +1300,15 @@ export default function ChatPage() {
       persistDrafts(updatedDrafts);
 
       if (activeConvId === id) {
-        const nextId = remainingConvs.length > 0 ? remainingConvs[0].id : null;
+        const nextConv = remainingConvs.length > 0 ? remainingConvs[0] : null;
+        const nextId = nextConv ? nextConv.id : null;
+        userOverrodeModelRef.current = false;
+        if (nextConv) {
+          applyConversationModel(
+            { name: nextConv.last_model_name, tier: nextConv.last_model_tier },
+            modelOptionsRef.current
+          );
+        }
         activeConvIdRef.current = nextId;
         setActiveConvId(nextId);
         const nextDraft = (nextId ? updatedDrafts[nextId] : updatedDrafts[DRAFT_NEW_KEY]) ?? "";
@@ -1212,7 +1324,7 @@ export default function ChatPage() {
         }
       }
     },
-    [conversations, activeConvId, setProgrammaticInput]
+    [conversations, activeConvId, setProgrammaticInput, applyConversationModel]
   );
 
   // Updates the display title for a conversation in SQLite chats.db and synchronizes local UI state
@@ -1261,14 +1373,24 @@ export default function ChatPage() {
       const imagesToSend = [...pendingImages];
       setPendingImages([]);
 
+      const turnModelOption =
+        modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
+      const turnTier = turnModelOption?.tier ?? selectedModelTier;
+      const turnModelName = turnModelOption?.model_name ?? null;
+      // Clear manual-override guard now that the selected model is being committed to this turn
+      userOverrodeModelRef.current = false;
+
       let targetConvId = activeConvId;
       let isNewConv = false;
       if (!targetConvId) {
-        // Create new conversation on first message
+        // Create new conversation on first message and seed its remembered model metadata
         isNewConv = true;
         const initialTitleText = query || "Image Analysis";
         const title = initialTitleText.slice(0, 30) + (initialTitleText.length > 30 ? "..." : "");
-        const res = await createConversation(title);
+        const res = await createConversation(title, {
+          tier: turnTier,
+          name: turnModelName,
+        });
         targetConvId = res.conversation_id;
         // Mark active stream thread BEFORE updating activeConvId so useEffect([activeConvId]) doesn't clobber live state
         activeStreamConvIdRef.current = targetConvId;
@@ -1280,29 +1402,40 @@ export default function ChatPage() {
           // Ignore storage errors
         }
         // Refresh conversations list to show the new one
-        getConversations().then(setConversations);
+        getConversations().then((list) => {
+          conversationsRef.current = list;
+          setConversations(list);
+        });
       } else {
         activeStreamConvIdRef.current = targetConvId;
-        // Optimistically bump `last_updated` and move the active thread to index 0 on Send
-        // so the sidebar updates recency immediately without waiting for `onDone` to refetch SQLite
+        // Optimistically bump `last_updated`, record remembered model, and move the active thread to index 0 on Send
+        // so the sidebar and model memory update immediately without waiting for `onDone` to refetch SQLite
         const bumpedIso = new Date().toISOString();
         setConversations((prev) => {
           const target = prev.find((c) => c.id === targetConvId);
           if (!target) return prev;
-          return [{ ...target, last_updated: bumpedIso }, ...prev.filter((c) => c.id !== targetConvId)];
+          const next = [
+            {
+              ...target,
+              last_updated: bumpedIso,
+              last_model_tier: turnTier,
+              last_model_name: turnModelName,
+            },
+            ...prev.filter((c) => c.id !== targetConvId),
+          ];
+          conversationsRef.current = next;
+          return next;
         });
       }
 
-      const turnModelOption =
-        modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
       const expectedReplyMinLength = messagesRef.current.length + 2;
       const userMsg: Message = {
         role: "user",
         content: query,
         images: imagesToSend.length > 0 ? imagesToSend : undefined,
         timestamp: new Date(),
-        modelTier: turnModelOption?.tier ?? selectedModelTier,
-        modelName: turnModelOption?.model_name ?? null,
+        modelTier: turnTier,
+        modelName: turnModelName,
       };
       setMessages((prev) => [...prev, userMsg]);
       setProgrammaticInput("");
@@ -1385,7 +1518,10 @@ export default function ChatPage() {
       setMessages(mapHistoryEntriesToMessages(history));
 
       // 5. Refresh conversations list and external capture cache count
-      getConversations().then(setConversations);
+      getConversations().then((list) => {
+        conversationsRef.current = list;
+        setConversations(list);
+      });
       void refreshConversationCaptures(activeConvId);
     } catch (err) {
       console.error("Failed to stop and revert turn:", err);
@@ -1509,6 +1645,7 @@ export default function ChatPage() {
 
   const handleRefreshConversations = useCallback(async () => {
     const list = await getConversations();
+    conversationsRef.current = list;
     setConversations(list);
     return list;
   }, []);
@@ -1534,15 +1671,11 @@ export default function ChatPage() {
     modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
   const activeModelLabel = activeModelOption?.label ?? selectedModelTier;
   // Use the running turn's model metadata in the live Thinking Panel banner so switching threads preserves accuracy
-  const liveStatusModelLabel = useMemo(() => {
-    if (!activeRunModel) return activeModelLabel;
-    const matched = modelOptions.find(
-      (m) =>
-        (activeRunModel.name && m.model_name === activeRunModel.name) ||
-        (activeRunModel.tier && m.id === activeRunModel.tier)
-    );
-    return matched?.label ?? activeRunModel.label ?? activeRunModel.name ?? activeModelLabel;
-  }, [activeRunModel, modelOptions, activeModelLabel]);
+  // Resolves concrete model name before tier ID so e.g. Claude Haiku 5.5 (`tier: "low"`) never matches Gemini's `id: "low"` entry
+  const liveStatusModelLabel = useMemo(
+    () => resolveLiveModelLabel(activeRunModel, modelOptions, activeModelLabel),
+    [activeRunModel, modelOptions, activeModelLabel]
+  );
 
   return (
     <div className="flex h-[calc(100dvh-4rem)] md:h-full md:max-h-screen relative overflow-hidden">
