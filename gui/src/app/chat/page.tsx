@@ -251,9 +251,23 @@ export default function ChatPage() {
         if (catalog.models && catalog.models.length > 0) {
           setModelOptions(catalog.models);
         }
-        // Only apply backend default_tier if the user hasn't explicitly chosen a tier in localStorage
+        // Migrate retired Anthropic 4.5 localStorage IDs to their 5.5 successors and fall back to backend default_tier if unmapped
+        const retiredAnthropicReplacements: Record<string, string> = {
+          "claude-sonnet-4-5": "claude-sonnet-5-5",
+          "claude-sonnet-4.5": "claude-sonnet-5-5",
+          "claude-opus-4-5": "claude-opus-5-5",
+          "claude-opus-4.5": "claude-opus-5-5",
+        };
         try {
-          if (!localStorage.getItem(MODEL_STORAGE_KEY) && catalog.default_tier) {
+          const savedTier = localStorage.getItem(MODEL_STORAGE_KEY);
+          const migratedTier = savedTier ? retiredAnthropicReplacements[savedTier] : undefined;
+          if (migratedTier && catalog.models.some((m) => m.id === migratedTier)) {
+            setSelectedModelTier(migratedTier);
+            localStorage.setItem(MODEL_STORAGE_KEY, migratedTier);
+          } else if (
+            (!savedTier || !catalog.models.some((m) => m.id === savedTier)) &&
+            catalog.default_tier
+          ) {
             setSelectedModelTier(catalog.default_tier);
           }
         } catch {
@@ -1088,10 +1102,7 @@ export default function ChatPage() {
 
   // Starts a fresh blank conversation thread, preserving the outgoing thread's draft and restoring the new chat draft (if any)
   const handleNewChat = useCallback(
-    (initialTier?: string) => {
-      if (initialTier) {
-        handleSelectModelTier(initialTier);
-      }
+    () => {
       if (activeConvId === null) {
         // Already viewing the new chat composer
         inputRef.current?.focus();
@@ -1143,7 +1154,7 @@ export default function ChatPage() {
       }
       inputRef.current?.focus();
     },
-    [activeConvId, handleSelectModelTier, setProgrammaticInput]
+    [activeConvId, setProgrammaticInput]
   );
 
   const handleDeleteChat = useCallback(
@@ -1548,6 +1559,7 @@ export default function ChatPage() {
         onToggleCollapse={handleToggleSidebarCollapse}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         onSelectConversation={handleSelectConversation}
+        onSelectModelTier={handleSelectModelTier}
         onNewChat={handleNewChat}
       />
 

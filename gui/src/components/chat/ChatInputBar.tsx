@@ -4,14 +4,15 @@
 /**
  * ChatInputBar.tsx — Multiline auto-expanding chat input with per-turn model selector dropdown.
  * Handles dynamic textarea height resizing, Enter/Shift+Enter keyboard shortcuts,
- * and an accessible dropdown menu for switching capability tiers and explicit models
- * (e.g. `Strong (gemini-4-argon)`, `Fast (gemini-3.8-flash)`, `Hydrogen (gemini-4-hydrogen)`, Claude Opus/Sonnet).
+ * and delegates model switching to the shared `ModelSelectorDropdown` component
+ * (`Gemini 4 Argon`, `Gemini 4 Hydrogen`, `Gemini 3.8 Flash`, `Claude Opus/Sonnet/Haiku 5.5`).
  * Isolates live keystroke buffer state locally so typing never triggers full-page re-renders.
  */
 
 import { useState, useEffect, useRef, memo } from "react";
 import type { ModelOption } from "@/lib/api";
 import { uploadImage, resolveImageUrl } from "@/lib/api";
+import ModelSelectorDropdown from "./ModelSelectorDropdown";
 
 // Height bounds (in pixels) for the auto-expanding multiline chat textarea
 const MIN_TEXTAREA_HEIGHT = 10;
@@ -92,32 +93,8 @@ const ChatInputBar = memo(function ChatInputBar({
   const [uploadError, setUploadError] = useState<string | null>(null);
   // Drag-and-drop hover feedback state
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
-  // Model selector dropdown open/closed state and container ref for outside-click / Escape dismissal
-  const [isModelMenuOpen, setIsModelMenuOpen] = useState<boolean>(false);
-  const modelMenuRef = useRef<HTMLDivElement>(null);
   // Hidden input element ref for triggering browser file dialog on paperclip click
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Dismiss model dropdown menu on outside click or Escape key press
-  useEffect(() => {
-    if (!isModelMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
-        setIsModelMenuOpen(false);
-      }
-    };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setIsModelMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isModelMenuOpen]);
 
   // Render-phase prop synchronization: when the parent switches conversations, clears on submit, or injects a prompt suggestion,
   // immediately snap `localInput` to the new `input` value in the same render pass without a cascading effect re-render.
@@ -419,99 +396,15 @@ const ChatInputBar = memo(function ChatInputBar({
 
         {/* Bottom toolbar inside input card: Per-turn model dropdown + attachment + send action */}
         <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap pt-2 border-t border-border-subtle/50 px-1">
-          {/* Per-Turn Model Selector Dropdown */}
-          <div className="relative min-w-0" ref={modelMenuRef}>
-            {(() => {
-              const selectedOpt =
-                modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
-              const isSelectedStrong = selectedOpt?.tier === "strong";
-              return (
-                <>
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => setIsModelMenuOpen((prev) => !prev)}
-                    aria-haspopup="listbox"
-                    aria-expanded={isModelMenuOpen}
-                    aria-label="Select model for this turn"
-                    title={selectedOpt?.description || "Select model for this turn"}
-                    className={`px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-2 border disabled:opacity-50 max-w-full ${
-                      isSelectedStrong
-                        ? "bg-accent-violet/15 text-purple-200 border-accent-violet/35 hover:border-accent-violet/60"
-                        : "bg-bg-secondary/90 text-text-primary border-border-subtle hover:border-accent-cyan/45"
-                    }`}
-                  >
-                    <span className="shrink-0">
-                      {isSelectedStrong ? "🧠" : selectedOpt?.tier === "medium" ? "⚖️" : "⚡"}
-                    </span>
-                    <span className="truncate">
-                      {selectedOpt?.label || activeModelLabel}
-                    </span>
-                    <svg
-                      viewBox="0 0 24 24"
-                      className={`w-3.5 h-3.5 text-text-muted shrink-0 transition-transform duration-150 ${
-                        isModelMenuOpen ? "rotate-180" : ""
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                  </button>
-
-                  {isModelMenuOpen && (
-                    <div
-                      role="listbox"
-                      aria-label="Available models"
-                      className="absolute left-0 bottom-full mb-2 w-72 sm:w-80 max-w-[calc(100vw-2rem)] rounded-xl bg-bg-secondary/95 backdrop-blur-md border border-border-subtle shadow-2xl p-1.5 z-50"
-                    >
-                      {modelOptions.map((opt) => {
-                        const isSelected = selectedModelTier === opt.id;
-                        const isStrong = opt.tier === "strong";
-                        return (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            role="option"
-                            aria-selected={isSelected}
-                            onClick={() => {
-                              onSelectModelTier(opt.id);
-                              setIsModelMenuOpen(false);
-                            }}
-                            className={`w-full flex items-start gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors ${
-                              isSelected
-                                ? isStrong
-                                  ? "bg-accent-violet/20 text-purple-200 border border-accent-violet/35"
-                                  : "bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/35"
-                                : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary border border-transparent"
-                            }`}
-                          >
-                            <span className="text-sm mt-0.5 shrink-0">
-                              {isStrong ? "🧠" : opt.tier === "medium" ? "⚖️" : "⚡"}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-semibold truncate">{opt.label}</span>
-                                {isSelected && <span className="text-xs shrink-0">✓</span>}
-                              </div>
-                              {opt.description && (
-                                <p className="text-[0.68rem] text-text-muted leading-snug mt-0.5 line-clamp-2">
-                                  {opt.description}
-                                </p>
-                              )}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
-              );
-            })()}
-          </div>
+          {/* Per-Turn Model Selector Dropdown (shared component & lifted state with ChatSidebar) */}
+          <ModelSelectorDropdown
+            modelOptions={modelOptions}
+            selectedModelTier={selectedModelTier}
+            fallbackLabel={activeModelLabel}
+            placement="up"
+            disabled={loading}
+            onSelect={onSelectModelTier}
+          />
 
           <div className="flex items-center gap-2 ml-auto shrink-0">
             {/* Hidden file input invoked by the paperclip attachment button */}

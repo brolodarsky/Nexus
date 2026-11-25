@@ -127,52 +127,109 @@ export const MAX_CHAT_SIDEBAR_WIDTH = 640;
 // LocalStorage key for persisting whether the bottom message input bar is collapsed across page navigation
 export const CHAT_INPUT_COLLAPSED_KEY = "nexus_chat_input_collapsed";
 
-// Immediate fallback catalog rendered before GET /api/agents/models resolves
+// Immediate fallback catalog rendered before GET /api/agents/models resolves (mirrors `constants.py` & `cost.py`)
 export const FALLBACK_MODELS: ModelOption[] = [
   {
     id: "strong",
     tier: "strong",
     provider: "gemini",
     model_name: "gemini-4-argon",
-    label: "Strong (gemini-4-argon)",
-    short_label: "Strong",
-    description: "Deep reasoning & complex synthesis — Argon (gemini-4-argon)",
+    label: "Gemini 4 Argon",
+    short_label: "Argon",
+    description:
+      "Deep multi-step reasoning, cross-document synthesis, and hard analytical problems.",
+    pricing: {
+      input_per_m: 2.0,
+      output_per_m: 10.0,
+      cached_per_m: 0.1,
+      summary: "$2 / $10",
+      note: "$4/$20 Dec 1",
+    },
+  },
+  {
+    id: "gemini-4-hydrogen",
+    tier: "medium",
+    provider: "gemini",
+    model_name: "gemini-4-hydrogen",
+    label: "Gemini 4 Hydrogen",
+    short_label: "Hydrogen",
+    description:
+      "Everyday coding, fast tool loops, and large-context work at mid-tier cost.",
+    pricing: {
+      input_per_m: 1.5,
+      output_per_m: 7.5,
+      cached_per_m: 0.075,
+      summary: "$1.50 / $7.50",
+      note: null,
+    },
   },
   {
     id: "low",
     tier: "low",
     provider: "gemini",
     model_name: "gemini-3.8-flash",
-    label: "Fast (gemini-3.8-flash)",
-    short_label: "Fast",
-    description: "High-speed, ultra-low-cost execution — Flash (gemini-3.8-flash)",
-  },
-  {
-    id: "gemini-4-hydrogen",
-    tier: "low",
-    provider: "gemini",
-    model_name: "gemini-4-hydrogen",
-    label: "Hydrogen (gemini-4-hydrogen)",
-    short_label: "Hydrogen",
-    description: "High-efficiency 1M-context workhorse — Hydrogen (gemini-4-hydrogen)",
+    label: "Gemini 3.8 Flash",
+    short_label: "Flash",
+    description:
+      "Quick lookups, routine summaries, and fast multimodal tasks on Gemini.",
+    pricing: {
+      input_per_m: 0.75,
+      output_per_m: 3.75,
+      cached_per_m: 0.075,
+      summary: "$0.75 / $3.75",
+      note: "$1.50/$7.50 Jan 1",
+    },
   },
   {
     id: "claude-opus-5-5",
     tier: "strong",
     provider: "anthropic",
     model_name: "claude-opus-5-5",
-    label: "Opus 5.5 (claude-opus-5-5)",
+    label: "Claude Opus 5.5",
     short_label: "Opus 5.5",
-    description: "Anthropic deep reasoning & synthesis — Claude Opus 5.5 (claude-opus-5-5)",
+    description:
+      "Flagship autonomous coding, nuanced writing, and high-stakes tasks.",
+    pricing: {
+      input_per_m: 4.0,
+      output_per_m: 20.0,
+      cached_per_m: 0.2,
+      summary: "$4 / $20",
+      note: null,
+    },
   },
   {
-    id: "claude-sonnet-4-5",
+    id: "claude-sonnet-5-5",
+    tier: "medium",
+    provider: "anthropic",
+    model_name: "claude-sonnet-5-5",
+    label: "Claude Sonnet 5.5",
+    short_label: "Sonnet 5.5",
+    description:
+      "Balanced everyday drafting, coding, and reasoning at half Opus cost.",
+    pricing: {
+      input_per_m: 2.0,
+      output_per_m: 10.0,
+      cached_per_m: 0.1,
+      summary: "$2 / $10",
+      note: null,
+    },
+  },
+  {
+    id: "claude-haiku-5-5",
     tier: "low",
     provider: "anthropic",
-    model_name: "claude-sonnet-4-5",
-    label: "Sonnet 4.5 (claude-sonnet-4-5)",
-    short_label: "Sonnet 4.5",
-    description: "Anthropic fast, low-cost execution — Claude Sonnet 4.5 (claude-sonnet-4-5)",
+    model_name: "claude-haiku-5-5",
+    label: "Claude Haiku 5.5",
+    short_label: "Haiku 5.5",
+    description:
+      "Near-instant, ultra-cheap replies, formatting, tagging, and light search.",
+    pricing: {
+      input_per_m: 0.1,
+      output_per_m: 0.5,
+      cached_per_m: 0.01,
+      summary: "$0.10 / $0.50",
+      note: "5× >100K",
+    },
   },
 ];
 
@@ -267,15 +324,23 @@ export function extractTurnCost(
     const lowerName = (modelName || "").toLowerCase();
     const isOpus45 = lowerName.includes("opus-4") || lowerName.includes("opus 4");
     const isOpus = lowerName.includes("opus");
+    const isSonnet45 = lowerName.includes("sonnet-4") || lowerName.includes("sonnet 4");
     const isSonnet = lowerName.includes("sonnet");
-    // Default active "low" tier to Gemini 3.8 Flash ($0.10/$0.025/$0.40) while preserving explicit Hydrogen pricing ($1.50/$0.075/$7.50)
+    const isHaiku = lowerName.includes("haiku");
+    // Default active "low" tier to Gemini 3.8 Flash ($0.75/$0.075/$3.75) while preserving explicit Hydrogen pricing ($1.50/$0.075/$7.50)
     const isHydrogen = lowerName.includes("hydrogen");
-    const isFlash = lowerName.includes("flash") || (modelTier === "low" && !isHydrogen && !isSonnet && !isOpus);
+    const isFlash = lowerName.includes("flash") || (modelTier === "low" && !isHydrogen && !isSonnet && !isOpus && !isHaiku);
 
-    // Resolve per-million-token pricing across Anthropic Claude (Opus 5.5: $4/$0.20/$20, Opus 4.5: $5/$0.50/$25, Sonnet: $3/$0.30/$15) and Google Gemini model families
-    const inRate = isOpus45 ? 5.00 : isOpus ? 4.00 : isSonnet ? 3.00 : isFlash ? 0.10 : isHydrogen ? 1.50 : 1.25;
-    const cachedRate = isOpus45 ? 0.50 : isOpus ? 0.20 : isSonnet ? 0.30 : isFlash ? 0.025 : isHydrogen ? 0.075 : 0.3125;
-    const outRate = isOpus45 ? 25.00 : isOpus ? 20.00 : isSonnet ? 15.00 : isFlash ? 0.40 : isHydrogen ? 7.50 : 5.00;
+    // Claude Haiku 5.5 steps up 5x above 100k input tokens ($0.10/$0.01/$0.50 -> $0.50/$0.05/$2.50)
+    const isHaikuLongContext = isHaiku && totalIn > 100000;
+    const haikuInRate = isHaikuLongContext ? 0.50 : 0.10;
+    const haikuCachedRate = isHaikuLongContext ? 0.05 : 0.01;
+    const haikuOutRate = isHaikuLongContext ? 2.50 : 0.50;
+
+    // Resolve per-million-token pricing across Anthropic Claude (Opus 5.5: $4/$0.20/$20, Opus 4.5: $5/$0.50/$25, Sonnet 5.5: $2/$0.10/$10, Sonnet 4.5: $3/$0.30/$15, Haiku 5.5: $0.10/$0.01/$0.50 <=100k) and Google Gemini (Argon: $2/$0.10/$10, Hydrogen: $1.50/$0.075/$7.50, Flash: $0.75/$0.075/$3.75) model families
+    const inRate = isOpus45 ? 5.00 : isOpus ? 4.00 : isSonnet45 ? 3.00 : isSonnet ? 2.00 : isHaiku ? haikuInRate : isFlash ? 0.75 : isHydrogen ? 1.50 : 2.00;
+    const cachedRate = isOpus45 ? 0.50 : isOpus ? 0.20 : isSonnet45 ? 0.30 : isSonnet ? 0.10 : isHaiku ? haikuCachedRate : isFlash ? 0.075 : isHydrogen ? 0.075 : 0.10;
+    const outRate = isOpus45 ? 25.00 : isOpus ? 20.00 : isSonnet45 ? 15.00 : isSonnet ? 10.00 : isHaiku ? haikuOutRate : isFlash ? 3.75 : isHydrogen ? 7.50 : 10.00;
 
     const uncachedIn = Math.max(0, totalIn - totalCached);
     const cost = ((uncachedIn * inRate) + (totalCached * cachedRate) + (totalOut * outRate)) / 1000000;

@@ -10,6 +10,7 @@ export { default as MessageBranchTrigger } from "./MessageBranchTrigger";
 export { default as ChatMessageItem } from "./ChatMessageItem";
 export { default as ChatMessageThread } from "./ChatMessageThread";
 export { default as ChatInputBar } from "./ChatInputBar";
+export { default as ModelSelectorDropdown } from "./ModelSelectorDropdown";
 export { useChatBranching } from "./useChatBranching";
 
 export * from "./types";
@@ -22,4 +23,5 @@ export type { MessageBranchTriggerProps } from "./MessageBranchTrigger";
 export type { ChatMessageItemProps } from "./ChatMessageItem";
 export type { ChatMessageThreadProps } from "./ChatMessageThread";
 export type { ChatInputBarProps } from "./ChatInputBar";
+export type { ModelSelectorDropdownProps, ModelDropdownPlacement } from "./ModelSelectorDropdown";
 

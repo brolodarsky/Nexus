@@ -2,13 +2,14 @@
 
 /**
  * ChatSidebar.tsx — Collapsible conversation history menu for the Nexus Chat interface.
- * Renders either a compact 14-unit icon rail or a full 64-unit drawer with quick model preset buttons,
+ * Renders either a compact 14-unit icon rail or a full resizable drawer with the shared model selector dropdown,
  * nested branch tree views, and per-row kebab menus for copying Conversation / Thread IDs.
  */
 
 // memo: Isolates the conversation history sidebar from re-rendering during keystroke updates in the composer
 import { useState, useRef, useEffect, useMemo, memo } from "react";
 import type { Conversation, ModelOption } from "@/lib/api";
+import ModelSelectorDropdown from "./ModelSelectorDropdown";
 import {
   CHAT_SIDEBAR_WIDTH_KEY,
   DEFAULT_CHAT_SIDEBAR_WIDTH,
@@ -31,7 +32,8 @@ import {
 // - onToggleCollapse: callback invoked to expand or collapse the desktop conversation history panel
 // - onCloseMobile: optional callback invoked to close the mobile slide-over drawer
 // - onSelectConversation: callback invoked when the user clicks a conversation row
-// - onNewChat: callback to start a blank conversation, optionally pre-selecting a model tier
+// - onSelectModelTier: callback updating and persisting the shared selected model tier
+// - onNewChat: callback to start a blank conversation
 export interface ChatSidebarProps {
   conversations: Conversation[];
   activeConvId: string | null;
@@ -44,7 +46,8 @@ export interface ChatSidebarProps {
   onToggleCollapse: (collapsed: boolean) => void;
   onCloseMobile?: () => void;
   onSelectConversation: (id: string) => void;
-  onNewChat: (initialTier?: string) => void;
+  onSelectModelTier: (tierId: string) => void;
+  onNewChat: () => void;
 }
 
 /**
@@ -70,6 +73,7 @@ const ChatSidebar = memo(function ChatSidebar({
   onToggleCollapse,
   onCloseMobile,
   onSelectConversation,
+  onSelectModelTier,
   onNewChat,
 }: ChatSidebarProps) {
   // collapsedParentIds: tracks which parent conversation UUIDs have their child branch trees collapsed in the sidebar
@@ -359,33 +363,14 @@ const ChatSidebar = memo(function ChatSidebar({
           )}
         </div>
 
-        {/* Quick New Chat Model Preset Buttons (2-column grid for Gemini & Anthropic Strong/Fast presets) */}
-        <div className="grid grid-cols-2 gap-1.5">
-          {modelOptions.map((opt) => {
-            const isSelected = selectedModelTier === opt.id;
-            const isStrong = opt.tier === "strong";
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => {
-                  onNewChat(opt.id);
-                  if (isMobileDrawer) onCloseMobile?.();
-                }}
-                title={`Open new chat with ${opt.description}`}
-                className={`py-1 px-2 rounded-lg text-[0.68rem] font-medium border transition-all flex items-center justify-center gap-1 ${isSelected
-                  ? isStrong
-                    ? "bg-accent-violet/15 border-accent-violet/40 text-purple-300"
-                    : "bg-accent-cyan/15 border-accent-cyan/40 text-accent-cyan"
-                  : "bg-bg-tertiary/50 border-border-subtle text-text-muted hover:text-text-secondary"
-                  }`}
-              >
-                <span>{isStrong ? "🧠" : opt.tier === "medium" ? "⚖️" : "⚡"}</span>
-                <span className="truncate">{opt.short_label}</span>
-              </button>
-            );
-          })}
-        </div>
+        {/* Shared Model Selector Dropdown (same component & lifted state as ChatInputBar) */}
+        <ModelSelectorDropdown
+          modelOptions={modelOptions}
+          selectedModelTier={selectedModelTier}
+          placement="down"
+          fullWidth
+          onSelect={onSelectModelTier}
+        />
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1">

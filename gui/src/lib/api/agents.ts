@@ -19,15 +19,25 @@ export interface AskResponse {
   timestamp: string;          // ISO-8601 timestamp of response generation
 }
 
+// Interface describing verified USD per-1M-token pricing metadata returned by GET /api/agents/models
+export interface ModelPricingInfo {
+  input_per_m: number;        // Standard uncached input token rate in USD per 1M tokens
+  output_per_m: number;       // Output / thinking token rate in USD per 1M tokens
+  cached_per_m: number;       // Context-cached input read rate in USD per 1M tokens
+  summary: string;            // Compact UI badge string (e.g. "$2 / $10", "$0.10 / $0.50")
+  note?: string | null;       // Optional promo expiry or context-length step-up caveat
+}
+
 // Interface describing a single selectable model/tier option in the Chat UI
 export interface ModelOption {
-  id: string;                 // Selection key passed as `model_tier` (e.g. "strong", "low", "claude-opus-5-5", "claude-sonnet-4-5")
+  id: string;                 // Selection key passed as `model_tier` (e.g. "strong", "low", "gemini-4-hydrogen", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")
   tier: "low" | "medium" | "strong" | string; // Capability/cost tier
   provider?: string;          // LLM provider family ("gemini", "anthropic", "openai")
   model_name: string;         // Concrete LLM identifier (e.g. "gemini-4-argon", "claude-opus-5-5")
-  label: string;              // Full dropdown label (e.g. "Strong (gemini-4-argon)", "Opus 5.5 (claude-opus-5-5)")
-  short_label: string;        // Compact pill label (e.g. "Strong", "Fast", "Opus 5.5", "Sonnet 4.5")
-  description: string;        // Tooltip/helper description of model strength and role
+  label: string;              // Standardized dropdown label (e.g. "Gemini 4 Argon", "Claude Opus 5.5")
+  short_label: string;        // Compact pill label (e.g. "Argon", "Hydrogen", "Flash", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5")
+  description: string;        // Single-sentence explanation of when to select this model
+  pricing?: ModelPricingInfo; // Verified per-1M-token USD pricing summary and caveats
 }
 
 // Interface for the model catalog returned by GET /api/agents/models
