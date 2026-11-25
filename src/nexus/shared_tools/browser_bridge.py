@@ -1,10 +1,10 @@
 """
-browser_bridge.py — Read-Only Chrome Browser & Tab Group Bridge for the Nexus Engine.
+browser_bridge.py — Chrome Browser, Tab Group & Assisted-Draft Form Bridge for the Nexus Engine.
 
 Connects to the local unpacked Chrome Extension (`src/nexus/shared_tools/browser_extension/`)
-to list open tabs, inspect native Chrome Tab Groups (`chrome.tabGroups`), and extract clean
-Markdown from the live rendered DOM of authenticated tabs with zero vision tokens and zero
-anti-bot network footprint.
+to list open tabs, inspect/create Chrome Tab Groups (`chrome.tabGroups`), extract clean
+Markdown (and optional transient form refs) from the live rendered DOM of authenticated tabs,
+and draft-fill form fields without ever auto-submitting.
 """
 # argparse: Standard library CLI argument parser for `python -m nexus.shared_tools.browser_bridge`
 import argparse
@@ -17,6 +17,7 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any, Coroutine, Dict, List, Optional
+from urllib.parse import urlsplit
 
 # httpx: Modern HTTP client used to query the FastAPI `/api/browser` relay when `start.ps1` is running
 import httpx
@@ -31,7 +32,10 @@ FASTAPI_BASE_URL = "http://127.0.0.1:8000/api/browser"
 CLI_WS_HOST = "127.0.0.1"
 CLI_WS_PORT = 8765
 API_WS_PORT = 8000
-EXPECTED_BRIDGE_VERSION = "1.1.0"
+EXPECTED_BRIDGE_VERSION = "1.2.0"
+MAX_OPEN_TABS = 10
+MAX_FILL_FIELDS = 50
+VALID_GROUP_COLORS = frozenset({"grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"})
 EXTENSION_DIR: Path = PROJECT_ROOT / "src" / "nexus" / "shared_tools" / "browser_extension"
 
 
@@ -198,11 +202,11 @@ def _dispatch_browser_command(
     params: Optional[Dict[str, Any]] = None,
     timeout: float = 20.0,
 ) -> Dict[str, Any]:
-    """Dispatches a read-only browser command via FastAPI (`localhost:8000`) if connected, else standalone WS (`8765`).
+    """Dispatches a browser bridge command via FastAPI (`localhost:8000`) if connected, else standalone WS (`8765`).
 
     Args:
-        action: One of `"ping"`, `"list_tabs"`, or `"read_tabs"`.
-        params: Optional filter/extraction parameters dictionary.
+        action: One of `"ping"`, `"list_tabs"`, `"read_tabs"`, `"open_tabs"`, or `"fill_form"`.
+        params: Optional filter, extraction, tab-opening, or form-fill parameters dictionary.
         timeout: Maximum timeout in seconds for the command.
 
     Returns:
@@ -233,6 +237,10 @@ def _dispatch_browser_command(
                             r = api_client.get(f"{FASTAPI_BASE_URL}/tabs", params=clean_params)
                         elif action == "read_tabs":
                             r = api_client.post(f"{FASTAPI_BASE_URL}/read", json=clean_params)
+                        elif action == "open_tabs":
+                            r = api_client.post(f"{FASTAPI_BASE_URL}/open", json=clean_params)
+                        elif action == "fill_form":
+                            r = api_client.post(f"{FASTAPI_BASE_URL}/fill", json=clean_params)
                         else:
                             return {"ok": False, "error": f"Unknown action: {action}"}
 
@@ -266,15 +274,41 @@ def _dispatch_browser_command(
     )
 
 
+# ── Pure-Python Validation Helpers ───────────────────────────────────────────
+
+# Validates and normalizes target URLs before dispatching `open_tabs` so non-HTTP schemes never hit Chrome.
+def validate_http_urls(urls: List[str]) -> tuple[List[str], Optional[str]]:
+    """Validates a bounded list of `http://` or `https://` URLs for `open_tabs()`.
+
+    Returns:
+        Tuple `(cleaned_urls, error_message)`. `error_message` is None when valid.
+    """
+    if not isinstance(urls, list) or not urls:
+        return [], "Provide at least 1 URL to open."
+    if len(urls) > MAX_OPEN_TABS:
+        return [], f"Cannot open more than {MAX_OPEN_TABS} tabs per call (received {len(urls)})."
+
+    cleaned: List[str] = []
+    for raw in urls:
+        u = str(raw or "").strip()
+        if not u:
+            return [], "Empty URL string in `urls` list."
+        parsed = urlsplit(u)
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
+            return [], f"Rejected unsafe or invalid URL '{u}'. Only http:// and https:// URLs are permitted."
+        cleaned.append(u)
+    return cleaned, None
+
+
 # ── Public Pure-Python API ───────────────────────────────────────────────────
 
 def get_bridge_status() -> Dict[str, Any]:
-    """Checks connection status of the read-only Chrome Extension bridge."""
+    """Checks connection status of the Chrome Extension bridge."""
     res = _dispatch_browser_command("ping", timeout=5.0)
     if not res.get("ok"):
         return {
             "connected": False,
-            "mode": "read_only",
+            "mode": "assisted_draft",
             "expected_bridge_version": EXPECTED_BRIDGE_VERSION,
             "extension_dir": str(EXTENSION_DIR),
             "error": res.get("error"),
@@ -282,9 +316,10 @@ def get_bridge_status() -> Dict[str, Any]:
     meta = res.get("data", {}) or {}
     loaded_version = (meta.get("bridge_version") if isinstance(meta, dict) else None) or res.get("bridge_version")
     update_required = bool(isinstance(loaded_version, str) and loaded_version and loaded_version != EXPECTED_BRIDGE_VERSION)
+    mode = (meta.get("mode") if isinstance(meta, dict) else None) or "assisted_draft"
     return {
         "connected": True,
-        "mode": "read_only",
+        "mode": mode,
         "transport": res.get("transport"),
         "expected_bridge_version": EXPECTED_BRIDGE_VERSION,
         "loaded_bridge_version": loaded_version,
@@ -360,8 +395,9 @@ def read_tabs(
     query: Optional[str] = None,
     active_only: bool = False,
     max_chars: int = 20000,
+    include_refs: bool = False,
 ) -> Dict[str, Any]:
-    """Extracts clean Markdown from the live rendered DOM of matching Chrome tabs (strictly read-only).
+    """Extracts clean Markdown from the live rendered DOM of matching Chrome tabs.
 
     Args:
         tab_ids: Optional list of integer Chrome `tab_id` values to read.
@@ -369,6 +405,7 @@ def read_tabs(
         query: Optional substring filter matching tab title or URL.
         active_only: If True, reads only the currently active tab.
         max_chars: Maximum characters of Markdown to return per tab (default: 20,000).
+        include_refs: If True, stamps transient `data-nexus-ref` IDs onto visible form controls for `fill_form()`.
     """
     res = _dispatch_browser_command(
         action="read_tabs",
@@ -378,6 +415,7 @@ def read_tabs(
             "query": query,
             "active_only": active_only,
             "max_chars": max_chars,
+            "include_refs": include_refs,
         },
         timeout=25.0,
     )
@@ -386,7 +424,83 @@ def read_tabs(
     return res
 
 
+def open_tabs(
+    urls: List[str],
+    group_name: Optional[str] = None,
+    group_color: str = "blue",
+    activate_first: bool = False,
+) -> Dict[str, Any]:
+    """Opens 1-10 `http(s)` URLs in Chrome tabs and optionally groups them into a Chrome Tab Group.
+
+    Args:
+        urls: List of 1-10 `http://` or `https://` URLs to open.
+        group_name: Optional Chrome Tab Group title (reuses existing group in window if matched).
+        group_color: Tab Group color (`grey`, `blue`, `red`, `yellow`, `green`, `pink`, `purple`, `cyan`, `orange`).
+        activate_first: If True, focuses the first newly opened tab.
+    """
+    cleaned_urls, err = validate_http_urls(urls)
+    if err:
+        return {"ok": False, "error": err}
+
+    norm_color = (group_color or "blue").strip().lower()
+    if norm_color not in VALID_GROUP_COLORS:
+        norm_color = "blue"
+
+    clean_group = group_name.strip() if isinstance(group_name, str) and group_name.strip() else None
+    return _dispatch_browser_command(
+        action="open_tabs",
+        params={
+            "urls": cleaned_urls,
+            "group_name": clean_group,
+            "group_color": norm_color,
+            "activate_first": bool(activate_first),
+        },
+        timeout=20.0,
+    )
+
+
+def fill_form(
+    tab_id: int,
+    fields: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Draft-fills form controls inside an open Chrome tab using transient `ref` IDs (never auto-submits).
+
+    Args:
+        tab_id: Integer Chrome `tab_id` previously inspected with `read_tabs(..., include_refs=True)`.
+        fields: Dictionary mapping `ref` IDs (e.g. `{"f0_1": "Jane Doe"}`) to draft values.
+    """
+    if isinstance(tab_id, bool) or not isinstance(tab_id, int):
+        return {"ok": False, "error": "`tab_id` must be an integer Chrome tab ID."}
+    if not isinstance(fields, dict) or not fields:
+        return {"ok": False, "error": "`fields` must be a non-empty dictionary mapping element refs to values."}
+    if len(fields) > MAX_FILL_FIELDS:
+        return {"ok": False, "error": f"Cannot fill more than {MAX_FILL_FIELDS} fields per call (received {len(fields)})."}
+
+    return _dispatch_browser_command(
+        action="fill_form",
+        params={
+            "tab_id": tab_id,
+            "fields": fields,
+        },
+        timeout=20.0,
+    )
+
+
 # ── Markdown Formatters for Agent & CLI Consumption ──────────────────────────
+
+# Emits a top reload notice when the running Chrome extension reports an older `BRIDGE_VERSION`.
+def _version_drift_callout(data: Dict[str, Any], result: Dict[str, Any]) -> Optional[str]:
+    """Returns a Markdown warning block if loaded extension version differs from `EXPECTED_BRIDGE_VERSION`."""
+    loaded_version = data.get("bridge_version") or result.get("bridge_version")
+    if isinstance(loaded_version, str) and loaded_version and loaded_version != EXPECTED_BRIDGE_VERSION:
+        return (
+            f"\n> ⚠️ **Stale Chrome Extension Detected:** Chrome is running Nexus Browser Bridge "
+            f"`v{loaded_version}` (expected `v{EXPECTED_BRIDGE_VERSION}`). Open `chrome://extensions` "
+            f"and click **Reload** on *Nexus Browser Bridge* to activate the latest "
+            f"DOM/modal/form/tab-automation capabilities."
+        )
+    return None
+
 
 def format_tabs_as_markdown(result: Dict[str, Any]) -> str:
     """Formats the output of `list_tabs()` into a clean, token-efficient Markdown report."""
@@ -450,15 +564,9 @@ def format_tab_reads_as_markdown(result: Dict[str, Any]) -> str:
     header_lines: List[str] = [
         f"# Extracted Chrome Tab Content ({ok_count}/{req_count} tabs read successfully)"
     ]
-    # Surface an explicit reload warning only when the extension reports a mismatched version
-    loaded_version = data.get("bridge_version") or result.get("bridge_version")
-    if isinstance(loaded_version, str) and loaded_version and loaded_version != EXPECTED_BRIDGE_VERSION:
-        header_lines.append(
-            f"\n> ⚠️ **Stale Chrome Extension Detected:** Chrome is running Nexus Browser Bridge "
-            f"`v{loaded_version}` (expected `v{EXPECTED_BRIDGE_VERSION}`). Open `chrome://extensions` "
-            f"and click **Reload** on *Nexus Browser Bridge (Read-Only)* to activate the latest "
-            f"DOM/modal/form extractor."
-        )
+    drift = _version_drift_callout(data, result)
+    if drift:
+        header_lines.append(drift)
     blocks: List[str] = ["\n".join(header_lines)]
 
     for idx, t in enumerate(tabs, start=1):
@@ -496,15 +604,96 @@ def format_tab_reads_as_markdown(result: Dict[str, Any]) -> str:
     return "\n---\n\n".join(blocks)
 
 
+def format_open_tabs_as_markdown(result: Dict[str, Any]) -> str:
+    """Formats the output of `open_tabs()` into a structured Markdown summary with `tab_id` handles."""
+    if not result.get("ok"):
+        return f"❌ **Nexus Browser Bridge Error:**\n{result.get('error', 'Unknown error')}"
+
+    data = result.get("data") or {}
+    tabs: List[Dict[str, Any]] = data.get("tabs") or []
+    opened_count = data.get("opened_count", len(tabs))
+    group_title = data.get("group_title")
+    group_color = data.get("group_color")
+    group_id = data.get("group_id")
+
+    lines: List[str] = [f"# Opened Chrome Tabs ({opened_count} tab(s))"]
+    drift = _version_drift_callout(data, result)
+    if drift:
+        lines.append(drift)
+
+    if group_title:
+        lines.append(
+            f"- **Chrome Tab Group:** {group_title} (`color: {group_color or 'blue'}`, `group_id: {group_id}`)"
+        )
+
+    for t in tabs:
+        tid = t.get("tab_id")
+        url = t.get("url") or ""
+        active_badge = " **[ACTIVE]**" if t.get("active") else ""
+        lines.append(f"- **`[tab_id: {tid}]`**{active_badge} {url}")
+
+    return "\n".join(lines)
+
+
+def format_fill_form_as_markdown(result: Dict[str, Any]) -> str:
+    """Formats the output of `fill_form()` into a clear audit report for human review."""
+    if not result.get("ok"):
+        return f"❌ **Nexus Browser Bridge Error:**\n{result.get('error', 'Unknown error')}"
+
+    data = result.get("data") or {}
+    tab_id = data.get("tab_id")
+    title = (data.get("title") or "(Untitled)").strip()
+    url = data.get("url") or ""
+    filled_count = data.get("filled_count", 0)
+    blocked_count = data.get("blocked_count", 0)
+    skipped_count = data.get("skipped_count", 0)
+    not_found_count = data.get("not_found_count", 0)
+    entries: List[Dict[str, Any]] = data.get("results") or []
+
+    lines: List[str] = [
+        f"# Draft Form Fill Report — `[tab_id: {tab_id}]` {title}",
+        f"- **URL:** {url}",
+        (
+            f"- **Summary:** {filled_count} filled | {blocked_count} blocked | "
+            f"{skipped_count} skipped | {not_found_count} not found"
+        ),
+    ]
+    drift = _version_drift_callout(data, result)
+    if drift:
+        lines.append(drift)
+
+    if entries:
+        lines.append("\n## Field Outcomes")
+        for item in entries:
+            ref = item.get("ref", "?")
+            status = item.get("status", "unknown")
+            label = item.get("label") or item.get("tag") or ""
+            label_part = f" ({label})" if label else ""
+            if status == "filled":
+                lines.append(f"- ✅ `{ref}`{label_part}: set to `{item.get('new_value', '')}`")
+            elif status == "blocked":
+                lines.append(f"- ⛔ `{ref}`{label_part}: **BLOCKED** — {item.get('reason', 'Restricted field')}")
+            elif status == "skipped":
+                lines.append(f"- ⚠️ `{ref}`{label_part}: **SKIPPED** — {item.get('reason', 'Could not apply value')}")
+            else:
+                lines.append(f"- ❌ `{ref}`: **NOT FOUND** — {item.get('reason', 'Missing in DOM')}")
+
+    lines.append(
+        "\n> **Review Required:** Inspect the blue-outlined draft fields in Chrome and submit manually "
+        "(Nexus never auto-submits forms)."
+    )
+    return "\n".join(lines)
+
+
 # ── CLI Entrypoint (`python -m nexus.shared_tools.browser_bridge`) ───────────
 
 def main() -> None:
-    """CLI entrypoint for inspecting Chrome Tab Groups and extracting live tab Markdown."""
+    """CLI entrypoint for inspecting/opening Chrome Tab Groups, extracting DOM Markdown, and draft-filling forms."""
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(
-        description="Read-Only Chrome Browser & Tab Group Bridge for the Nexus Engine."
+        description="Chrome Browser, Tab Group & Assisted-Draft Form Bridge for the Nexus Engine."
     )
     parser.add_argument(
         "--status",
@@ -514,7 +703,7 @@ def main() -> None:
     parser.add_argument(
         "--list",
         action="store_true",
-        help="List open Chrome tabs and Chrome Tab Groups (default action if --read is not passed).",
+        help="List open Chrome tabs and Chrome Tab Groups (default action if --read/--open/--fill are not passed).",
     )
     parser.add_argument(
         "--read",
@@ -522,11 +711,45 @@ def main() -> None:
         help="Extract clean rendered DOM Markdown from matching tabs.",
     )
     parser.add_argument(
+        "--refs",
+        action="store_true",
+        help="Stamp transient `ref` handles onto visible form controls when using --read.",
+    )
+    parser.add_argument(
+        "--open",
+        nargs="+",
+        metavar="URL",
+        default=None,
+        help="Open 1-10 HTTP(S) URLs in Chrome tabs (optionally grouped via --group/--color).",
+    )
+    parser.add_argument(
+        "--color",
+        type=str,
+        default="blue",
+        help="Chrome Tab Group color for --open (grey, blue, red, yellow, green, pink, purple, cyan, orange).",
+    )
+    parser.add_argument(
+        "--activate",
+        action="store_true",
+        help="Focus the first newly opened tab when using --open.",
+    )
+    parser.add_argument(
+        "--fill",
+        action="store_true",
+        help="Draft-fill form fields in a single --tab-id using --fields-json (never submits).",
+    )
+    parser.add_argument(
+        "--fields-json",
+        type=str,
+        default=None,
+        help='JSON object mapping element refs to draft values (e.g. \'{"f0_1": "Jane Doe"}\').',
+    )
+    parser.add_argument(
         "-g",
         "--group",
         type=str,
         default=None,
-        help="Filter by Chrome Tab Group name (case-insensitive, e.g. 'Jobs').",
+        help="Filter or assign Chrome Tab Group name (case-insensitive, e.g. 'Jobs').",
     )
     parser.add_argument(
         "-q",
@@ -541,7 +764,7 @@ def main() -> None:
         type=int,
         nargs="+",
         default=None,
-        help="One or more specific Chrome tab_id integers to read.",
+        help="One or more specific Chrome tab_id integers to read (or single tab_id for --fill).",
     )
     parser.add_argument(
         "--active",
@@ -578,10 +801,50 @@ def main() -> None:
                 print(
                     f"⚠️  Stale Chrome Extension detected: Chrome is running v{loaded_ver} "
                     f"(expected v{status.get('expected_bridge_version')}).\n"
-                    "   Open chrome://extensions and click Reload on 'Nexus Browser Bridge (Read-Only)'."
+                    "   Open chrome://extensions and click Reload on 'Nexus Browser Bridge'."
                 )
         else:
             print(f"❌ Nexus Browser Bridge Disconnected\n{status.get('error')}")
+            sys.exit(1)
+        return
+
+    if args.open:
+        res = open_tabs(
+            urls=args.open,
+            group_name=args.group,
+            group_color=args.color,
+            activate_first=args.activate,
+        )
+        if args.json:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+        else:
+            print(format_open_tabs_as_markdown(res))
+        if not res.get("ok"):
+            sys.exit(1)
+        return
+
+    if args.fill:
+        if not args.tab_id or len(args.tab_id) != 1:
+            print("❌ Error: --fill requires exactly one --tab-id.", file=sys.stderr)
+            sys.exit(1)
+        if not args.fields_json:
+            print("❌ Error: --fill requires --fields-json with a JSON object.", file=sys.stderr)
+            sys.exit(1)
+        try:
+            parsed_fields = json.loads(args.fields_json)
+        except Exception as exc:
+            print(f"❌ Error parsing --fields-json: {exc}", file=sys.stderr)
+            sys.exit(1)
+        if not isinstance(parsed_fields, dict):
+            print("❌ Error: --fields-json must decode to a JSON object.", file=sys.stderr)
+            sys.exit(1)
+
+        res = fill_form(tab_id=args.tab_id[0], fields=parsed_fields)
+        if args.json:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+        else:
+            print(format_fill_form_as_markdown(res))
+        if not res.get("ok"):
             sys.exit(1)
         return
 
@@ -593,6 +856,7 @@ def main() -> None:
             query=args.query,
             active_only=args.active,
             max_chars=args.max_chars,
+            include_refs=args.refs,
         )
         if args.json:
             print(json.dumps(res, indent=2, ensure_ascii=False))

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Nexus Browser Bridge (Read-Only)",
-  "version": "1.1.0",
-  "description": "Read-only bridge allowing the local Nexus Agentic Engine to list Chrome Tab Groups and extract clean Markdown from live rendered tabs.",
+  "name": "Nexus Browser Bridge",
+  "version": "1.2.0",
+  "description": "Local bridge allowing the Nexus Agentic Engine to list/read Chrome Tab Groups and DOM Markdown, open/group tabs, and draft-fill forms without auto-submitting.",
   "permissions": [
     "tabs",
     "tabGroups",
@@ -16,7 +16,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Nexus Browser Bridge (Read-Only)",
+    "default_title": "Nexus Browser Bridge",
     "default_popup": "popup.html"
   }
 }

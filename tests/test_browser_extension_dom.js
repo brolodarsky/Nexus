@@ -29,6 +29,14 @@ if (startIdx === -1 || endIdx === -1) {
 
 const funcCode = bgCode.slice(startIdx, endIdx).trim();
 
+const fillStartIdx = bgCode.indexOf("function fillFormFieldsInFrame(");
+const fillEndIdx = bgCode.indexOf("async function handleFillForm(");
+if (fillStartIdx === -1 || fillEndIdx === -1) {
+  console.error("Could not locate fillFormFieldsInFrame in background.js");
+  process.exit(1);
+}
+const fillFuncCode = bgCode.slice(fillStartIdx, fillEndIdx).trim();
+
 // Lightweight Mock DOM for Node.js
 class MockNode {
   constructor(tag, attrs = {}, text = "") {
@@ -41,12 +49,15 @@ class MockNode {
     this.parentElement = null;
     this.shadowRoot = null;
     this._text = text;
+    this._dispatchedEvents = [];
     this.style = attrs.style && typeof attrs.style === "object" ? { ...attrs.style } : {};
     if (attrs.value !== undefined) this.value = String(attrs.value);
     if (attrs.checked !== undefined) this.checked = Boolean(attrs.checked);
     if (attrs.selected !== undefined) this.selected = Boolean(attrs.selected);
     if (attrs.required !== undefined) this.required = Boolean(attrs.required);
     if (attrs.multiple !== undefined) this.multiple = Boolean(attrs.multiple);
+    if (attrs.disabled !== undefined) this.disabled = Boolean(attrs.disabled);
+    if (attrs.readOnly !== undefined) this.readOnly = Boolean(attrs.readOnly);
     if (attrs.rect && typeof attrs.rect === "object") {
       this.getBoundingClientRect = () => ({ ...attrs.rect });
     }
@@ -55,10 +66,35 @@ class MockNode {
   }
 
   getAttribute(name) { return this.attrs[name] ?? null; }
+  setAttribute(name, value) { this.attrs[name] = String(value); }
+  removeAttribute(name) { delete this.attrs[name]; }
   hasAttribute(name) { return name in this.attrs; }
+  focus() {}
+  dispatchEvent(evt) {
+    if (evt && evt.type) this._dispatchedEvents.push(evt.type);
+    return true;
+  }
+  click() {
+    const t = (this.getAttribute("type") || "").toLowerCase();
+    if (this.tagName === "INPUT" && (t === "checkbox" || t === "radio")) {
+      this.checked = t === "radio" ? true : !this.checked;
+      this._dispatchedEvents.push("input", "change");
+    } else if (["checkbox", "radio", "switch"].includes((this.getAttribute("role") || "").toLowerCase())) {
+      const curr = this.getAttribute("aria-checked") === "true";
+      this.setAttribute("aria-checked", curr ? "false" : "true");
+      this._dispatchedEvents.push("change");
+    }
+  }
   get textContent() {
     if (this._text && this.children.length === 0) return this._text;
     return this.children.map(c => c.textContent || c.nodeValue || "").join("");
+  }
+  set textContent(val) {
+    this._text = String(val ?? "");
+    this.children = [];
+    if (this._text) {
+      this.appendChild(new MockTextNode(this._text));
+    }
   }
   appendChild(child) {
     child.parentElement = this;
@@ -560,6 +596,160 @@ if (result9.markdown.includes("CLOSED_OPACITY_ZERO_MODAL")) {
 }
 if (result9.markdown.includes("SuperSecret99!") || !result9.markdown.includes("(redacted)")) {
   throw new Error("Test 9 failed to redact password input value");
+}
+
+// ── Test 10: includeRefs=true stamps data-nexus-ref on form controls (skipping password), reuses modal refs ──
+const evalFillFunc = new Function(`${fillFuncCode}; return fillFormFieldsInFrame;`)();
+const root10 = new MockNode("html");
+const body10 = root10.appendChild(new MockNode("body"));
+const main10 = body10.appendChild(new MockNode("main"));
+main10.appendChild(new MockNode("h1", {}, "Therapist Intake Form"));
+main10.appendChild(
+  new MockNode(
+    "p",
+    {},
+    "Complete your initial consultation request below so our care coordinator can match you with an in-network clinician and verify your scheduling preferences for an initial 45-minute telehealth or in-person intake."
+  )
+);
+const form10 = main10.appendChild(new MockNode("form"));
+const inpName10 = form10.appendChild(new MockNode("label", {}, "Full Name *")).appendChild(
+  new MockNode("input", { type: "text", required: true, name: "full_name" })
+);
+const inpEmail10 = form10.appendChild(new MockNode("label", {}, "Email *")).appendChild(
+  new MockNode("input", { type: "email", required: true, name: "email" })
+);
+const inpPass10 = form10.appendChild(new MockNode("label", {}, "Portal Password")).appendChild(
+  new MockNode("input", { type: "password", value: "pw123" })
+);
+const txtNotes10 = form10.appendChild(new MockNode("label", {}, "Goals")).appendChild(
+  new MockNode("textarea", { placeholder: "What brings you in?" })
+);
+const selIns10 = form10.appendChild(new MockNode("label", {}, "Insurance")).appendChild(new MockNode("select"));
+selIns10.appendChild(new MockNode("option", { value: "aetna" }, "Aetna"));
+selIns10.appendChild(new MockNode("option", { value: "bcbs" }, "Blue Cross"));
+const chkTele10 = form10.appendChild(new MockNode("label"));
+const chkInput10 = chkTele10.appendChild(new MockNode("input", { type: "checkbox", checked: false }));
+chkTele10.appendChild(new MockTextNode("Prefer Telehealth"));
+const edBox10 = form10.appendChild(new MockNode("div", { contenteditable: "true", "aria-placeholder": "Extra notes" }));
+
+// Also add an interactive credit-card field & submit button inside a fixed portal modal to test blocking & ref reuse
+const portal10 = body10.appendChild(
+  new MockNode("div", { class: "lux-modal", style: { position: "fixed" }, rect: { width: 420, height: 320 } })
+);
+portal10.appendChild(new MockNode("h2", {}, "Additional Details"));
+const inpCard10 = portal10.appendChild(new MockNode("label", {}, "Credit Card Number")).appendChild(
+  new MockNode("input", { type: "text", autocomplete: "cc-number", name: "cc_number" })
+);
+const inpSub10 = portal10.appendChild(new MockNode("input", { type: "submit", value: "Book Appointment" }));
+portal10.appendChild(new MockNode("input", { type: "file", name: "insurance_card" }));
+
+global.document = attachDocumentHelpers(root10, "Therapist Intake", body10);
+const result10 = evalFunc(20000, true);
+const nameRef = inpName10.getAttribute("data-nexus-ref");
+const emailRef = inpEmail10.getAttribute("data-nexus-ref");
+const txtRef = txtNotes10.getAttribute("data-nexus-ref");
+const selRef = selIns10.getAttribute("data-nexus-ref");
+const chkRef = chkInput10.getAttribute("data-nexus-ref");
+const edRef = edBox10.getAttribute("data-nexus-ref");
+const cardRef = inpCard10.getAttribute("data-nexus-ref");
+
+if (!nameRef || !nameRef.startsWith("f0_")) throw new Error("Test 10 failed to stamp f0_ ref on text input");
+if (!result10.markdown.includes(`ref=${nameRef}`) || !result10.markdown.includes(`ref=${selRef}`)) {
+  throw new Error("Test 10 missing ref= handles in rendered Markdown");
+}
+if (!result10.markdown.includes(`[ref=${chkRef}]`)) {
+  throw new Error("Test 10 missing [ref=...] on checkbox");
+}
+if (!result10.markdown.includes(`ref=${edRef}`)) {
+  throw new Error("Test 10 missing ref= on contenteditable");
+}
+if (inpPass10.getAttribute("data-nexus-ref") !== null) {
+  throw new Error("Test 10 must NOT stamp data-nexus-ref on password inputs");
+}
+if (inpSub10.getAttribute("data-nexus-ref") !== null) {
+  throw new Error("Test 10 must NOT stamp data-nexus-ref on submit buttons");
+}
+
+// ── Test 11: fillFormFieldsInFrame fills text, textarea, select, checkbox, and contenteditable + highlights ──
+const fillRes11 = evalFillFunc({
+  [nameRef]: "William Volodarsky",
+  [emailRef]: "bill@example.com",
+  [txtRef]: "Seeking CBT / ADHD support; flexible afternoons.",
+  [selRef]: "Blue Cross",
+  [chkRef]: true,
+  [edRef]: "Tuesday or Thursday after 2pm works best.",
+});
+if (fillRes11[nameRef].status !== "filled" || inpName10.value !== "William Volodarsky") {
+  throw new Error("Test 11 failed to fill text input");
+}
+if (!inpName10._dispatchedEvents.includes("input") || !inpName10._dispatchedEvents.includes("change")) {
+  throw new Error("Test 11 failed to dispatch input/change events on text input");
+}
+if (inpName10.getAttribute("data-nexus-filled") !== "true" || !inpName10.style.outline.includes("#0284c7")) {
+  throw new Error("Test 11 failed to set visual review highlight on filled input");
+}
+if (fillRes11[txtRef].status !== "filled" || txtNotes10.value !== "Seeking CBT / ADHD support; flexible afternoons.") {
+  throw new Error("Test 11 failed to fill textarea");
+}
+if (fillRes11[selRef].status !== "filled" || selIns10.value !== "bcbs") {
+  throw new Error("Test 11 failed to match select option by label");
+}
+if (fillRes11[chkRef].status !== "filled" || chkInput10.checked !== true) {
+  throw new Error("Test 11 failed to toggle checkbox");
+}
+if (fillRes11[edRef].status !== "filled" || edBox10.textContent !== "Tuesday or Thursday after 2pm works best.") {
+  throw new Error("Test 11 failed to fill contenteditable");
+}
+
+// ── Test 12: fillFormFieldsInFrame hard-blocks password, submit, file, disabled, readOnly, and payment/SSN ──
+const blockRoot = new MockNode("html");
+const blockBody = blockRoot.appendChild(new MockNode("body"));
+const bForm = blockBody.appendChild(new MockNode("form"));
+const bPass = bForm.appendChild(new MockNode("input", { type: "password", "data-nexus-ref": "b_pass", value: "orig" }));
+const bSub = bForm.appendChild(new MockNode("button", { type: "submit", "data-nexus-ref": "b_sub" }, "Submit"));
+const bFile = bForm.appendChild(new MockNode("input", { type: "file", "data-nexus-ref": "b_file" }));
+const bDis = bForm.appendChild(new MockNode("input", { type: "text", disabled: true, "data-nexus-ref": "b_dis", value: "locked" }));
+const bRo = bForm.appendChild(new MockNode("input", { type: "text", readOnly: true, "data-nexus-ref": "b_ro", value: "ro" }));
+const bSsn = bForm.appendChild(new MockNode("input", { type: "text", name: "ssn", "data-nexus-ref": "b_ssn", value: "" }));
+const bCc = bForm.appendChild(new MockNode("input", { type: "text", autocomplete: "cc-csc", "data-nexus-ref": "b_cc", value: "" }));
+
+global.document = attachDocumentHelpers(blockRoot, "Blocked Controls", blockBody);
+const fillRes12 = evalFillFunc({
+  b_pass: "hacked",
+  b_sub: "click",
+  b_file: "/etc/passwd",
+  b_dis: "override",
+  b_ro: "override",
+  b_ssn: "123-45-6789",
+  b_cc: "999",
+});
+for (const k of ["b_pass", "b_sub", "b_file", "b_dis", "b_ro", "b_ssn", "b_cc"]) {
+  if (!fillRes12[k] || fillRes12[k].status !== "blocked") {
+    throw new Error(`Test 12 failed to block '${k}'`);
+  }
+}
+if (bPass.value !== "orig" || bDis.value !== "locked" || bRo.value !== "ro" || bSsn.value !== "" || bCc.value !== "") {
+  throw new Error("Test 12 mutated a blocked field");
+}
+if (cardRef) {
+  global.document = attachDocumentHelpers(root10, "Therapist Intake", body10);
+  const cardRes = evalFillFunc({ [cardRef]: "4111" });
+  if (cardRes[cardRef].status !== "blocked") {
+    throw new Error("Test 12 failed to block cc-number field stamped during Test 10");
+  }
+}
+
+// ── Test 13: Unmatched <select> option returns skipped with option hints; unknown ref omitted from frame map ──
+global.document = attachDocumentHelpers(root10, "Therapist Intake", body10);
+const fillRes13 = evalFillFunc({
+  [selRef]: "Nonexistent Plan",
+  f0_999: "should not exist",
+});
+if (fillRes13[selRef].status !== "skipped" || !fillRes13[selRef].reason.includes("Aetna")) {
+  throw new Error("Test 13 expected skipped select with available options hint");
+}
+if ("f0_999" in fillRes13) {
+  throw new Error("Test 13 expected unknown ref to be absent from frame outcome map");
 }
 
 console.log("All Node.js browser extension DOM tests passed successfully!");

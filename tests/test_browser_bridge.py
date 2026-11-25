@@ -24,9 +24,15 @@ from websockets.asyncio.client import connect
 
 from nexus.agent.graph import CORE_TOOLS
 from nexus.api.main import app
+from nexus.api.routers import browser as browser_router
 from nexus.core.tool_catalog import get_shared_tools_catalog
 from nexus.shared_tools import browser_bridge
-from nexus.shared_tools.shared import list_browser_tabs, read_browser_tabs
+from nexus.shared_tools.shared import (
+    fill_browser_form,
+    list_browser_tabs,
+    open_browser_tabs,
+    read_browser_tabs,
+)
 
 
 def test_browser_bridge_in_tool_catalog() -> None:
@@ -41,10 +47,12 @@ def test_browser_bridge_in_tool_catalog() -> None:
 
 
 def test_browser_tools_bound_in_core_tools() -> None:
-    """Ensure `list_browser_tabs`, `read_browser_tabs`, and `get_directory_structure` (not duplicate alias) are bound in `CORE_TOOLS`."""
+    """Ensure browser bridge tools and `get_directory_structure` (not duplicate alias) are bound in `CORE_TOOLS`."""
     tool_names = {t.name for t in CORE_TOOLS}
     assert "list_browser_tabs" in tool_names
     assert "read_browser_tabs" in tool_names
+    assert "open_browser_tabs" in tool_names
+    assert "fill_browser_form" in tool_names
     assert "get_directory_structure" in tool_names
     assert "get_vault_structure" not in tool_names
 
@@ -295,11 +303,213 @@ def test_fastapi_browser_router_status_when_disconnected() -> None:
     assert status_res.status_code == 200
     body = status_res.json()
     assert body["connected"] is False
-    assert body["mode"] == "read_only"
+    assert body["mode"] == "assisted_draft"
 
     tabs_res = client.get("/api/browser/tabs")
     assert tabs_res.status_code == 503
     assert "chrome://extensions" in tabs_res.json()["detail"]
+
+
+def test_browser_router_loopback_guard() -> None:
+    """Verify non-loopback peers are rejected with 403 on HTTP and 1008 on WebSocket."""
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    assert browser_router.is_loopback_host("127.0.0.1") is True
+    assert browser_router.is_loopback_host("::1") is True
+    assert browser_router.is_loopback_host("::ffff:127.0.0.1") is True
+    assert browser_router.is_loopback_host("192.168.1.42") is False
+    assert browser_router.is_loopback_host("100.64.0.10") is False
+    assert browser_router.is_loopback_host(None) is False
+
+    # Direct dependency check with a spoofed LAN peer
+    lan_req = SimpleNamespace(client=SimpleNamespace(host="192.168.1.42"))
+    with pytest.raises(HTTPException) as exc_info:
+        browser_router.require_loopback_client(lan_req)
+    assert exc_info.value.status_code == 403
+
+    # ASGI-level TestClient check overriding client=("192.168.1.42", 54321)
+    lan_client = TestClient(app, client=("192.168.1.42", 54321))
+    assert lan_client.get("/api/browser/status").status_code == 403
+    assert lan_client.post("/api/browser/open", json={"urls": ["https://example.com"]}).status_code == 403
+    assert lan_client.post("/api/browser/fill", json={"tab_id": 1, "fields": {"f0_1": "x"}}).status_code == 403
+
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect) as ws_exc:
+        with lan_client.websocket_connect("/api/browser/ws"):
+            pass
+    assert ws_exc.value.code == 1008
+
+
+def test_open_tabs_and_fill_form_local_validation() -> None:
+    """Verify pure-Python validation blocks unsafe schemes, empty payloads, and oversized batches."""
+    bad_scheme = browser_bridge.open_tabs(["javascript:alert(1)"])
+    assert bad_scheme["ok"] is False
+    assert "http://" in bad_scheme["error"]
+
+    bad_file = browser_bridge.open_tabs(["file:///C:/Windows/System32"])
+    assert bad_file["ok"] is False
+
+    too_many_urls = browser_bridge.open_tabs([f"https://example.com/{i}" for i in range(11)])
+    assert too_many_urls["ok"] is False
+    assert "10" in too_many_urls["error"]
+
+    empty_fields = browser_bridge.fill_form(tab_id=42, fields={})
+    assert empty_fields["ok"] is False
+
+    too_many_fields = browser_bridge.fill_form(tab_id=42, fields={f"f0_{i}": "x" for i in range(51)})
+    assert too_many_fields["ok"] is False
+    assert "50" in too_many_fields["error"]
+
+
+def test_ephemeral_ws_open_tabs_and_fill_form_roundtrip() -> None:
+    """Verify ephemeral WS roundtrips for `open_tabs` and `fill_form` commands."""
+
+    async def _run_command(action: str, params: Dict[str, Any], reply_data: Dict[str, Any]) -> Dict[str, Any]:
+        server_task = asyncio.create_task(
+            browser_bridge._execute_via_ephemeral_ws(
+                action=action,
+                params=params,
+                connect_timeout=3.0,
+                response_timeout=3.0,
+            )
+        )
+        await asyncio.sleep(0.15)
+        async with connect(f"ws://127.0.0.1:{browser_bridge.CLI_WS_PORT}/api/browser/ws") as ws:
+            cmd = json.loads(await ws.recv())
+            assert cmd["action"] == action
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "response",
+                        "request_id": cmd["request_id"],
+                        "ok": True,
+                        "data": reply_data,
+                    }
+                )
+            )
+        return await server_task
+
+    open_res = asyncio.run(
+        _run_command(
+            "open_tabs",
+            {"urls": ["https://example.com/therapist-1"], "group_name": "Therapists", "group_color": "green"},
+            {
+                "bridge_version": browser_bridge.EXPECTED_BRIDGE_VERSION,
+                "opened_count": 1,
+                "group_id": 12,
+                "group_title": "Therapists",
+                "group_color": "green",
+                "tabs": [{"tab_id": 77, "url": "https://example.com/therapist-1", "active": False}],
+            },
+        )
+    )
+    assert open_res["ok"] is True
+    assert open_res["data"]["group_title"] == "Therapists"
+
+    fill_res = asyncio.run(
+        _run_command(
+            "fill_form",
+            {"tab_id": 77, "fields": {"f0_1": "William"}},
+            {
+                "bridge_version": browser_bridge.EXPECTED_BRIDGE_VERSION,
+                "tab_id": 77,
+                "title": "Contact Therapist",
+                "url": "https://example.com/therapist-1",
+                "filled_count": 1,
+                "blocked_count": 0,
+                "skipped_count": 0,
+                "not_found_count": 0,
+                "results": [{"ref": "f0_1", "status": "filled", "tag": "INPUT", "label": "Name", "new_value": "William"}],
+            },
+        )
+    )
+    assert fill_res["ok"] is True
+    assert fill_res["data"]["filled_count"] == 1
+
+
+def test_open_and_fill_langchain_tools_and_formatters() -> None:
+    """Verify `read_browser_tabs(include_refs=True)`, `open_browser_tabs`, and `fill_browser_form` wrappers."""
+    with patch(
+        "nexus.shared_tools.browser_bridge.read_tabs",
+        return_value={
+            "ok": True,
+            "data": {
+                "requested_count": 1,
+                "succeeded_count": 1,
+                "tabs": [
+                    {
+                        "tab_id": 55,
+                        "title": "Intake",
+                        "url": "https://example.com/intake",
+                        "ok": True,
+                        "char_count": 40,
+                        "truncated": False,
+                        "markdown": "`[Input (text, required): ref=f0_1, label=\"Name\"]`",
+                    }
+                ],
+            },
+        },
+    ) as mock_read:
+        out = read_browser_tabs.invoke({"tab_ids": [55], "include_refs": True})
+        mock_read.assert_called_once_with(
+            tab_ids=[55],
+            group_name=None,
+            query=None,
+            active_only=False,
+            max_chars=15000,
+            include_refs=True,
+        )
+        assert "ref=f0_1" in out
+
+    with patch(
+        "nexus.shared_tools.browser_bridge.open_tabs",
+        return_value={
+            "ok": True,
+            "data": {
+                "opened_count": 2,
+                "group_id": 9,
+                "group_title": "Therapists",
+                "group_color": "teal",
+                "tabs": [
+                    {"tab_id": 81, "url": "https://example.com/a", "active": True},
+                    {"tab_id": 82, "url": "https://example.com/b", "active": False},
+                ],
+            },
+        },
+    ):
+        open_out = open_browser_tabs.invoke(
+            {"urls": ["https://example.com/a", "https://example.com/b"], "group_name": "Therapists"}
+        )
+        assert "Opened Chrome Tabs (2 tab(s))" in open_out
+        assert "`[tab_id: 81]`" in open_out
+        assert "Therapists" in open_out
+
+    with patch(
+        "nexus.shared_tools.browser_bridge.fill_form",
+        return_value={
+            "ok": True,
+            "data": {
+                "tab_id": 81,
+                "title": "Provider Contact",
+                "url": "https://example.com/a",
+                "filled_count": 1,
+                "blocked_count": 1,
+                "skipped_count": 0,
+                "not_found_count": 0,
+                "results": [
+                    {"ref": "f0_1", "status": "filled", "tag": "INPUT", "label": "Name", "new_value": "William"},
+                    {"ref": "f0_2", "status": "blocked", "tag": "INPUT", "label": "SSN", "reason": "Sensitive field"},
+                ],
+            },
+        },
+    ):
+        fill_out = fill_browser_form.invoke({"tab_id": 81, "fields": {"f0_1": "William", "f0_2": "000"}})
+        assert "1 filled | 1 blocked" in fill_out
+        assert "BLOCKED" in fill_out
+        assert "submit manually" in fill_out
 
 
 def test_format_tab_reads_version_drift_warning() -> None:

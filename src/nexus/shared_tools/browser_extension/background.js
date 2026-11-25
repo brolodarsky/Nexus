@@ -1,20 +1,26 @@
 /**
- * background.js — Manifest V3 Service Worker for the Nexus Read-Only Browser Bridge.
+ * background.js — Manifest V3 Service Worker for the Nexus Browser Bridge.
  *
  * Architecture & Security Invariants:
- * 1. Strictly Read-Only: Only inspects tab metadata (`chrome.tabs.query`), tab groups
- *    (`chrome.tabGroups.query`), and extracts rendered DOM text/Markdown via isolated
- *    read-only script execution (`chrome.scripting.executeScript`). Never clicks, submits
- *    forms, mutates DOM state, or closes/navigates tabs.
+ * 1. Assisted Draft Mode (No Auto-Submit): Inspects tab metadata (`chrome.tabs.query`),
+ *    tab groups (`chrome.tabGroups.query`), extracts rendered DOM Markdown (with optional
+ *    transient `data-nexus-ref` handles), opens/groups `http(s)` tabs, and draft-fills
+ *    form fields while hard-blocking passwords, payment/SSN fields, and form submission.
  * 2. Loopback-Only Transport: Connects exclusively to `ws://127.0.0.1:8000/api/browser/ws`
  *    (when the FastAPI Control Panel is running) and `ws://127.0.0.1:8765/api/browser/ws`
  *    (when `python -m nexus.shared_tools.browser_bridge` runs in standalone CLI mode).
- * 3. Zero Anti-Bot Footprint: Reads the already-rendered DOM inside the user's real,
+ * 3. Zero Anti-Bot Footprint: Reads and drafts directly inside the user's real,
  *    authenticated Chrome session—generating zero extra HTTP requests to external sites.
  */
 
 // Extension protocol/extractor version verified by `browser_bridge.py` to flag stale loaded workers
-const BRIDGE_VERSION = "1.1.0";
+const BRIDGE_VERSION = "1.2.0";
+
+// Hard bounds preventing runaway tab opening or massive form-fill payloads
+const MAX_OPEN_TABS = 10;
+const MAX_FILL_FIELDS = 50;
+// Chrome Tab Group color enum accepted by `chrome.tabGroups.update`
+const VALID_GROUP_COLORS = new Set(["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]);
 
 // Loopback WebSocket endpoints:
 // - 8000: Primary Nexus FastAPI backend (`start.ps1`)
@@ -141,7 +147,7 @@ async function connectEndpoint(key) {
     safeSend(ws, {
       type: "hello",
       bridge_version: BRIDGE_VERSION,
-      mode: "read_only",
+      mode: "assisted_draft",
       endpoint: key,
       user_agent: navigator.userAgent,
       tab_count: summary.tabCount,
@@ -171,7 +177,7 @@ async function connectEndpoint(key) {
           ok: true,
           data: {
             status: "ok",
-            mode: "read_only",
+            mode: "assisted_draft",
             bridge_version: BRIDGE_VERSION,
             user_agent: navigator.userAgent,
             tab_count: summary.tabCount,
@@ -195,12 +201,28 @@ async function connectEndpoint(key) {
           ok: true,
           data,
         });
+      } else if (action === "open_tabs") {
+        const data = await handleOpenTabs(payload.params || {});
+        safeSend(ws, {
+          type: "response",
+          request_id: requestId,
+          ok: true,
+          data,
+        });
+      } else if (action === "fill_form") {
+        const data = await handleFillForm(payload.params || {});
+        safeSend(ws, {
+          type: "response",
+          request_id: requestId,
+          ok: true,
+          data,
+        });
       } else {
         safeSend(ws, {
           type: "response",
           request_id: requestId,
           ok: false,
-          error: `Unsupported read-only action: '${action}'. Allowed actions: ping, list_tabs, read_tabs.`,
+          error: `Unsupported action: '${action}'. Allowed actions: ping, list_tabs, read_tabs, open_tabs, fill_form.`,
         });
       }
     } catch (err) {
@@ -376,16 +398,19 @@ async function handleListTabs(params = {}) {
 }
 
 /**
- * Self-contained read-only function injected into target tabs via `chrome.scripting.executeScript`.
+ * Self-contained function injected into target tabs via `chrome.scripting.executeScript`.
  *
  * IMPORTANT: Because Chrome serializes this function to run inside the target tab's isolated world,
  * it MUST NOT reference any outer closures or global variables from `background.js`.
- * It strictly reads the live DOM and returns a structured object with clean Markdown.
+ * Reads the live DOM into clean Markdown and, only when `includeRefs === true`, stamps transient
+ * `data-nexus-ref` handles onto visible form controls so `fillFormFieldsInFrame` can target them.
  *
  * @param {number} maxChars - Maximum character budget for the returned Markdown string
+ * @param {boolean} [includeRefs=false] - When true, stamp `data-nexus-ref` attributes onto form controls
  */
-function extractTabMarkdownReadOnly(maxChars) {
+function extractTabMarkdownReadOnly(maxChars, includeRefs = false) {
   const charBudget = typeof maxChars === "number" && maxChars > 0 ? maxChars : 20000;
+  const stampRefs = Boolean(includeRefs);
 
   // Detect whether this script instance is executing inside an embedded <iframe> vs. top frame
   let isSubframe = false;
@@ -397,6 +422,43 @@ function extractTabMarkdownReadOnly(maxChars) {
   }
 
   const currentUrl = window.location && window.location.href ? window.location.href : "";
+
+  // Deterministic per-frame prefix (`f0` for top frame, `s<hash>` for iframes) so cross-frame refs never collide
+  const computeShortHash = (str) => {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i += 1) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(36).slice(0, 5);
+  };
+  const framePrefix = isSubframe ? `s${computeShortHash(currentUrl || "sub")}` : "f0";
+  let refCounter = 0;
+
+  // Clear stale `data-nexus-ref` stamps on re-capture so refs stay aligned with the latest read
+  if (stampRefs && typeof document.querySelectorAll === "function") {
+    try {
+      const priorStamped = document.querySelectorAll("[data-nexus-ref]");
+      for (const node of priorStamped) {
+        if (node && typeof node.removeAttribute === "function") {
+          node.removeAttribute("data-nexus-ref");
+        }
+      }
+    } catch (_e) {}
+  }
+
+  // Assigns (or reuses if visited in both main and modal walks) a transient `data-nexus-ref` handle
+  const assignFormRef = (el) => {
+    if (!stampRefs || !el) return "";
+    const existingRef = typeof el.getAttribute === "function" ? el.getAttribute("data-nexus-ref") : null;
+    if (existingRef) return existingRef;
+    refCounter += 1;
+    const refId = `${framePrefix}_${refCounter}`;
+    if (typeof el.setAttribute === "function") {
+      el.setAttribute("data-nexus-ref", refId);
+    }
+    return refId;
+  };
   if (isSubframe) {
     const lowerUrl = currentUrl.toLowerCase();
     // Skip blank, tracking, payment-card, or CAPTCHA iframes with no readable content/forms
@@ -748,7 +810,8 @@ function extractTabMarkdownReadOnly(maxChars) {
       return mdRows.length > 0 ? `\n\n${mdRows.join("\n")}\n\n` : "";
     }
 
-    // Interactive form controls: serialize inputs, textareas, selects, and custom ARIA widgets read-only
+    // Interactive form controls: serialize inputs, textareas, selects, and custom ARIA widgets
+    // (stamping transient `ref=<id>` handles when `stampRefs` is enabled)
     if (tag === "INPUT") {
       const inputType = (el.getAttribute("type") || el.type || "text").toLowerCase();
       if (inputType === "hidden") return "";
@@ -765,15 +828,17 @@ function extractTabMarkdownReadOnly(maxChars) {
       if (inputType === "checkbox" || inputType === "radio") {
         const isChecked = Boolean(el.checked || el.hasAttribute("checked"));
         const box = isChecked ? "[x]" : "[ ]";
+        const refId = stampRefs ? assignFormRef(el) : "";
+        const refTag = refId ? ` [ref=${refId}]` : "";
         const insideLabel = Boolean(el.closest && el.closest("label"));
         if (insideLabel) {
-          return `\n${box} `;
+          return `\n${box}${refTag} `;
         }
         const ariaLbl = (el.getAttribute("aria-label") || "").trim();
-        return `\n${box}${ariaLbl ? ` ${ariaLbl}` : ""}\n`;
+        return `\n${box}${refTag}${ariaLbl ? ` ${ariaLbl}` : ""}\n`;
       }
 
-      // Never expose raw secrets from password fields
+      // Never expose raw secrets or stamp fillable refs on password fields
       const isPassword = inputType === "password";
       const rawVal = typeof el.value === "string" ? el.value : el.getAttribute("value") || "";
       const displayVal = isPassword ? (rawVal ? "(redacted)" : "") : rawVal;
@@ -791,7 +856,11 @@ function extractTabMarkdownReadOnly(maxChars) {
       const parentLabelText = parentLabel
         ? (parentLabel.textContent || "").replace(/\s+/g, " ").trim().toLowerCase()
         : "";
+      const refId = stampRefs && !isPassword ? assignFormRef(el) : "";
       const parts = [];
+      if (refId) {
+        parts.push(`ref=${refId}`);
+      }
       if (ariaLabel && !parentLabelText.includes(ariaLabel.toLowerCase())) {
         parts.push(`label="${ariaLabel}"`);
       }
@@ -820,7 +889,9 @@ function extractTabMarkdownReadOnly(maxChars) {
       const parentLabelText = parentLabel
         ? (parentLabel.textContent || "").replace(/\s+/g, " ").trim().toLowerCase()
         : "";
+      const refId = stampRefs ? assignFormRef(el) : "";
       const parts = [];
+      if (refId) parts.push(`ref=${refId}`);
       if (ariaLabel && !parentLabelText.includes(ariaLabel.toLowerCase())) {
         parts.push(`label="${ariaLabel}"`);
       }
@@ -853,7 +924,9 @@ function extractTabMarkdownReadOnly(maxChars) {
       }
       const typeLabel = isMulti ? "Select (multi)" : "Select";
       const reqLabel = isRequired ? " (required)" : "";
+      const refId = stampRefs ? assignFormRef(el) : "";
       const parts = [];
+      if (refId) parts.push(`ref=${refId}`);
       if (ariaLabel) parts.push(`label="${ariaLabel}"`);
       if (selectedLabels.length > 0) parts.push(`selected="${selectedLabels.join(", ")}"`);
       if (allLabels.length > 0) {
@@ -873,8 +946,10 @@ function extractTabMarkdownReadOnly(maxChars) {
     if (elRole === "checkbox" || elRole === "radio" || elRole === "switch") {
       const checked = el.getAttribute("aria-checked") === "true";
       const box = checked ? "[x]" : "[ ]";
+      const refId = stampRefs ? assignFormRef(el) : "";
+      const refTag = refId ? ` [ref=${refId}]` : "";
       const txt = (renderChildren().replace(/\s+/g, " ").trim() || el.getAttribute("aria-label") || "").trim();
-      return `\n${box}${txt ? ` ${txt}` : ""}\n`;
+      return `\n${box}${refTag}${txt ? ` ${txt}` : ""}\n`;
     }
 
     if (elRole === "combobox" || elHasPopup === "listbox") {
@@ -907,15 +982,21 @@ function extractTabMarkdownReadOnly(maxChars) {
           }
         }
       }
+      const refId = stampRefs ? assignFormRef(el) : "";
+      const refPrefix = refId ? `ref=${refId}; ` : "";
       const prefix = ariaLabel ? `label="${ariaLabel}"; ` : "";
-      return `\n\`[Dropdown${reqLabel}: ${prefix}${currentDisplay}${optionsSuffix}]\`\n`;
+      return `\n\`[Dropdown${reqLabel}: ${refPrefix}${prefix}${currentDisplay}${optionsSuffix}]\`\n`;
     }
 
     if (el.getAttribute("contenteditable") === "true") {
+      const refId = stampRefs ? assignFormRef(el) : "";
+      const refPrefix = refId ? `ref=${refId}; ` : "";
       const inner = renderChildren().trim();
-      if (inner) return `\n${inner}\n`;
+      if (inner) {
+        return refId ? `\n\`[Editable: ref=${refId}]\`\n${inner}\n` : `\n${inner}\n`;
+      }
       const ph = (el.getAttribute("aria-placeholder") || el.getAttribute("data-placeholder") || "").trim();
-      return ph ? `\n\`[Editable: placeholder="${ph}"]\`\n` : `\n\`[Editable: (empty)]\`\n`;
+      return ph ? `\n\`[Editable: ${refPrefix}placeholder="${ph}"]\`\n` : `\n\`[Editable: ${refPrefix}(empty)]\`\n`;
     }
 
     if (tag === "LEGEND") {
@@ -1542,6 +1623,7 @@ function extractTabMarkdownReadOnly(maxChars) {
     truncated,
     is_subframe: isSubframe,
     has_form_controls: hasFormControls,
+    include_refs: stampRefs,
   };
 }
 
@@ -1551,6 +1633,7 @@ function extractTabMarkdownReadOnly(maxChars) {
  */
 async function handleReadTabs(params = {}) {
   const maxChars = typeof params.max_chars === "number" && params.max_chars > 0 ? params.max_chars : 20000;
+  const includeRefs = Boolean(params.include_refs);
   const requestedIds = Array.isArray(params.tab_ids)
     ? params.tab_ids.map((id) => Number(id)).filter((id) => !Number.isNaN(id))
     : [];
@@ -1600,14 +1683,14 @@ async function handleReadTabs(params = {}) {
           injectionResults = await chrome.scripting.executeScript({
             target: { tabId: tab.tab_id, allFrames: true },
             func: extractTabMarkdownReadOnly,
-            args: [maxChars],
+            args: [maxChars, includeRefs],
           });
         } catch (_allFramesErr) {
           // Fall back to top frame if an iframe policy rejects allFrames injection
           injectionResults = await chrome.scripting.executeScript({
             target: { tabId: tab.tab_id },
             func: extractTabMarkdownReadOnly,
-            args: [maxChars],
+            args: [maxChars, includeRefs],
           });
         }
 
@@ -1673,6 +1756,7 @@ async function handleReadTabs(params = {}) {
           markdown: mergedMarkdown,
           char_count: totalCharCount,
           truncated: isTruncated,
+          include_refs: includeRefs,
           error: null,
         };
       } catch (err) {
@@ -1693,6 +1777,634 @@ async function handleReadTabs(params = {}) {
     requested_count: targetTabs.length,
     succeeded_count: results.filter((r) => r.ok).length,
     tabs: results,
+  };
+}
+
+/**
+ * Opens 1-10 validated `http(s)` URLs in Chrome tabs and optionally places them into a Chrome Tab Group.
+ *
+ * @param {Object} params
+ * @param {string[]} params.urls - Bounded list of `http://` or `https://` URLs
+ * @param {string} [params.group_name] - Optional Tab Group title (reuses existing group in window if found)
+ * @param {string} [params.group_color="blue"] - Tab Group badge color
+ * @param {boolean} [params.activate_first=false] - Focus the first opened tab
+ */
+async function handleOpenTabs(params = {}) {
+  const rawUrls = Array.isArray(params.urls) ? params.urls : [];
+  if (rawUrls.length === 0) {
+    throw new Error("Provide at least 1 URL in `urls`.");
+  }
+  if (rawUrls.length > MAX_OPEN_TABS) {
+    throw new Error(`Cannot open more than ${MAX_OPEN_TABS} tabs per call (received ${rawUrls.length}).`);
+  }
+
+  // Validate every URL strictly as http/https before creating any tab
+  const validUrls = [];
+  for (const raw of rawUrls) {
+    const str = String(raw || "").trim();
+    let parsed;
+    try {
+      parsed = new URL(str);
+    } catch (_e) {
+      throw new Error(`Invalid URL: '${str}'.`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`Rejected non-HTTP(S) URL '${str}'. Only http:// and https:// URLs are permitted.`);
+    }
+    validUrls.push(parsed.toString());
+  }
+
+  let targetWindowId;
+  try {
+    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+    if (win && typeof win.id === "number") {
+      targetWindowId = win.id;
+    }
+  } catch (_e) {}
+
+  const createdTabs = [];
+  const activateFirst = Boolean(params.activate_first);
+  for (let idx = 0; idx < validUrls.length; idx += 1) {
+    const createOpts = {
+      url: validUrls[idx],
+      active: activateFirst && idx === 0,
+    };
+    if (typeof targetWindowId === "number") {
+      createOpts.windowId = targetWindowId;
+    }
+    const created = await chrome.tabs.create(createOpts);
+    createdTabs.push(created);
+  }
+
+  let groupId = null;
+  let resolvedGroupTitle = null;
+  let resolvedGroupColor = null;
+  const rawGroupName = typeof params.group_name === "string" ? params.group_name.trim() : "";
+
+  if (rawGroupName && createdTabs.length > 0 && chrome.tabs && typeof chrome.tabs.group === "function") {
+    const tabIds = createdTabs.map((t) => t.id).filter((id) => typeof id === "number");
+    const winId = typeof createdTabs[0].windowId === "number" ? createdTabs[0].windowId : targetWindowId;
+    const desiredColor = VALID_GROUP_COLORS.has(String(params.group_color || "").toLowerCase())
+      ? String(params.group_color).toLowerCase()
+      : "blue";
+
+    let existingGroup = null;
+    if (chrome.tabGroups && typeof chrome.tabGroups.query === "function") {
+      try {
+        const groups = await chrome.tabGroups.query(typeof winId === "number" ? { windowId: winId } : {});
+        existingGroup =
+          groups.find((g) => (g.title || "").trim().toLowerCase() === rawGroupName.toLowerCase()) || null;
+      } catch (_e) {}
+    }
+
+    if (existingGroup) {
+      groupId = await chrome.tabs.group({ groupId: existingGroup.id, tabIds });
+      resolvedGroupTitle = existingGroup.title || rawGroupName;
+      resolvedGroupColor = existingGroup.color || desiredColor;
+    } else {
+      const groupOpts = typeof winId === "number" ? { tabIds, createProperties: { windowId: winId } } : { tabIds };
+      groupId = await chrome.tabs.group(groupOpts);
+      if (chrome.tabGroups && typeof chrome.tabGroups.update === "function") {
+        const updated = await chrome.tabGroups.update(groupId, {
+          title: rawGroupName,
+          color: desiredColor,
+        });
+        resolvedGroupTitle = (updated && updated.title) || rawGroupName;
+        resolvedGroupColor = (updated && updated.color) || desiredColor;
+      } else {
+        resolvedGroupTitle = rawGroupName;
+        resolvedGroupColor = desiredColor;
+      }
+    }
+  }
+
+  return {
+    bridge_version: BRIDGE_VERSION,
+    opened_count: createdTabs.length,
+    group_id: groupId,
+    group_title: resolvedGroupTitle,
+    group_color: resolvedGroupColor,
+    tabs: createdTabs.map((t) => ({
+      tab_id: t.id,
+      window_id: t.windowId,
+      title: t.title || t.pendingUrl || t.url || "",
+      url: t.pendingUrl || t.url || "",
+      active: Boolean(t.active),
+    })),
+  };
+}
+
+/**
+ * Self-contained draft form-filler injected into target tabs via `chrome.scripting.executeScript`.
+ *
+ * IMPORTANT: Because Chrome serializes this function to run inside the target tab's isolated world,
+ * it MUST NOT reference any outer closures or global variables from `background.js`.
+ * Hard-blocks password, file, hidden, submit/button, disabled/readonly, and payment/SSN inputs.
+ * Never submits forms.
+ *
+ * @param {Object<string, any>} fieldsMap - Map of `data-nexus-ref` IDs to draft values
+ */
+function fillFormFieldsInFrame(fieldsMap) {
+  const outcomes = {};
+  if (!fieldsMap || typeof fieldsMap !== "object") {
+    return outcomes;
+  }
+
+  // Index every element stamped with `data-nexus-ref` in this frame
+  const refElements = new Map();
+  const stampedNodes = document.querySelectorAll("[data-nexus-ref]");
+  for (const node of stampedNodes) {
+    const refAttr = node && typeof node.getAttribute === "function" ? node.getAttribute("data-nexus-ref") : null;
+    if (refAttr) {
+      refElements.set(refAttr, node);
+    }
+  }
+
+  const SENSITIVE_FIELD_RE =
+    /(?:\bcc[-_]|credit[-_ ]?card|card[-_ ]?number|\bcv[cv]\b|\bcsc\b|security[-_ ]?code|\bssn\b|social[-_ ]?security)/i;
+  const BLOCKED_INPUT_TYPES = new Set(["password", "hidden", "file", "submit", "button", "reset", "image"]);
+
+  const dispatchInputAndChange = (el) => {
+    if (!el || typeof el.dispatchEvent !== "function") return;
+    for (const evtName of ["input", "change"]) {
+      try {
+        const evt =
+          typeof Event === "function"
+            ? new Event(evtName, { bubbles: true })
+            : { type: evtName, bubbles: true };
+        el.dispatchEvent(evt);
+      } catch (_e) {}
+    }
+  };
+
+  // Highlight draft-filled controls in Chrome so the user can visually verify before submitting
+  const highlightFilledElement = (el) => {
+    if (!el) return;
+    try {
+      if (el.style) {
+        el.style.outline = "2px solid #0284c7";
+        el.style.outlineOffset = "1px";
+        el.style.boxShadow = "0 0 0 3px rgba(2, 132, 199, 0.2)";
+      }
+      if (typeof el.setAttribute === "function") {
+        el.setAttribute("data-nexus-filled", "true");
+        if (!el.getAttribute("title")) {
+          el.setAttribute("title", "Draft-filled by Nexus — review before submitting");
+        }
+      }
+    } catch (_e) {}
+  };
+
+  const resolveFieldLabel = (el) => {
+    const aria = el.getAttribute && el.getAttribute("aria-label");
+    if (aria) return aria.trim();
+    const parentLbl = el.closest ? el.closest("label") : null;
+    if (parentLbl && parentLbl.textContent) {
+      return parentLbl.textContent.replace(/\s+/g, " ").trim().slice(0, 80);
+    }
+    const ph = el.getAttribute && el.getAttribute("placeholder");
+    if (ph) return ph.trim();
+    return (el.getAttribute && el.getAttribute("name")) || "";
+  };
+
+  const parseBoolValue = (raw) => {
+    if (typeof raw === "boolean") return raw;
+    if (typeof raw === "number") return raw === 1 ? true : raw === 0 ? false : null;
+    const norm = String(raw ?? "").trim().toLowerCase();
+    if (["true", "yes", "1", "checked", "on"].includes(norm)) return true;
+    if (["false", "no", "0", "unchecked", "off"].includes(norm)) return false;
+    return null;
+  };
+
+  for (const [refId, rawValue] of Object.entries(fieldsMap)) {
+    const el = refElements.get(refId);
+    if (!el) continue;
+
+    const tag = (el.tagName || "").toUpperCase();
+    const label = resolveFieldLabel(el);
+    const inputType = tag === "INPUT" ? (el.getAttribute("type") || el.type || "text").toLowerCase() : "";
+
+    // Safety Guard 1: Block forbidden input/button types (passwords, files, submit buttons)
+    if (tag === "INPUT" && BLOCKED_INPUT_TYPES.has(inputType)) {
+      outcomes[refId] = {
+        ref: refId,
+        status: "blocked",
+        tag,
+        label,
+        reason: `Input type '${inputType}' is hard-blocked from automated filling.`,
+      };
+      continue;
+    }
+
+    const roleAttr = (el.getAttribute && (el.getAttribute("role") || "").toLowerCase()) || "";
+    const hasPopup = (el.getAttribute && (el.getAttribute("aria-haspopup") || "").toLowerCase()) || "";
+    const isInteractiveAriaButton =
+      ["checkbox", "radio", "switch", "combobox"].includes(roleAttr) || hasPopup === "listbox";
+
+    if (tag === "BUTTON" && !isInteractiveAriaButton) {
+      outcomes[refId] = {
+        ref: refId,
+        status: "blocked",
+        tag,
+        label,
+        reason: "Button/submit elements cannot be clicked or filled by draft automation.",
+      };
+      continue;
+    }
+
+    // Safety Guard 2: Block disabled/readonly controls
+    if (
+      Boolean(el.disabled) ||
+      Boolean(el.readOnly) ||
+      (el.hasAttribute && (el.hasAttribute("disabled") || el.hasAttribute("readonly"))) ||
+      (el.getAttribute && el.getAttribute("aria-disabled") === "true")
+    ) {
+      outcomes[refId] = {
+        ref: refId,
+        status: "blocked",
+        tag,
+        label,
+        reason: "Control is disabled or read-only.",
+      };
+      continue;
+    }
+
+    // Safety Guard 3: Block sensitive payment card / CVV / SSN heuristics
+    const sensitivityHaystack = [
+      el.getAttribute && el.getAttribute("autocomplete"),
+      el.getAttribute && el.getAttribute("name"),
+      el.id,
+      el.getAttribute && el.getAttribute("aria-label"),
+      el.getAttribute && el.getAttribute("placeholder"),
+      label,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    if (SENSITIVE_FIELD_RE.test(sensitivityHaystack)) {
+      outcomes[refId] = {
+        ref: refId,
+        status: "blocked",
+        tag,
+        label,
+        reason: "Sensitive payment or SSN field is hard-blocked from automated filling.",
+      };
+      continue;
+    }
+
+    // Fill Path A: Native checkbox or radio input
+    if (tag === "INPUT" && (inputType === "checkbox" || inputType === "radio")) {
+      const targetBool = parseBoolValue(rawValue);
+      if (targetBool === null) {
+        outcomes[refId] = {
+          ref: refId,
+          status: "skipped",
+          tag,
+          label,
+          reason: `Expected boolean value for ${inputType}, got '${String(rawValue)}'.`,
+        };
+        continue;
+      }
+      if (inputType === "radio" && !targetBool) {
+        outcomes[refId] = {
+          ref: refId,
+          status: "skipped",
+          tag,
+          label,
+          reason: "Radio buttons cannot be unchecked directly; set the desired option to true instead.",
+        };
+        continue;
+      }
+
+      if (Boolean(el.checked) !== targetBool) {
+        if (typeof el.click === "function") {
+          el.click();
+        }
+        if (Boolean(el.checked) !== targetBool) {
+          try {
+            const proto = typeof HTMLInputElement !== "undefined" ? HTMLInputElement.prototype : null;
+            const desc = proto ? Object.getOwnPropertyDescriptor(proto, "checked") : null;
+            if (desc && typeof desc.set === "function") {
+              desc.set.call(el, targetBool);
+            } else {
+              el.checked = targetBool;
+            }
+          } catch (_e) {
+            el.checked = targetBool;
+          }
+          dispatchInputAndChange(el);
+        }
+      }
+      highlightFilledElement(el);
+      outcomes[refId] = {
+        ref: refId,
+        status: "filled",
+        tag,
+        label,
+        new_value: Boolean(el.checked),
+      };
+      continue;
+    }
+
+    // Fill Path B: Native <select> dropdown (match by value, exact label, or partial label)
+    if (tag === "SELECT") {
+      const desired = String(rawValue ?? "").trim();
+      const desiredLow = desired.toLowerCase();
+      const options = Array.from(el.querySelectorAll("option"));
+      let matchedOpt =
+        options.find((o) => String(o.getAttribute("value") ?? o.value ?? "").trim().toLowerCase() === desiredLow) ||
+        options.find((o) => (o.textContent || "").replace(/\s+/g, " ").trim().toLowerCase() === desiredLow) ||
+        options.find(
+          (o) => desiredLow && (o.textContent || "").replace(/\s+/g, " ").trim().toLowerCase().includes(desiredLow)
+        );
+
+      if (!matchedOpt) {
+        const available = options
+          .map((o) => (o.textContent || o.getAttribute("value") || "").replace(/\s+/g, " ").trim())
+          .filter(Boolean)
+          .slice(0, 20);
+        outcomes[refId] = {
+          ref: refId,
+          status: "skipped",
+          tag,
+          label,
+          reason: `Option '${desired}' not found. Available: ${available.join(" | ") || "(none)"}`,
+        };
+        continue;
+      }
+
+      const optVal =
+        matchedOpt.getAttribute("value") !== null
+          ? matchedOpt.getAttribute("value")
+          : (matchedOpt.textContent || "").trim();
+      for (const o of options) {
+        o.selected = o === matchedOpt;
+      }
+      try {
+        const proto = typeof HTMLSelectElement !== "undefined" ? HTMLSelectElement.prototype : null;
+        const desc = proto ? Object.getOwnPropertyDescriptor(proto, "value") : null;
+        if (desc && typeof desc.set === "function") {
+          desc.set.call(el, optVal);
+        } else {
+          el.value = optVal;
+        }
+      } catch (_e) {
+        el.value = optVal;
+      }
+      dispatchInputAndChange(el);
+      highlightFilledElement(el);
+      outcomes[refId] = {
+        ref: refId,
+        status: "filled",
+        tag,
+        label,
+        new_value: (matchedOpt.textContent || optVal).replace(/\s+/g, " ").trim(),
+      };
+      continue;
+    }
+
+    // Fill Path C: Native text/email/url/tel/number/date <input> or <textarea>
+    if (tag === "INPUT" || tag === "TEXTAREA") {
+      const strVal = String(rawValue ?? "");
+      if (typeof el.focus === "function") {
+        try {
+          el.focus();
+        } catch (_e) {}
+      }
+      try {
+        const proto =
+          tag === "TEXTAREA"
+            ? typeof HTMLTextAreaElement !== "undefined"
+              ? HTMLTextAreaElement.prototype
+              : null
+            : typeof HTMLInputElement !== "undefined"
+            ? HTMLInputElement.prototype
+            : null;
+        const desc = proto ? Object.getOwnPropertyDescriptor(proto, "value") : null;
+        if (desc && typeof desc.set === "function") {
+          desc.set.call(el, strVal);
+        } else {
+          el.value = strVal;
+        }
+      } catch (_e) {
+        el.value = strVal;
+      }
+      dispatchInputAndChange(el);
+      highlightFilledElement(el);
+      outcomes[refId] = {
+        ref: refId,
+        status: "filled",
+        tag,
+        label,
+        new_value: strVal,
+      };
+      continue;
+    }
+
+    // Fill Path D: Custom ARIA checkbox / radio / switch
+    if (roleAttr === "checkbox" || roleAttr === "radio" || roleAttr === "switch") {
+      const targetBool = parseBoolValue(rawValue);
+      if (targetBool === null) {
+        outcomes[refId] = {
+          ref: refId,
+          status: "skipped",
+          tag,
+          label,
+          reason: `Expected boolean value for ARIA ${roleAttr}, got '${String(rawValue)}'.`,
+        };
+        continue;
+      }
+      const currBool = el.getAttribute("aria-checked") === "true";
+      if (currBool !== targetBool) {
+        if (typeof el.click === "function") {
+          el.click();
+        } else if (typeof el.setAttribute === "function") {
+          el.setAttribute("aria-checked", targetBool ? "true" : "false");
+          dispatchInputAndChange(el);
+        }
+      }
+      highlightFilledElement(el);
+      outcomes[refId] = {
+        ref: refId,
+        status: "filled",
+        tag,
+        label,
+        new_value: targetBool,
+      };
+      continue;
+    }
+
+    // Fill Path E: Rich contenteditable surface
+    if (el.getAttribute && el.getAttribute("contenteditable") === "true") {
+      const strVal = String(rawValue ?? "");
+      el.textContent = strVal;
+      dispatchInputAndChange(el);
+      highlightFilledElement(el);
+      outcomes[refId] = {
+        ref: refId,
+        status: "filled",
+        tag,
+        label,
+        new_value: strVal,
+      };
+      continue;
+    }
+
+    // Fill Path F: Custom non-input ARIA combobox / listbox when controlled options are open in DOM
+    if (roleAttr === "combobox" || hasPopup === "listbox") {
+      const desired = String(rawValue ?? "").trim().toLowerCase();
+      const controlledId = (el.getAttribute("aria-controls") || el.getAttribute("aria-owns") || "").trim();
+      let selectedOpt = null;
+      if (controlledId) {
+        const firstId = controlledId.split(/\s+/)[0];
+        let listboxEl = null;
+        try {
+          listboxEl =
+            typeof document.getElementById === "function"
+              ? document.getElementById(firstId)
+              : document.querySelector(`[id="${firstId}"]`);
+        } catch (_e) {}
+        if (listboxEl) {
+          const optNodes = Array.from(listboxEl.querySelectorAll('[role="option"]'));
+          selectedOpt =
+            optNodes.find((o) => (o.textContent || "").replace(/\s+/g, " ").trim().toLowerCase() === desired) ||
+            optNodes.find(
+              (o) => desired && (o.textContent || "").replace(/\s+/g, " ").trim().toLowerCase().includes(desired)
+            ) ||
+            null;
+        }
+      }
+      if (selectedOpt && typeof selectedOpt.click === "function") {
+        selectedOpt.click();
+        highlightFilledElement(el);
+        outcomes[refId] = {
+          ref: refId,
+          status: "filled",
+          tag,
+          label,
+          new_value: (selectedOpt.textContent || "").replace(/\s+/g, " ").trim(),
+        };
+      } else {
+        outcomes[refId] = {
+          ref: refId,
+          status: "skipped",
+          tag,
+          label,
+          reason: "Custom ARIA dropdown is closed or has no clickable matching option; select this field manually in Chrome.",
+        };
+      }
+      continue;
+    }
+
+    outcomes[refId] = {
+      ref: refId,
+      status: "skipped",
+      tag,
+      label,
+      reason: `Unsupported form element <${tag.toLowerCase()}>.`,
+    };
+  }
+
+  return outcomes;
+}
+
+/**
+ * Validates `tab_id` and `fields` and executes `fillFormFieldsInFrame` across all frames of the target tab.
+ *
+ * @param {Object} params
+ * @param {number} params.tab_id - Target Chrome tab ID
+ * @param {Object<string, any>} params.fields - Mapping of `ref` IDs to draft values
+ */
+async function handleFillForm(params = {}) {
+  const tabId = Number(params.tab_id);
+  if (!Number.isInteger(tabId) || tabId <= 0) {
+    throw new Error("`tab_id` must be a positive integer Chrome tab ID.");
+  }
+
+  const fields = params.fields;
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+    throw new Error("`fields` must be a non-empty JSON object mapping element refs to values.");
+  }
+  const fieldKeys = Object.keys(fields);
+  if (fieldKeys.length === 0) {
+    throw new Error("`fields` cannot be empty.");
+  }
+  if (fieldKeys.length > MAX_FILL_FIELDS) {
+    throw new Error(`Cannot fill more than ${MAX_FILL_FIELDS} fields per call (received ${fieldKeys.length}).`);
+  }
+
+  const tab = await chrome.tabs.get(tabId);
+  const url = (tab && tab.url) || "";
+  if (
+    !url ||
+    url.startsWith("chrome://") ||
+    url.startsWith("chrome-extension://") ||
+    url.startsWith("edge://") ||
+    url.startsWith("about:")
+  ) {
+    throw new Error(`Cannot fill forms on restricted browser URL: ${url || "(empty)"}`);
+  }
+
+  let injectionResults;
+  try {
+    injectionResults = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: fillFormFieldsInFrame,
+      args: [fields],
+    });
+  } catch (_allFramesErr) {
+    injectionResults = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: fillFormFieldsInFrame,
+      args: [fields],
+    });
+  }
+
+  const mergedOutcomes = {};
+  if (Array.isArray(injectionResults)) {
+    for (const frameRes of injectionResults) {
+      if (frameRes && frameRes.result && typeof frameRes.result === "object") {
+        for (const [k, v] of Object.entries(frameRes.result)) {
+          if (!mergedOutcomes[k]) {
+            mergedOutcomes[k] = v;
+          }
+        }
+      }
+    }
+  }
+
+  const orderedResults = [];
+  let filledCount = 0;
+  let blockedCount = 0;
+  let skippedCount = 0;
+  let notFoundCount = 0;
+
+  for (const refId of fieldKeys) {
+    const entry = mergedOutcomes[refId];
+    if (!entry) {
+      notFoundCount += 1;
+      orderedResults.push({
+        ref: refId,
+        status: "not_found",
+        reason: "Element ref not found in live DOM (page may have reloaded; re-run read_browser_tabs with include_refs=True).",
+      });
+    } else {
+      if (entry.status === "filled") filledCount += 1;
+      else if (entry.status === "blocked") blockedCount += 1;
+      else if (entry.status === "skipped") skippedCount += 1;
+      orderedResults.push(entry);
+    }
+  }
+
+  return {
+    bridge_version: BRIDGE_VERSION,
+    tab_id: tabId,
+    title: (tab && tab.title) || "",
+    url,
+    filled_count: filledCount,
+    blocked_count: blockedCount,
+    skipped_count: skippedCount,
+    not_found_count: notFoundCount,
+    results: orderedResults,
   };
 }
 

@@ -10,7 +10,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.tools import tool
 
@@ -1361,6 +1361,7 @@ def list_browser_tabs(
 # - query: Optional substring filter on tab title or URL
 # - active_only: Set True to read only the currently focused Chrome tab
 # - max_chars: Maximum Markdown character budget per tab (default 15,000)
+# - include_refs: Set True when inspecting a form to stamp `ref=f0_1` handles for `fill_browser_form`
 @tool
 def read_browser_tabs(
     tab_ids: Optional[List[int]] = None,
@@ -1368,12 +1369,14 @@ def read_browser_tabs(
     query: Optional[str] = None,
     active_only: bool = False,
     max_chars: int = 15000,
+    include_refs: bool = False,
 ) -> str:
-    """Extract clean, read-only Markdown from the live rendered DOM of open Chrome tabs.
+    """Extract clean Markdown from the live rendered DOM of open Chrome tabs.
 
     Reads directly from the user's authenticated Chrome session via the local Nexus Browser Bridge,
     bypassing anti-bot walls (LinkedIn, Workday, Greenhouse, Cloudflare) with zero vision tokens.
     Automatically persists each extracted tab under `cache://tab/<slug>` in the active conversation cache.
+    Pass `include_refs=True` when inspecting a form page to receive transient `ref` handles for `fill_browser_form`.
 
     Args:
         tab_ids: Optional list of specific integer `tab_id` values to read (e.g. [142, 145]).
@@ -1381,6 +1384,7 @@ def read_browser_tabs(
         query: Optional substring filter matching tab title or URL.
         active_only: Set True to read only the currently active/focused tab.
         max_chars: Maximum characters of Markdown to return per tab (default: 15000).
+        include_refs: Set True to stamp transient `ref` handles onto visible form controls (default: False).
     """
     from nexus.shared_tools.browser_bridge import format_tab_reads_as_markdown, read_tabs
 
@@ -1390,8 +1394,68 @@ def read_browser_tabs(
         query=query,
         active_only=active_only,
         max_chars=max_chars,
+        include_refs=include_refs,
     )
     return format_tab_reads_as_markdown(result)
+
+
+# Signature breakdown for open_browser_tabs:
+# - urls: List[str] of 1-10 HTTP(S) URLs to open into Chrome tabs
+# - group_name: Optional Chrome Tab Group title (reuses existing group in window or creates a new one)
+# - group_color: Chrome Tab Group color enum (default "blue")
+# - activate_first: If True, focuses the first newly opened tab
+@tool
+def open_browser_tabs(
+    urls: List[str],
+    group_name: Optional[str] = None,
+    group_color: str = "blue",
+    activate_first: bool = False,
+) -> str:
+    """Open 1-10 `http(s)` URLs in the user's live Chrome browser and optionally organize them in a Chrome Tab Group.
+
+    Use this to stage shortlisted links (e.g. therapist profiles, direct ATS portals, booking pages)
+    into a clean Chrome Tab Group so the user does not have to click URLs one by one.
+
+    Args:
+        urls: List of 1-10 `http://` or `https://` URLs to open.
+        group_name: Optional Chrome Tab Group title (e.g. 'Therapists', 'Direct ATS').
+        group_color: Group badge color ('grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange').
+        activate_first: Set True to focus the first opened tab immediately (default: False).
+    """
+    from nexus.shared_tools.browser_bridge import format_open_tabs_as_markdown, open_tabs
+
+    result = open_tabs(
+        urls=urls,
+        group_name=group_name,
+        group_color=group_color,
+        activate_first=activate_first,
+    )
+    return format_open_tabs_as_markdown(result)
+
+
+# Signature breakdown for fill_browser_form:
+# - tab_id: int Chrome tab ID returned by `list_browser_tabs` / `read_browser_tabs`
+# - fields: Dict[str, Any] mapping transient form refs (`f0_1`, etc.) to draft field values
+@tool
+def fill_browser_form(
+    tab_id: int,
+    fields: Dict[str, Any],
+) -> str:
+    """Draft-fill form controls inside an open Chrome tab without submitting (human review required).
+
+    Always call `read_browser_tabs(tab_ids=[tab_id], include_refs=True)` first to obtain exact `ref`
+    handles (`f0_1`, `s..._1`). Populates inputs, textareas, selects, checkboxes, and editable blocks,
+    highlights filled fields in Chrome for visual review, and hard-blocks passwords, payment/SSN fields,
+    and form submission. Always instruct the user to review the highlighted fields and submit manually.
+
+    Args:
+        tab_id: Target Chrome `tab_id` integer containing the form.
+        fields: Dictionary mapping element `ref` strings to draft values (e.g. `{"f0_1": "Jane Doe"}`).
+    """
+    from nexus.shared_tools.browser_bridge import fill_form, format_fill_form_as_markdown
+
+    result = fill_form(tab_id=tab_id, fields=fields)
+    return format_fill_form_as_markdown(result)
 
 
 @tool
