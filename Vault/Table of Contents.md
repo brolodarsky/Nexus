@@ -44,6 +44,7 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 - **Archive**
 
 ## 1.3. Security & Digital Sovereignty
+- **[[Personal Credentials & Identifiers]]:** Persistent reference for personal IDs, academic credentials, WiFi network passwords, and account recovery codes.
 - **Security Audit:** Password management strategy, 2FA recovery locations, and encryption protocols.
 - **Digital Inheritance:** Instructions for account access in case of emergency.
 	- Todo: Research best practices & implement.
@@ -74,6 +75,8 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 ## 2.2. Medical
 - **[[Health Summary]]**: Master dashboard for symptoms, workups, doctors visits, lab work, biomarkers, medical history and longitudinal tracking.
+- **[[Psychiatric Intake Summary]]**
+- **[[Therapy Intake Summary]]**
 - **[[Sleep Specialist Intake Summary]]**
 - **[[Insurance Card]]**
 	- [[Doc - Medical Insurance 2027 Summary of Benefits and Coverage (SBC)]]: 2027 Oscar Health Summary of Benefits and Coverage
