@@ -8,8 +8,9 @@ Tests:
   4. run_nexus_agent_with_trace returns clear diagnostic guidance on 504 DEADLINE_EXCEEDED.
 """
 from unittest.mock import MagicMock, patch
+import base64
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
 from nexus.agent.api import prepend_current_time_to_prompt, run_nexus_agent_with_trace
@@ -17,9 +18,12 @@ from nexus.agent.graph import (
     _build_system_message,
     _cooperative_sleep,
     _extract_retry_delay,
+    _infer_message_provider,
     _invoke_llm_with_resilience,
     _invoke_tool_node_resilient,
+    _is_invalid_signature_error,
     _is_rate_limit_error,
+    _sanitize_messages_for_provider,
     call_model,
 )
 from nexus.core.config import EngineSettings
@@ -112,15 +116,62 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
 
     catalog = get_available_models()
     assert catalog["provider"] == "gemini"
-    assert any(m["id"] == "strong" for m in catalog["models"])
-    low_entry = next(m for m in catalog["models"] if m["id"] == "low")
-    assert low_entry["model_name"] == "gemini-3.8-flash"
-    assert "Flash" in low_entry["description"]
+    assert [m["label"] for m in catalog["models"]] == [
+        "Gemini 4 Argon",
+        "Gemini 4 Hydrogen",
+        "Gemini 3.8 Flash",
+        "Claude Opus 5.5",
+        "Claude Sonnet 5.5",
+        "Claude Haiku 5.5",
+    ]
+
+    for entry in catalog["models"]:
+        assert entry["description"]
+        assert entry["description"].endswith(".")
+        assert entry["model_name"] not in entry["description"]
+        assert "pricing" in entry
+        assert entry["pricing"]["summary"].startswith("$")
+        assert entry["pricing"]["input_per_m"] > 0
+        assert entry["pricing"]["output_per_m"] > 0
+        assert entry["pricing"]["cached_per_m"] > 0
+
+    strong_entry = next(m for m in catalog["models"] if m["id"] == "strong")
+    assert strong_entry["model_name"] == "gemini-4-argon"
+    assert strong_entry["pricing"]["summary"] == "$2 / $10"
+
     hydrogen_entry = next(m for m in catalog["models"] if m["id"] == "gemini-4-hydrogen")
     assert hydrogen_entry["model_name"] == "gemini-4-hydrogen"
     assert hydrogen_entry["provider"] == "gemini"
-    assert any(m["id"] == "claude-opus-5-5" and m["tier"] == "strong" and m["provider"] == "anthropic" for m in catalog["models"])
-    assert any(m["id"] == "claude-sonnet-4-5" and m["tier"] == "low" and m["provider"] == "anthropic" for m in catalog["models"])
+    assert hydrogen_entry["tier"] == "medium"
+    assert hydrogen_entry["pricing"]["summary"] == "$1.50 / $7.50"
+
+    low_entry = next(m for m in catalog["models"] if m["id"] == "low")
+    assert low_entry["model_name"] == "gemini-3.8-flash"
+    assert low_entry["pricing"]["summary"] == "$0.75 / $3.75"
+
+    assert any(
+        m["id"] == "claude-opus-5-5"
+        and m["tier"] == "strong"
+        and m["provider"] == "anthropic"
+        and m["pricing"]["summary"] == "$4 / $20"
+        for m in catalog["models"]
+    )
+    assert any(
+        m["id"] == "claude-sonnet-5-5"
+        and m["tier"] == "medium"
+        and m["provider"] == "anthropic"
+        and m["short_label"] == "Sonnet 5.5"
+        and m["pricing"]["summary"] == "$2 / $10"
+        for m in catalog["models"]
+    )
+    assert any(
+        m["id"] == "claude-haiku-5-5"
+        and m["tier"] == "low"
+        and m["provider"] == "anthropic"
+        and m["short_label"] == "Haiku 5.5"
+        and m["pricing"]["summary"] == "$0.10 / $0.50"
+        for m in catalog["models"]
+    )
 
     low_cfg = resolve_model_config("low")
     assert low_cfg["tier"] == "low"
@@ -144,10 +195,25 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
     assert opus_cfg["provider"] == "anthropic"
     assert opus_cfg["model_name"] == "claude-opus-5-5"
 
-    sonnet_cfg = resolve_model_config("claude-sonnet-4-5")
-    assert sonnet_cfg["tier"] == "low"
+    sonnet_cfg = resolve_model_config("claude-sonnet-5-5")
+    assert sonnet_cfg["tier"] == "medium"
     assert sonnet_cfg["provider"] == "anthropic"
-    assert sonnet_cfg["model_name"] == "claude-sonnet-4-5"
+    assert sonnet_cfg["model_name"] == "claude-sonnet-5-5"
+
+    sonnet_dot_cfg = resolve_model_config("claude-sonnet-5.5")
+    assert sonnet_dot_cfg["tier"] == "medium"
+    assert sonnet_dot_cfg["provider"] == "anthropic"
+    assert sonnet_dot_cfg["model_name"] == "claude-sonnet-5-5"
+
+    haiku_cfg = resolve_model_config("claude-haiku-5-5")
+    assert haiku_cfg["tier"] == "low"
+    assert haiku_cfg["provider"] == "anthropic"
+    assert haiku_cfg["model_name"] == "claude-haiku-5-5"
+
+    haiku_dot_cfg = resolve_model_config("claude-haiku-5.5")
+    assert haiku_dot_cfg["tier"] == "low"
+    assert haiku_dot_cfg["provider"] == "anthropic"
+    assert haiku_dot_cfg["model_name"] == "claude-haiku-5-5"
 
     # Verify ChatAnthropic instantiation when selecting an Anthropic model
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
@@ -156,9 +222,19 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
     assert getattr(anthropic_llm, "temperature", None) is None
     assert getattr(anthropic_llm, "model_kwargs", None) == {"cache_control": {"type": "ephemeral"}}
 
-    sonnet_llm = get_chat_model(tier="claude-sonnet-4-5")
-    assert getattr(sonnet_llm, "temperature", None) == 0.0
-    assert getattr(sonnet_llm, "model_kwargs", None) == {"cache_control": {"type": "ephemeral"}}
+    sonnet55_llm = get_chat_model(tier="claude-sonnet-5-5")
+    assert getattr(sonnet55_llm, "model", None) == "claude-sonnet-5-5"
+    assert getattr(sonnet55_llm, "temperature", None) is None
+    assert getattr(sonnet55_llm, "model_kwargs", None) == {"cache_control": {"type": "ephemeral"}}
+
+    haiku55_llm = get_chat_model(tier="claude-haiku-5-5")
+    assert getattr(haiku55_llm, "model", None) == "claude-haiku-5-5"
+    assert getattr(haiku55_llm, "temperature", None) is None
+    assert getattr(haiku55_llm, "model_kwargs", None) == {"cache_control": {"type": "ephemeral"}}
+
+    legacy_sonnet_llm = get_chat_model(tier="claude-sonnet-4-5")
+    assert getattr(legacy_sonnet_llm, "temperature", None) == 0.0
+    assert getattr(legacy_sonnet_llm, "model_kwargs", None) == {"cache_control": {"type": "ephemeral"}}
 
     recorded_tiers: list[str | None] = []
     mock_llm = MagicMock()
@@ -180,7 +256,8 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
     call_model(state, config={"configurable": {"thread_id": "t1", "model_tier": "claude-opus-5-5"}})
     import nexus.agent.graph as graph_mod
     assert graph_mod._active_turn_provider == "anthropic"
-    assert resolve_model_config(f"{graph_mod._active_turn_provider}:low")["model_name"] == "claude-sonnet-4-5"
+    assert resolve_model_config(f"{graph_mod._active_turn_provider}:low")["model_name"] == "claude-haiku-5-5"
+    assert resolve_model_config(f"{graph_mod._active_turn_provider}:medium")["model_name"] == "claude-sonnet-5-5"
 
 
 def test_run_nexus_agent_with_trace_executor_shutdown_diagnostic_message(monkeypatch: pytest.MonkeyPatch):
@@ -564,6 +641,291 @@ def test_master_instructions_protocol_pointer_and_deduplication() -> None:
     assert resolved_path.as_posix().endswith(
         "Vault/1. Core/1.2. Personal Knowledge Management (PKM)/Protocol - Email Triage.md"
     )
+
+
+def test_infer_message_provider_metadata_and_structural_markers() -> None:
+    """Verify _infer_message_provider resolves Gemini, Anthropic, OpenAI, and plain synthetic AIMessages."""
+    # Explicit model_provider metadata
+    assert _infer_message_provider(AIMessage(content="hi", response_metadata={"model_provider": "google_genai"})) == "gemini"
+    assert _infer_message_provider(AIMessage(content="hi", response_metadata={"model_provider": "anthropic"})) == "anthropic"
+    assert _infer_message_provider(AIMessage(content="hi", response_metadata={"model_provider": "openai"})) == "openai"
+
+    # Model-name fallback without model_provider
+    assert _infer_message_provider(AIMessage(content="hi", response_metadata={"model_name": "gemini-4-hydrogen"})) == "gemini"
+    assert _infer_message_provider(AIMessage(content="hi", response_metadata={"model": "claude-opus-5-5"})) == "anthropic"
+    assert _infer_message_provider(AIMessage(content="hi", response_metadata={"model_name": "gpt-5.6-sol"})) == "openai"
+
+    # Structural marker fallback without response_metadata
+    gem_tc_msg = AIMessage(
+        content="",
+        tool_calls=[{"name": "read_file", "args": {}, "id": "tc_gem"}],
+        additional_kwargs={"__gemini_function_call_thought_signatures__": {"tc_gem": "abc="}},
+    )
+    assert _infer_message_provider(gem_tc_msg) == "gemini"
+
+    gem_text_sig_msg = AIMessage(
+        content=[{"type": "text", "text": "done", "extras": {"signature": "abc="}}],
+    )
+    assert _infer_message_provider(gem_text_sig_msg) == "gemini"
+
+    anth_redacted = AIMessage(content=[{"type": "redacted_thinking", "data": "xyz"}, {"type": "text", "text": "ok"}])
+    assert _infer_message_provider(anth_redacted) == "anthropic"
+
+    anth_tool_use = AIMessage(content=[{"type": "tool_use", "id": "tu_1", "name": "read_file", "input": {}}])
+    assert _infer_message_provider(anth_tool_use) == "anthropic"
+
+    # Plain synthetic AIMessage or HumanMessage
+    assert _infer_message_provider(AIMessage(content="Plain reply")) is None
+    assert _infer_message_provider(HumanMessage(content="User prompt")) is None
+
+
+def test_sanitize_messages_for_gemini_strips_anthropic_preserves_gemini_and_parses() -> None:
+    """Verify Anthropic -> Gemini sanitization drops foreign thinking/tool_use blocks while keeping Gemini signatures intact."""
+    import langchain_google_genai.chat_models as google_cm
+
+    anth_sig = base64.b64encode(b"anthropic-thinking-sig-bytes").decode("ascii")
+    gem_tc_sig = base64.b64encode(b"gemini-fc-sig-bytes").decode("ascii")
+    gem_text_sig = base64.b64encode(b"gemini-text-sig-bytes").decode("ascii")
+
+    anth_tc_msg = AIMessage(
+        content=[
+            {"type": "thinking", "thinking": "Claude reasoning", "signature": anth_sig},
+            {"type": "redacted_thinking", "data": "opaque"},
+            {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {"file_path": "Note.md"}},
+        ],
+        tool_calls=[{"name": "read_file", "args": {"file_path": "Note.md"}, "id": "toolu_1"}],
+        response_metadata={"model_provider": "anthropic", "model_name": "claude-opus-5-5", "output_version": "v1"},
+    )
+    anth_final_msg = AIMessage(
+        content=[
+            {"type": "thinking", "thinking": "More reasoning", "signature": anth_sig},
+            {"type": "text", "text": "Claude final synthesis.", "cache_control": {"type": "ephemeral"}},
+        ],
+        response_metadata={"model_provider": "anthropic", "model_name": "claude-opus-5-5"},
+    )
+    gem_tc_msg = AIMessage(
+        content="",
+        tool_calls=[{"name": "read_file", "args": {"file_path": "Log.md"}, "id": "call_gem_1"}],
+        additional_kwargs={
+            "function_call": {"name": "read_file", "arguments": '{"file_path": "Log.md"}'},
+            "__gemini_function_call_thought_signatures__": {"call_gem_1": gem_tc_sig},
+        },
+        response_metadata={"model_provider": "google_genai", "model_name": "gemini-4-hydrogen"},
+    )
+    gem_final_msg = AIMessage(
+        content=[{"type": "text", "text": "Gemini synthesis.", "extras": {"signature": gem_text_sig}}],
+        response_metadata={"model_provider": "google_genai", "model_name": "gemini-4-hydrogen"},
+    )
+
+    history = [
+        HumanMessage(content="Turn 1"),
+        anth_tc_msg,
+        ToolMessage(content="Note body", name="read_file", tool_call_id="toolu_1"),
+        anth_final_msg,
+        HumanMessage(content="Turn 2"),
+        gem_tc_msg,
+        ToolMessage(content="Log body", name="read_file", tool_call_id="call_gem_1"),
+        gem_final_msg,
+        HumanMessage(content="Turn 3 on gemini-3.8-flash"),
+    ]
+
+    sanitized = _sanitize_messages_for_provider(history, "gemini")
+
+    # Original persisted messages must never be mutated in place
+    assert isinstance(anth_tc_msg.content, list) and anth_tc_msg.content[0]["type"] == "thinking"
+    assert anth_final_msg.content[1]["cache_control"] == {"type": "ephemeral"}
+
+    # Anthropic messages were replaced with stripped ephemeral copies
+    assert sanitized[1] is not anth_tc_msg
+    assert sanitized[1].content == ""
+    assert sanitized[1].tool_calls == anth_tc_msg.tool_calls
+    assert "output_version" not in sanitized[1].response_metadata
+
+    assert sanitized[3] is not anth_final_msg
+    assert sanitized[3].content == "Claude final synthesis."
+
+    # Same-provider Gemini messages keep exact object identity and thought signatures (zero KV-cache churn)
+    assert sanitized[5] is gem_tc_msg
+    assert sanitized[5].additional_kwargs["__gemini_function_call_thought_signatures__"]["call_gem_1"] == gem_tc_sig
+    assert sanitized[7] is gem_final_msg
+    assert sanitized[7].content[0]["extras"]["signature"] == gem_text_sig
+
+    # Serializing via langchain-google-genai for gemini-3.8-flash succeeds with zero ValueError and zero Anthropic thought parts
+    _sys_instr, contents = google_cm._parse_chat_history(sanitized, model="gemini-3.8-flash")
+    # Content[1] is stripped Anthropic tool-call turn: only function_call, no Anthropic thought signature
+    assert all(not p.thought for p in (contents[1].parts or []))
+    assert [p.function_call.name for p in (contents[1].parts or []) if p.function_call] == ["read_file"]
+    # Content[3] is stripped Anthropic text turn: clean text, no thought signature
+    assert [p.text for p in (contents[3].parts or [])] == ["Claude final synthesis."]
+    assert all(p.thought_signature is None for p in (contents[3].parts or []))
+    # Content[5] is untouched Gemini tool-call turn: original thought_signature bytes preserved
+    assert contents[5].parts[0].thought_signature == b"gemini-fc-sig-bytes"
+    # Content[7] is untouched Gemini text turn: original thought_signature bytes preserved
+    assert contents[7].parts[0].thought_signature == b"gemini-text-sig-bytes"
+
+
+def test_sanitize_messages_cross_provider_anthropic_openai_and_empty_blocks() -> None:
+    """Verify Gemini -> Anthropic, cross-provider -> OpenAI, and empty thinking-only collapse guards."""
+    anth_sig = base64.b64encode(b"anth-sig").decode("ascii")
+    gem_sig = base64.b64encode(b"gem-sig").decode("ascii")
+
+    gem_msg = AIMessage(
+        content=[{"type": "text", "text": "Gemini text.", "extras": {"signature": gem_sig}}],
+        additional_kwargs={"__gemini_function_call_thought_signatures__": {"tc_1": gem_sig}},
+        tool_calls=[{"name": "search_vault", "args": {"query": "x"}, "id": "tc_1"}],
+        response_metadata={"model_provider": "google_genai", "model_name": "gemini-4-argon"},
+    )
+    anth_msg = AIMessage(
+        content=[
+            {"type": "thinking", "thinking": "Internal thought", "signature": anth_sig},
+            {"type": "text", "text": "Anthropic text.", "cache_control": {"type": "ephemeral"}},
+        ],
+        response_metadata={"model_provider": "anthropic", "model_name": "claude-opus-5-5"},
+    )
+    thinking_only_tc = AIMessage(
+        content=[{"type": "thinking", "thinking": "Only thinking", "signature": anth_sig}],
+        tool_calls=[{"name": "read_file", "args": {"file_path": "a.md"}, "id": "tc_only"}],
+        response_metadata={"model_provider": "anthropic"},
+    )
+    thinking_only_no_tc = AIMessage(
+        content=[{"type": "thinking", "thinking": "Only thinking", "signature": anth_sig}],
+        response_metadata={"model_provider": "anthropic"},
+    )
+
+    # Gemini -> Anthropic: strips Gemini signatures while keeping Anthropic messages identical
+    for_anthropic = _sanitize_messages_for_provider([gem_msg, anth_msg], "anthropic")
+    assert for_anthropic[0] is not gem_msg
+    assert for_anthropic[0].content == "Gemini text."
+    assert "__gemini_function_call_thought_signatures__" not in for_anthropic[0].additional_kwargs
+    assert for_anthropic[1] is anth_msg  # same provider untouched
+
+    # Cross-provider -> OpenAI: strips both Gemini and Anthropic artifacts
+    for_openai = _sanitize_messages_for_provider([gem_msg, anth_msg], "openai")
+    assert for_openai[0].content == "Gemini text."
+    assert "__gemini_function_call_thought_signatures__" not in for_openai[0].additional_kwargs
+    assert for_openai[1].content == "Anthropic text."
+
+    # Empty content guards after stripping thinking blocks
+    collapsed = _sanitize_messages_for_provider([thinking_only_tc, thinking_only_no_tc], "gemini")
+    assert collapsed[0].content == ""
+    assert collapsed[0].tool_calls == thinking_only_tc.tool_calls
+    assert collapsed[1].content == "(no text)"
+
+
+def test_call_model_sanitizes_cross_provider_history_without_mutating_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify call_model sanitizes foreign-provider thinking signatures before invoking LLM while leaving state untouched."""
+    anth_sig = base64.b64encode(b"anth-sig").decode("ascii")
+    anth_msg = AIMessage(
+        content=[
+            {"type": "thinking", "thinking": "Plan", "signature": anth_sig},
+            {"type": "text", "text": "Checked file."},
+        ],
+        response_metadata={"model_provider": "anthropic", "model_name": "claude-opus-5-5"},
+    )
+    state_msgs = [
+        HumanMessage(content="Check file"),
+        anth_msg,
+        HumanMessage(content="Now reply using Flash"),
+    ]
+
+    captured_payload: list = []
+    mock_llm = MagicMock()
+    mock_bound = MagicMock()
+    mock_llm.bind_tools.return_value = mock_bound
+
+    def fake_invoke(msgs):
+        captured_payload.extend(msgs)
+        return AIMessage(content="Flash response")
+
+    mock_bound.invoke.side_effect = fake_invoke
+    monkeypatch.setattr("nexus.agent.graph.get_chat_model", lambda tier=None, temperature=0.0: mock_llm)
+
+    call_model({"messages": state_msgs}, config={"configurable": {"thread_id": "t_cross", "model_tier": "low"}})
+
+    # First message is ephemeral SystemMessage; index 2 is the sanitized Anthropic AIMessage
+    sent_anth = captured_payload[2]
+    assert sent_anth is not anth_msg
+    assert sent_anth.content == "Checked file."
+    # Original state AIMessage retains its thinking block and signature intact
+    assert isinstance(anth_msg.content, list) and anth_msg.content[0]["signature"] == anth_sig
+
+
+def test_invoke_llm_with_resilience_self_heals_invalid_thought_signature() -> None:
+    """Verify _invoke_llm_with_resilience strips signatures once on INVALID_THOUGHT_SIGNATURE and never infinite-loops."""
+    assert _is_invalid_signature_error(Exception("400 INVALID_ARGUMENT. INVALID_THOUGHT_SIGNATURE"))
+    assert _is_invalid_signature_error(Exception("Invalid thought signature."))
+    assert not _is_invalid_signature_error(Exception("504 DEADLINE_EXCEEDED"))
+
+    gem_sig = base64.b64encode(b"stale-gemini-sig").decode("ascii")
+    hist_msg = AIMessage(
+        content=[{"type": "text", "text": "Earlier answer", "extras": {"signature": gem_sig}}],
+        response_metadata={"model_provider": "google_genai", "model_name": "gemini-4-hydrogen"},
+    )
+    input_msgs = [HumanMessage(content="Hi"), hist_msg, HumanMessage(content="Follow up")]
+
+    # 1. Self-heals once even when max_retries=0
+    recorded_batches = []
+    mock_llm = MagicMock()
+
+    def fake_invoke_succeeds_on_retry(msgs):
+        recorded_batches.append(list(msgs))
+        if len(recorded_batches) == 1:
+            raise Exception(
+                "Error calling model 'gemini-3.8-flash' (INVALID_ARGUMENT): 400 INVALID_ARGUMENT. "
+                "{'error': {'code': 400, 'message': 'Invalid thought signature.', "
+                "'details': [{'reason': 'INVALID_THOUGHT_SIGNATURE'}]}}"
+            )
+        return AIMessage(content="Recovered answer")
+
+    mock_llm.invoke.side_effect = fake_invoke_succeeds_on_retry
+    tracer = MagicMock()
+    res = _invoke_llm_with_resilience(
+        llm=mock_llm,
+        messages=input_msgs,
+        tracer=tracer,
+        thread_ids=["t_sig_heal"],
+        model_name="gemini-3.8-flash",
+        tier="low",
+        max_retries=0,
+    )
+    assert res.content == "Recovered answer"
+    assert len(recorded_batches) == 2
+    assert recorded_batches[0][1] is hist_msg
+    assert recorded_batches[1][1] is not hist_msg
+    assert recorded_batches[1][1].content == "Earlier answer"
+    tracer.info.assert_called_once()
+
+    # 2. If the stripped retry still fails with INVALID_THOUGHT_SIGNATURE, propagate instead of looping
+    always_fail_llm = MagicMock()
+    always_fail_llm.invoke.side_effect = Exception("400 INVALID_ARGUMENT: Invalid thought signature.")
+    with pytest.raises(Exception, match="Invalid thought signature"):
+        _invoke_llm_with_resilience(
+            llm=always_fail_llm,
+            messages=input_msgs,
+            tracer=MagicMock(),
+            thread_ids=["t_sig_fail"],
+            model_name="gemini-3.8-flash",
+            tier="low",
+            max_retries=3,
+        )
+    assert always_fail_llm.invoke.call_count == 2
+
+
+def test_run_nexus_agent_with_trace_invalid_signature_diagnostic_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify run_nexus_agent_with_trace returns an actionable diagnostic when INVALID_THOUGHT_SIGNATURE bubbles out."""
+    mock_graph = MagicMock()
+    mock_graph.invoke.side_effect = Exception(
+        "Error calling model 'gemini-3.8-flash' (INVALID_ARGUMENT): 400 INVALID_ARGUMENT. "
+        "{'error': {'message': 'Invalid thought signature.', 'details': [{'reason': 'INVALID_THOUGHT_SIGNATURE'}]}}"
+    )
+    monkeypatch.setattr("nexus.agent.api.nexus_graph", mock_graph)
+
+    res = run_nexus_agent_with_trace(query="Test query", thread_id="test_sig_thread", model_tier="low")
+    assert "INVALID_THOUGHT_SIGNATURE" in res["response"]
+    assert "gemini-3.8-flash" in res["response"]
+    assert "reasoning signature mismatch" in res["response"]
+    assert res["confidence"] == 0.0
+
 
 
 

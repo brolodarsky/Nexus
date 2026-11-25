@@ -11,6 +11,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 # ChatOpenAI: LangChain client for OpenAI chat models
 from langchain_openai import ChatOpenAI
 from nexus.core.config import EngineSettings, settings
+from nexus.core.cost import resolve_model_pricing
 
 # Paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -30,7 +31,7 @@ GEMINI_MODEL_MEDIUM = settings.gemini_model_medium
 GEMINI_MODEL_STRONG = settings.gemini_model_strong
 
 # AI Config — Anthropic Claude Native Client & Model Tiers
-# Resolves `ANTHROPIC_API_KEY` from `.env`; maps Opus 5.5 to `strong` and Sonnet 4.5 to `low`
+# Resolves `ANTHROPIC_API_KEY` from `.env`; maps Opus 5.5 to `strong`, Sonnet 5.5 to `medium`, and Haiku 5.5 to `low`
 ANTHROPIC_API_KEY = settings.anthropic_api_key
 ANTHROPIC_MODEL_LOW = settings.anthropic_model_low
 ANTHROPIC_MODEL_MEDIUM = settings.anthropic_model_medium
@@ -40,7 +41,7 @@ ANTHROPIC_MODEL_STRONG = settings.anthropic_model_strong
 ModelTier = Literal["low", "medium", "strong"]
 
 
-# `model_id: str` is an incoming Anthropic model string (e.g. `"claude-opus-5.5"`, `"claude-opus-5-5"`, or `"claude-opus-4-5"`).
+# `model_id: str` is an incoming Anthropic model string (e.g. `"claude-opus-5.5"`, `"claude-sonnet-5.5"`, `"claude-haiku-5.5"`, or `"claude-opus-4-5"`).
 # `-> str` normalizes dot-separated version suffixes (`5.5`, `4.5`) into Anthropic's canonical hyphenated API format (`5-5`, `4-5`).
 def _normalize_anthropic_model_name(model_id: str) -> str:
     """Normalize shorthand or dot-versioned Anthropic model strings into canonical Anthropic API identifiers."""
@@ -48,6 +49,10 @@ def _normalize_anthropic_model_name(model_id: str) -> str:
     lower = cleaned.lower()
     if lower in ("claude-opus-5.5", "opus-5.5", "opus-5-5", "opus 5.5"):
         return "claude-opus-5-5"
+    if lower in ("claude-sonnet-5.5", "sonnet-5.5", "sonnet-5-5", "sonnet 5.5"):
+        return "claude-sonnet-5-5"
+    if lower in ("claude-haiku-5.5", "haiku-5.5", "haiku-5-5", "haiku 5.5"):
+        return "claude-haiku-5-5"
     if lower in ("claude-opus-4.5", "opus-4.5", "opus-4-5", "opus 4.5"):
         return "claude-opus-4-5"
     if lower in ("claude-sonnet-4.5", "sonnet-4.5", "sonnet-4-5", "sonnet 4.5"):
@@ -56,7 +61,7 @@ def _normalize_anthropic_model_name(model_id: str) -> str:
 
 
 # `tier: str | None` accepts a standardized tier (`"low"`, `"medium"`, `"strong"`), a provider-qualified tier (`"anthropic:strong"`),
-# or an explicit model ID (e.g. `"gemini-4-argon"`, `"claude-opus-5-5"`, `"claude-sonnet-4-5"`).
+# or an explicit model ID (e.g. `"gemini-4-argon"`, `"claude-opus-5-5"`, `"claude-sonnet-5-5"`, `"claude-haiku-5-5"`).
 # `provider: str | None` optionally overrides the target provider family (`"gemini"`, `"anthropic"`, `"openai"`), e.g. so subagents match the parent turn's provider.
 # `-> dict[str, str]` returns resolved metadata (`tier`, `provider`, `model_name`, `label`) for telemetry and client instantiation.
 def resolve_model_config(tier: str | None = None, provider: str | None = None) -> dict[str, str]:
@@ -133,7 +138,7 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
         effective_tier = lower_choice
         model_name = active_map[effective_tier]
     else:
-        # Caller passed an explicit model name (e.g. `"gemini-4-hydrogen"`, `"claude-opus-5-5"`, `"claude-sonnet-4-5"`):
+        # Caller passed an explicit model name (e.g. `"gemini-4-hydrogen"`, `"claude-opus-5-5"`, `"claude-sonnet-5-5"`, `"claude-haiku-5-5"`):
         # 1. Detect provider from explicit model identifier if not explicitly overridden
         if any(tok in lower_choice for tok in ("claude", "opus", "sonnet", "haiku")):
             active_provider = "anthropic"
@@ -145,10 +150,11 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
             active_provider = "openai"
 
         active_map = provider_maps.get(active_provider, active_map)
-        # 2. Reverse-lookup its tier if it matches a configured tier, else classify `"low"` vs `"strong"` by family name
+        # 2. Reverse-lookup its tier if it matches a configured tier, else classify `"low"` vs `"medium"` vs `"strong"` by family name
         matched_tier = next((t for t, m in active_map.items() if m.lower() == lower_choice), None)
-        is_fast_family = any(tok in lower_choice for tok in ("flash", "hydrogen", "mini", "sonnet", "haiku"))
-        effective_tier = matched_tier or ("low" if is_fast_family else "strong")
+        is_fast_family = any(tok in lower_choice for tok in ("flash", "hydrogen", "mini", "haiku"))
+        is_medium_family = "sonnet" in lower_choice
+        effective_tier = matched_tier or ("low" if is_fast_family else "medium" if is_medium_family else "strong")
         model_name = raw_choice
 
     tier_Wait_labels = {
@@ -164,6 +170,98 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
     }
 
 
+# Standardized UI metadata keyed by canonical model ID (single source of truth for labels, concise explainers, and caveat pills)
+_MODEL_CATALOG_META: dict[str, dict[str, str | None]] = {
+    "gemini-4-argon": {
+        "label": "Gemini 4 Argon",
+        "short_label": "Argon",
+        "description": "Deep multi-step reasoning, cross-document synthesis, and hard analytical problems.",
+        "pricing_note": "$4/$20 Dec 1",
+    },
+    "gemini-4-hydrogen": {
+        "label": "Gemini 4 Hydrogen",
+        "short_label": "Hydrogen",
+        "description": "Everyday coding, fast tool loops, and large-context work at mid-tier cost.",
+        "pricing_note": None,
+    },
+    "gemini-3.8-flash": {
+        "label": "Gemini 3.8 Flash",
+        "short_label": "Flash",
+        "description": "Quick lookups, routine summaries, and fast multimodal tasks on Gemini.",
+        "pricing_note": "$1.50/$7.50 Jan 1",
+    },
+    "claude-opus-5-5": {
+        "label": "Claude Opus 5.5",
+        "short_label": "Opus 5.5",
+        "description": "Flagship autonomous coding, nuanced writing, and high-stakes tasks.",
+        "pricing_note": None,
+    },
+    "claude-sonnet-5-5": {
+        "label": "Claude Sonnet 5.5",
+        "short_label": "Sonnet 5.5",
+        "description": "Balanced everyday drafting, coding, and reasoning at half Opus cost.",
+        "pricing_note": None,
+    },
+    "claude-haiku-5-5": {
+        "label": "Claude Haiku 5.5",
+        "short_label": "Haiku 5.5",
+        "description": "Near-instant, ultra-cheap replies, formatting, tagging, and light search.",
+        "pricing_note": "5× >100K",
+    },
+    "gpt-5.6-sol": {
+        "label": "GPT-5.6 Sol",
+        "short_label": "Sol",
+        "description": "Deep multi-step OpenAI reasoning, complex planning, and high-accuracy synthesis.",
+        "pricing_note": None,
+    },
+    "gpt-5.6-terra": {
+        "label": "GPT-5.6 Terra",
+        "short_label": "Terra",
+        "description": "Balanced everyday OpenAI model for writing, coding, and general tool workflows.",
+        "pricing_note": None,
+    },
+    "gpt-5.4-mini": {
+        "label": "GPT-5.4 Mini",
+        "short_label": "Mini",
+        "description": "Fast, low-cost OpenAI classification, short edits, and routine subagent tasks.",
+        "pricing_note": None,
+    },
+}
+
+
+# Formats a USD per-1M-token rate concisely (`$2` for whole integers, `$1.50` for cents, `$0.075` for sub-cent rates)
+def _format_usd_rate(rate: float) -> str:
+    if rate.is_integer():
+        return f"${int(rate)}"
+    formatted = f"{rate:.4f}".rstrip("0").rstrip(".")
+    if "." in formatted and len(formatted.split(".")[1]) == 1:
+        formatted += "0"
+    return f"${formatted}"
+
+
+# Builds one standardized catalog entry combining UI metadata with live rates resolved from `nexus.core.cost`
+def _build_model_catalog_entry(entry_id: str, tier: str, provider: str, model_name: str) -> dict[str, Any]:
+    meta = _MODEL_CATALOG_META.get(model_name, {})
+    rates = resolve_model_pricing(model_name=model_name, tier=tier)
+    fallback_short = model_name.split("/")[-1]
+    return {
+        "id": entry_id,
+        "tier": tier,
+        "provider": provider,
+        "model_name": model_name,
+        "label": meta.get("label") or model_name,
+        "short_label": meta.get("short_label") or fallback_short,
+        "description": meta.get("description") or f"Use {model_name} for {tier}-tier execution.",
+        "pricing": {
+            "input_per_m": rates["input"],
+            "output_per_m": rates["output"],
+            "cached_per_m": rates["cached"],
+            "summary": f"{_format_usd_rate(rates['input'])} / {_format_usd_rate(rates['output'])}",
+            "note": meta.get("pricing_note"),
+        },
+    }
+
+
 # `-> dict[str, Any]` returns the structured catalog of selectable models/tiers for the Next.js Chat UI (`GET /api/agents/models`).
 def get_available_models() -> dict[str, Any]:
     """Return the active provider, default tier, and selectable per-turn model options for the Chat UI."""
@@ -173,30 +271,11 @@ def get_available_models() -> dict[str, Any]:
     medium_cfg = resolve_model_config("medium")
     low_cfg = resolve_model_config("low")
     anthropic_strong = _normalize_anthropic_model_name(live_settings.anthropic_model_strong)
+    anthropic_medium = _normalize_anthropic_model_name(live_settings.anthropic_model_medium)
     anthropic_low = _normalize_anthropic_model_name(live_settings.anthropic_model_low)
 
-    models: list[dict[str, str]] = [
-        {
-            "id": "strong",
-            "tier": "strong",
-            "provider": strong_cfg["provider"],
-            "model_name": strong_cfg["model_name"],
-            "label": f"Strong ({strong_cfg['model_name']})",
-            "short_label": "Strong",
-            "description": f"Deep reasoning & complex synthesis — Astra ({strong_cfg['model_name']})",
-        },
-        {
-            "id": "low",
-            "tier": "low",
-            "provider": low_cfg["provider"],
-            "model_name": low_cfg["model_name"],
-            "label": f"Fast ({low_cfg['model_name']})",
-            "short_label": "Fast",
-            "description": (
-                f"High-speed execution — {'Hydrogen' if 'hydrogen' in low_cfg['model_name'].lower() else 'Flash'} "
-                f"({low_cfg['model_name']})"
-            ),
-        },
+    models: list[dict[str, Any]] = [
+        _build_model_catalog_entry("strong", "strong", strong_cfg["provider"], strong_cfg["model_name"]),
     ]
 
     # Include the `"medium"` tier option if it maps to a distinct model from `"low"` and `"strong"`,
@@ -205,60 +284,32 @@ def get_available_models() -> dict[str, Any]:
         medium_cfg["model_name"] not in (strong_cfg["model_name"], low_cfg["model_name"])
         or live_settings.nexus_primary_tier == "medium"
     ):
-        models.insert(
-            1,
-            {
-                "id": "medium",
-                "tier": "medium",
-                "provider": medium_cfg["provider"],
-                "model_name": medium_cfg["model_name"],
-                "label": f"Medium ({medium_cfg['model_name']})",
-                "short_label": "Medium",
-                "description": f"Balanced speed & reasoning ({medium_cfg['model_name']})",
-            },
+        models.append(
+            _build_model_catalog_entry("medium", "medium", medium_cfg["provider"], medium_cfg["model_name"])
         )
 
-    # Include `"gemini-4-hydrogen"` explicitly alongside `"strong"` (Argon) and `"low"` (Flash)
-    # whenever it is not already bound as the configured `"strong"` or `"low"` Gemini model.
+    # Order Gemini symmetrically (Strong -> Hydrogen Medium -> Low Flash) when Hydrogen isn't already bound above
     if (
         default_resolved["provider"] != "anthropic"
         and "gemini-4-hydrogen" not in (strong_cfg["model_name"], low_cfg["model_name"])
+        and not any(m["model_name"] == "gemini-4-hydrogen" for m in models)
     ):
         models.append(
-            {
-                "id": "gemini-4-hydrogen",
-                "tier": "low",
-                "provider": "gemini",
-                "model_name": "gemini-4-hydrogen",
-                "label": "Hydrogen (gemini-4-hydrogen)",
-                "short_label": "Hydrogen",
-                "description": "High-efficiency 1M-context workhorse — Hydrogen (gemini-4-hydrogen)",
-            }
+            _build_model_catalog_entry("gemini-4-hydrogen", "medium", "gemini", "gemini-4-hydrogen")
         )
 
-    # Append Anthropic Claude options (`claude-opus-5-5` for Strong, `claude-sonnet-4-5` for Low/Fast)
+    models.append(
+        _build_model_catalog_entry("low", "low", low_cfg["provider"], low_cfg["model_name"])
+    )
+
+    # Append Anthropic Claude options (`claude-opus-5-5` Strong, `claude-sonnet-5-5` Medium, `claude-haiku-5-5` Low)
     # when the primary provider is not already Anthropic so all selectable models appear together in the Chat UI.
     if default_resolved["provider"] != "anthropic":
         models.extend(
             [
-                {
-                    "id": anthropic_strong,
-                    "tier": "strong",
-                    "provider": "anthropic",
-                    "model_name": anthropic_strong,
-                    "label": f"Opus 5.5 ({anthropic_strong})",
-                    "short_label": "Opus 5.5",
-                    "description": f"Anthropic deep reasoning & synthesis — Claude Opus 5.5 ({anthropic_strong})",
-                },
-                {
-                    "id": anthropic_low,
-                    "tier": "low",
-                    "provider": "anthropic",
-                    "model_name": anthropic_low,
-                    "label": f"Sonnet 4.5 ({anthropic_low})",
-                    "short_label": "Sonnet 4.5",
-                    "description": f"Anthropic fast, low-cost execution — Claude Sonnet 4.5 ({anthropic_low})",
-                },
+                _build_model_catalog_entry(anthropic_strong, "strong", "anthropic", anthropic_strong),
+                _build_model_catalog_entry(anthropic_medium, "medium", "anthropic", anthropic_medium),
+                _build_model_catalog_entry(anthropic_low, "low", "anthropic", anthropic_low),
             ]
         )
 
@@ -297,17 +348,17 @@ def get_chat_model(
 
     if resolved["provider"] == "anthropic":
         lower_name = model_name.lower()
-        # Newer Anthropic reasoning models (Opus 5.5, Opus 4.7+, Sonnet 5+) have deprecated custom sampling
+        # Newer Anthropic reasoning models (Opus 5.5, Opus 4.7+, Sonnet 5+, Haiku 5+) have deprecated custom sampling
         # dials (temperature, top_p, top_k) and return HTTP 400 (`temperature is deprecated for this model`).
         # Omitting or passing `temperature=None` causes `ChatAnthropic._get_request_payload` to exclude `temperature`
         # entirely from the JSON payload, respecting the model's native default sampling behavior.
         is_temp_deprecated = any(
             tok in lower_name
-            for tok in ("opus-5", "opus 5", "opus-4-7", "opus 4.7", "sonnet-5", "sonnet 5")
+            for tok in ("opus-5", "opus 5", "opus-4-7", "opus 4.7", "sonnet-5", "sonnet 5", "haiku-5", "haiku 5")
         )
         # Enable Anthropic Prompt Caching automatically across the conversation and tool-loop prefix:
         # Top-level `cache_control={"type": "ephemeral"}` instructs the Anthropic Messages API to place an
-        # automatic ephemeral cache breakpoint (5-minute TTL, 0.1x input rate on hits) on the final cacheable
+        # automatic ephemeral cache breakpoint (5-minute TTL, 0.05x–0.1x cached read rate on hits) on the final cacheable
         # block in each request payload, eliminating redundant re-processing across multi-turn chats & tool loops.
         anthropic_kwargs: dict[str, Any] = {
             "model": model_name,

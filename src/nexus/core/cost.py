@@ -23,20 +23,24 @@ from typing import Any, Dict, Optional
 CONTEXT_STEPUP_THRESHOLD: int = 128_000
 CONTEXT_STEPUP_MULTIPLIER: float = 2.0
 
+# Context threshold (100k tokens) above which Claude Haiku 5.5 steps up 5x ($0.10/$0.01/$0.50 -> $0.50/$0.05/$2.50)
+HAIKU_CONTEXT_STEPUP_THRESHOLD: int = 100_000
+HAIKU_CONTEXT_STEPUP_MULTIPLIER: float = 5.0
+
 # Base pricing per 1M tokens (for context <= 128k tokens)
 MODEL_PRICING: Dict[str, Dict[str, float]] = {
     # ── Google Gemini Family ──────────────────────────────────────────────────
-    # Fast / High-Efficiency Workhorse Tier: Gemini 4 Hydrogen (flat rate across entire 1M context window)
+    # Balanced / High-Efficiency Workhorse Tier: Gemini 4 Hydrogen (flat rate across entire 1M context window)
     "gemini-4-hydrogen": {
         "input": 1.50,      # $1.50 / 1M prompt tokens
         "cached": 0.075,    # $0.075 / 1M cached tokens (95% implicit caching discount)
         "output": 7.50,     # $7.50 / 1M completion & reasoning tokens
     },
-    # Legacy Fast / Low-Latency Tier: Gemini Flash family (retained for retrospective audit accuracy)
+    # Fast / Low-Latency Tier: Gemini 3.8 Flash (introductory rate through Dec 31, 2026; $1.50/$0.15/$7.50 starting Jan 1, 2027)
     "gemini-3.8-flash": {
-        "input": 0.10,      # $0.10 / 1M prompt tokens
-        "cached": 0.025,    # $0.025 / 1M cached tokens (75% discount)
-        "output": 0.40,     # $0.40 / 1M completion tokens
+        "input": 0.75,      # $0.75 / 1M prompt tokens (flat across 1M context)
+        "cached": 0.075,    # $0.075 / 1M cached tokens (90% discount)
+        "output": 3.75,     # $3.75 / 1M completion & thinking tokens
     },
     "gemini-2.5-flash": {
         "input": 0.075,
@@ -48,11 +52,11 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
         "cached": 0.01875,
         "output": 0.30,
     },
-    # Deep Reasoning / Strong Tier: Gemini Argon / Pro family
+    # Deep Reasoning / Strong Tier: Gemini 4 Argon (promo rate through Nov 30, 2026; $4.00/$0.20/$20.00 starting Dec 1, 2026; flat 1M context)
     "gemini-4-argon": {
-        "input": 1.25,      # $1.25 / 1M prompt tokens (<= 128k context)
-        "cached": 0.3125,   # $0.3125 / 1M cached tokens (75% discount)
-        "output": 5.00,     # $5.00 / 1M completion tokens
+        "input": 2.00,      # $2.00 / 1M prompt tokens (flat across 1M context)
+        "cached": 0.10,     # $0.10 / 1M cached tokens (95% discount)
+        "output": 10.00,    # $10.00 / 1M completion & thinking tokens
     },
     "gemini-2.5-pro": {
         "input": 1.25,
@@ -106,16 +110,27 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     },
 
     # ── Anthropic Claude Family ───────────────────────────────────────────────
-    # Fast / Low-Tier Option: Claude Sonnet 4.5 ($3.00 in / $0.30 cached [90% discount] / $15.00 out)
-    "claude-sonnet-4-5": {
-        "input": 3.00,      # $3.00 / 1M prompt tokens
-        "cached": 0.30,     # $0.30 / 1M cached tokens (90% discount)
-        "output": 15.00,    # $15.00 / 1M completion tokens
+    # Fast / Low-Tier Option: Claude Haiku 5.5 (<=100k: $0.10 in / $0.01 cached [90% discount] / $0.50 out; >100k: 5x step-up)
+    "claude-haiku-5-5": {
+        "input": 0.10,      # $0.10 / 1M prompt tokens (<= 100k context)
+        "cached": 0.01,     # $0.01 / 1M cached tokens (90% discount)
+        "output": 0.50,     # $0.50 / 1M completion tokens (<= 100k context)
     },
-    "claude-sonnet-4.5": {
-        "input": 3.00,
-        "cached": 0.30,
-        "output": 15.00,
+    "claude-haiku-5.5": {
+        "input": 0.10,
+        "cached": 0.01,
+        "output": 0.50,
+    },
+    # Balanced / Medium-Tier Option: Claude Sonnet 5.5 ($2.00 in / $0.10 cached [95% discount] / $10.00 out)
+    "claude-sonnet-5-5": {
+        "input": 2.00,      # $2.00 / 1M prompt tokens
+        "cached": 0.10,     # $0.10 / 1M cached tokens (95% discount)
+        "output": 10.00,    # $10.00 / 1M completion tokens
+    },
+    "claude-sonnet-5.5": {
+        "input": 2.00,
+        "cached": 0.10,
+        "output": 10.00,
     },
     # Deep Reasoning / Strong-Tier Option: Claude Opus 5.5 ($4.00 in / $0.20 cached [95% discount] / $20.00 out)
     "claude-opus-5-5": {
@@ -127,6 +142,17 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
         "input": 4.00,
         "cached": 0.20,
         "output": 20.00,
+    },
+    # Legacy Anthropic Fast-Tier: Claude Sonnet 4.5 ($3.00 in / $0.30 cached [90% discount] / $15.00 out)
+    "claude-sonnet-4-5": {
+        "input": 3.00,      # $3.00 / 1M prompt tokens
+        "cached": 0.30,     # $0.30 / 1M cached tokens (90% discount)
+        "output": 15.00,    # $15.00 / 1M completion tokens
+    },
+    "claude-sonnet-4.5": {
+        "input": 3.00,
+        "cached": 0.30,
+        "output": 15.00,
     },
     # Legacy Anthropic Strong-Tier: Claude Opus 4.5 ($5.00 in / $0.50 cached [90% discount] / $25.00 out)
     "claude-opus-4-5": {
@@ -191,8 +217,10 @@ def resolve_model_pricing(
                 base_rates = MODEL_PRICING["gemini-3.8-flash"]
             elif "mini" in clean_model:
                 base_rates = MODEL_PRICING["gpt-5.4-mini"]
+            elif "haiku" in clean_model:
+                base_rates = MODEL_PRICING["claude-haiku-5-5"]
             elif "sonnet" in clean_model:
-                base_rates = MODEL_PRICING["claude-sonnet-4-5"]
+                base_rates = MODEL_PRICING["claude-sonnet-5-5"]
             elif "opus" in clean_model:
                 base_rates = MODEL_PRICING["claude-opus-5-5"]
             elif "terra" in clean_model or "4o" in clean_model:
@@ -210,18 +238,26 @@ def resolve_model_pricing(
             # 5. Default safe fallback (strong tier)
             base_rates = TIER_FALLBACK_PRICING["strong"]
 
-    # 6. Apply context-length tier step-up (2x pricing above 128k tokens for Gemini Pro / Argon family)
-    # Google AI Studio and Gemini API double prompt and output rates when the prompt context window exceeds 128k tokens.
-    # Gemini 4 Hydrogen, Gemini Flash, Anthropic Claude, and OpenAI models maintain flat pricing across their context windows.
+    # 6. Apply context-length tier step-up:
+    # - Claude Haiku 5.5 steps up 5x above 100k input tokens ($0.10/$0.01/$0.50 -> $0.50/$0.05/$2.50).
+    # - Legacy Gemini 1.5/2.5 Pro models double rates above 128k tokens.
+    # - Gemini 4 Argon, Gemini 4 Hydrogen, Gemini 3.8 Flash, Claude Opus/Sonnet 5.5, and OpenAI models maintain flat pricing across their windows.
+    if "haiku" in clean_model and input_tokens > HAIKU_CONTEXT_STEPUP_THRESHOLD:
+        return {
+            "input": round(base_rates["input"] * HAIKU_CONTEXT_STEPUP_MULTIPLIER, 6),
+            "cached": round(base_rates["cached"] * HAIKU_CONTEXT_STEPUP_MULTIPLIER, 6),
+            "output": round(base_rates["output"] * HAIKU_CONTEXT_STEPUP_MULTIPLIER, 6),
+        }
+
     is_non_gemini_provider = any(
         tok in clean_model for tok in ("claude", "opus", "sonnet", "haiku", "gpt", "o1", "o3")
     )
     is_stepup_eligible = not is_non_gemini_provider and (
-        clean_model in ("gemini-4-argon", "gemini-2.5-pro", "gemini-1.5-pro")
-        or "argon" in clean_model
+        clean_model in ("gemini-2.5-pro", "gemini-1.5-pro")
         or "pro" in clean_model
         or (
             clean_tier in ("strong", "medium")
+            and "argon" not in clean_model
             and "flash" not in clean_model
             and "hydrogen" not in clean_model
             and "mini" not in clean_model

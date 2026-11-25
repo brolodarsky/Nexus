@@ -235,6 +235,18 @@ def run_nexus_agent_with_trace(
                 f"(typically triggered when `.py` files are edited while a chat turn is in flight).\n\n"
                 f"The engine has restarted cleanly and your conversation history is intact—please re-send your prompt."
             )
+        # Demystify cross-provider or stale cryptographic thought/thinking signature rejections (HTTP 400)
+        elif (
+            "invalid_thought_signature" in err_lower
+            or "invalid thought signature" in err_lower
+            or ("thinking" in err_lower and "invalid" in err_lower and "signature" in err_lower)
+        ):
+            user_msg = (
+                f"❌ NexusAgent hit a reasoning signature mismatch (`INVALID_THOUGHT_SIGNATURE`) on `{active_model_name}`.\n\n"
+                f"This happens when a thread switches between model providers or reasoning formats (for example, "
+                f"Claude Opus thinking signatures replayed to Gemini Flash) and an incompatible signature persisted in the request. "
+                f"You can re-send your prompt, switch back to the earlier model for this thread, or start a fresh branch."
+            )
         else:
             user_msg = f"❌ NexusAgent encountered an error: {e}"
 

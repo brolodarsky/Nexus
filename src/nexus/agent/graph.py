@@ -93,6 +93,7 @@ from nexus.shared_tools.shared import (
     create_file,
     delete_file,
     fetch_emails,
+    fill_browser_form,
     get_calendar_schedule,
     get_directory_structure,
     get_recent_modifications,
@@ -100,6 +101,7 @@ from nexus.shared_tools.shared import (
     list_browser_tabs,
     modify_file,
     move_file,
+    open_browser_tabs,
     read_browser_tabs,
     read_file,
     run_shared_tool_cli,
@@ -390,6 +392,8 @@ CORE_TOOLS = [
     search_web,
     list_browser_tabs,
     read_browser_tabs,
+    open_browser_tabs,
+    fill_browser_form,
     fetch_emails,
     get_calendar_schedule,
     create_calendar_event,
@@ -531,6 +535,29 @@ def _is_rate_limit_error(error: Exception) -> bool:
     return False
 
 
+# `error: Exception` is the raw provider or LangChain exception intercepted during `.invoke()`.
+# `-> bool` returns True if the provider rejected a historical thought/thinking signature (HTTP 400 INVALID_ARGUMENT).
+def _is_invalid_signature_error(error: Exception) -> bool:
+    """Detect provider 400 rejections caused by foreign, stale, or corrupted reasoning/thought signatures.
+
+    Occurs when conversation checkpoints contain cryptographic thinking signatures from one provider or model
+    (e.g. Anthropic `thinking.signature` or an older reasoning token) and are replayed to a strict verifier
+    such as Google Gemini (`INVALID_THOUGHT_SIGNATURE`) or Anthropic (`invalid signature`).
+    """
+    err_lower = str(error).lower()
+    if "invalid_thought_signature" in err_lower or "invalid thought signature" in err_lower:
+        return True
+    if ("thought_signature" in err_lower or "thought signature" in err_lower) and any(
+        tok in err_lower for tok in ("invalid", "400", "invalid_argument", "missing")
+    ):
+        return True
+    if "thinking" in err_lower and "signature" in err_lower and any(
+        tok in err_lower for tok in ("invalid", "400", "invalid_request_error", "mismatch", "corrupt")
+    ):
+        return True
+    return False
+
+
 # `error: Exception` is the rate-limit exception containing optional provider retry delay metadata.
 # `attempt: int` is the zero-based retry attempt index used for exponential backoff fallback.
 # `default_base_delay: float = 15.0` is the starting backoff in seconds if no provider hint is found.
@@ -604,68 +631,92 @@ def _invoke_llm_with_resilience(
     tier: str,
     max_retries: int = 3,
 ) -> BaseMessage:
-    """Invoke an LLM with automatic 429 rate-limit backoff and sliding token-window rollover handling.
+    """Invoke an LLM with automatic 429 rate-limit backoff, parameter self-healing, and signature recovery.
 
     Why this wrapper exists:
-    LangChain's default HTTP retry policies use short 1s–4s exponential backoffs intended for network blips.
-    When parallel subagents burst token velocity past provider minute-level ceilings (e.g. 2M TPM on Tier 1),
-    immediate retries burn all retry attempts while the sliding window remains saturated. This wrapper intercepts
-    429/RESOURCE_EXHAUSTED errors, extracts the exact `retryDelay` required for the sliding window to clear,
-    notifies the user via SSE trace events, cooperatively sleeps, and seamlessly retries the invocation.
+    1. Sliding Token-Window Backoff: LangChain's default HTTP retry policies use short 1s–4s exponential backoffs
+       intended for network blips. When parallel subagents burst token velocity past provider minute-level ceilings
+       (e.g. 2M TPM on Tier 1), immediate retries burn all attempts while the window remains saturated. This wrapper
+       extracts exact `retryDelay` hints, notifies the user via SSE trace events, cooperatively sleeps, and retries.
+    2. Ephemeral Self-Healing: Handles one-shot compatibility fixes (deprecated `temperature` dials or rejected
+       historical thought signatures) on the outgoing request payload without mutating persisted checkpoints.
     """
-    last_exception: Exception | None = None
-    for attempt in range(max_retries + 1):
+    # Copy message list reference so one-shot reactive sanitization never mutates caller's list in place
+    active_messages: list[BaseMessage] = list(messages)
+    # Bounded retry/self-healing state: each one-shot flag may fire at most once; rate_limit_attempts <= max_retries
+    rate_limit_attempts = 0
+    has_cleared_temp = False
+    has_stripped_signatures = False
+
+    while True:
         # Pre-inference cancellation check: abort immediately if user pressed Stop & Revert
         for tid in thread_ids:
             if tid and is_thread_cancelled(tid):
                 raise InterruptedError(f"Turn execution for thread '{tid}' stopped by user.")
 
         try:
-            return llm.invoke(messages)
+            return llm.invoke(active_messages)
         except Exception as e:
-            last_exception = e
             err_msg_lower = str(e).lower()
 
             # Dynamic Sampling Parameter Self-Healing:
             # Newer frontier models (such as Claude Opus 5.5) deprecate custom temperature/sampling controls and return HTTP 400
             # (`temperature is deprecated for this model`). If encountered, strip the temperature attribute from the active client
-            # (handling both direct BaseChatModel instances and tool-bound RunnableBinding instances) and retry immediately.
-            if "temperature" in err_msg_lower and ("deprecated" in err_msg_lower or "not supported" in err_msg_lower):
-                has_cleared_temp = False
+            # (handling both direct BaseChatModel instances and tool-bound RunnableBinding instances) and retry once.
+            if not has_cleared_temp and "temperature" in err_msg_lower and ("deprecated" in err_msg_lower or "not supported" in err_msg_lower):
+                cleared_temp_now = False
                 if hasattr(llm, "temperature") and getattr(llm, "temperature", None) is not None:
                     llm.temperature = None
-                    has_cleared_temp = True
+                    cleared_temp_now = True
                 if hasattr(llm, "bound") and hasattr(llm.bound, "temperature") and getattr(llm.bound, "temperature", None) is not None:
                     llm.bound.temperature = None
+                    cleared_temp_now = True
+                if cleared_temp_now:
                     has_cleared_temp = True
-                if has_cleared_temp:
                     tracer.info(
                         f"ℹ️ Model '{model_name}' deprecated custom temperature sampling. Cleared temperature parameter and retrying...",
                         data={"model": model_name, "model_tier": tier},
                     )
                     continue
 
+            # Reactive Thought-Signature Self-Healing:
+            # Safety net if a provider rejects a historical signature that slipped past proactive provider matching
+            # (e.g. a legacy Gemini checkpoint with an incompatible signature format across model upgrades). Strip all
+            # signatures ephemerally once and retry immediately; never loops if retry still fails.
+            if not has_stripped_signatures and _is_invalid_signature_error(e):
+                stripped = _sanitize_messages_for_provider(
+                    active_messages,
+                    target_provider="",
+                    strip_all_signatures=True,
+                )
+                # Compare object identity (`is not`) so we only retry if sanitization actually altered at least one message
+                if any(orig is not new for orig, new in zip(active_messages, stripped)):
+                    has_stripped_signatures = True
+                    active_messages = stripped
+                    tracer.info(
+                        f"ℹ️ Model '{model_name}' rejected a historical thought signature. Stripped incompatible signature metadata from ephemeral context and retrying...",
+                        data={"model": model_name, "model_tier": tier, "self_healed": "thought_signature"},
+                    )
+                    continue
+
             # Only intercept rate-limit / quota errors for backoff; let 504 timeouts and logic errors propagate
-            if _is_rate_limit_error(e) and attempt < max_retries:
-                delay = _extract_retry_delay(e, attempt=attempt)
+            if _is_rate_limit_error(e) and rate_limit_attempts < max_retries:
+                delay = _extract_retry_delay(e, attempt=rate_limit_attempts)
+                rate_limit_attempts += 1
                 tracer.info(
                     f"⏳ Rate limit reached (429 RESOURCE_EXHAUSTED). Waiting {delay:.1f}s for sliding token window rollover "
-                    f"before automatic retry (attempt {attempt + 1}/{max_retries})...",
+                    f"before automatic retry (attempt {rate_limit_attempts}/{max_retries})...",
                     data={
                         "model": model_name,
                         "model_tier": tier,
                         "retry_delay": delay,
-                        "attempt": attempt + 1,
+                        "attempt": rate_limit_attempts,
                         "max_retries": max_retries,
                     },
                 )
                 _cooperative_sleep(delay, thread_ids)
                 continue
             raise e
-
-    if last_exception:
-        raise last_exception
-    raise RuntimeError("Unexpected failure in _invoke_llm_with_resilience")
 
 
 # ── Dynamic Subagent Spawner (`spawn_subagent`) ──────────────────────────────
@@ -782,7 +833,7 @@ def spawn_subagent(
     parent_convo = parent_ctx.get("conversation_id") or "nexus_primary"
     parent_thread = parent_ctx.get("thread_id") or parent_convo
 
-    # Match the parent turn's provider when chatting on Anthropic (e.g. `"anthropic:low"` -> `claude-sonnet-4-5`)
+    # Match the parent turn's provider when chatting on Anthropic (e.g. `"anthropic:low"` -> `claude-haiku-5-5`)
     # Scoped strictly to parent_convo so parallel swarms on different provider families never cross-contaminate
     parent_provider = get_active_turn_provider(parent_convo)
     sub_tier_arg = f"anthropic:{effective_tier}" if parent_provider == "anthropic" else effective_tier
@@ -1119,6 +1170,234 @@ llm = get_chat_model(tier=_primary_tier, temperature=0.0)
 llm_with_tools = llm.bind_tools(TOOLS)
 
 
+# ── Helper: Cross-Provider Thought & Signature Isolation ─────────────────────
+
+# frozenset: Immutable set of provider-specific content block types that carry thinking payloads, cryptographic
+# signatures, or Anthropic-native tool envelopes (`tool_use`) which must not leak across provider families.
+_FOREIGN_BLOCK_TYPES = frozenset({
+    "thinking",
+    "redacted_thinking",
+    "reasoning",
+    "reasoning_content",
+    "tool_use",
+    "server_tool_use",
+    "mcp_tool_use",
+})
+
+
+# `provider: Optional[str]` is a raw provider identifier from `AIMessage.response_metadata["model_provider"]` or config.
+# `-> Optional[str]` maps LangChain provider strings to canonical Nexus keys (`"gemini"`, `"anthropic"`, `"openai"`).
+def _normalize_provider_name(provider: Optional[str]) -> Optional[str]:
+    """Normalize provider metadata strings across LangChain integrations into canonical provider keys."""
+    if not provider:
+        return None
+    norm = str(provider).strip().lower()
+    if norm in ("google_genai", "google_vertexai", "google", "gemini"):
+        return "gemini"
+    if norm == "anthropic":
+        return "anthropic"
+    if norm == "openai":
+        return "openai"
+    return None
+
+
+# `msg: BaseMessage` is any message in LangGraph conversation history.
+# `-> Optional[str]` infers the originating provider (`"gemini"`, `"anthropic"`, `"openai"`) for `AIMessage`s, or None.
+def _infer_message_provider(msg: BaseMessage) -> Optional[str]:
+    """Infer which LLM provider produced an `AIMessage` using metadata first, then structural block signatures."""
+    if not isinstance(msg, AIMessage):
+        return None
+
+    # 1. Explicit `model_provider` recorded by LangChain (`"google_genai"`, `"anthropic"`, `"openai"`)
+    rm = getattr(msg, "response_metadata", None) or {}
+    norm = _normalize_provider_name(rm.get("model_provider"))
+    if norm:
+        return norm
+
+    # 2. Fallback to model name substrings when older checkpoints omitted `model_provider`
+    model_name = str(rm.get("model_name") or rm.get("model") or "").strip().lower()
+    if model_name:
+        if any(tok in model_name for tok in ("gemini", "argon", "hydrogen")):
+            return "gemini"
+        if any(tok in model_name for tok in ("claude", "opus", "sonnet", "haiku")):
+            return "anthropic"
+        if any(tok in model_name for tok in ("gpt", "o1", "o3", "o4")):
+            return "openai"
+
+    # 3. Structural marker fallback for checkpoints lacking `response_metadata`
+    ak = getattr(msg, "additional_kwargs", None) or {}
+    if "__gemini_function_call_thought_signatures__" in ak:
+        return "gemini"
+
+    if isinstance(msg.content, list):
+        for block in msg.content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype in ("redacted_thinking", "tool_use", "server_tool_use", "mcp_tool_use"):
+                return "anthropic"
+            if btype == "text":
+                extras = block.get("extras")
+                if isinstance(extras, dict) and ("signature" in extras or "thought_signature" in extras):
+                    return "gemini"
+
+    return None
+
+
+# `msg: AIMessage` is a historical assistant message in thread state.
+# `-> bool` returns True if `msg` contains provider-bound thinking blocks, signatures, or native tool_use blocks.
+def _has_provider_thought_artifacts(msg: AIMessage) -> bool:
+    """Check whether an `AIMessage` carries provider-specific thought blocks or cryptographic signatures."""
+    ak = getattr(msg, "additional_kwargs", None) or {}
+    if "__gemini_function_call_thought_signatures__" in ak or "thought_signature" in ak:
+        return True
+
+    if isinstance(msg.content, list):
+        for block in msg.content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") in _FOREIGN_BLOCK_TYPES:
+                return True
+            if any(k in block for k in ("signature", "thought_signature", "cache_control")):
+                return True
+            extras = block.get("extras")
+            if isinstance(extras, dict) and ("signature" in extras or "thought_signature" in extras):
+                return True
+
+    return False
+
+
+# `msg: AIMessage` is a foreign-provider (or rejected-signature) assistant message.
+# `-> AIMessage` returns an ephemeral `model_copy` stripped of thought/signature metadata while leaving `msg` unmutated.
+def _strip_ai_message_thought_artifacts(msg: AIMessage) -> AIMessage:
+    """Create an ephemeral copy of `msg` with cross-provider thinking/signature blocks and tool envelopes removed.
+
+    Why `model_copy` instead of mutating `msg` in place:
+    `SqliteSaver` checkpoints hold references to historical `AIMessage` objects. Mutating them in place would
+    corrupt persisted Anthropic/Gemini signatures if the user later switches back to the original provider.
+    Tool call invocations (`msg.tool_calls`) and plain conversational text are preserved intact.
+    """
+    has_tool_calls = bool(getattr(msg, "tool_calls", None))
+    new_content: Any = msg.content
+
+    if isinstance(msg.content, list):
+        cleaned_blocks: list[Any] = []
+        for block in msg.content:
+            if isinstance(block, str):
+                cleaned_blocks.append(block)
+            elif isinstance(block, dict):
+                # Drop thinking/reasoning blocks and provider-specific tool_use wrappers (`msg.tool_calls` retains calls)
+                if block.get("type") in _FOREIGN_BLOCK_TYPES:
+                    continue
+                b_copy = dict(block)
+                b_copy.pop("signature", None)
+                b_copy.pop("thought_signature", None)
+                b_copy.pop("cache_control", None)
+                if isinstance(b_copy.get("extras"), dict):
+                    ex = dict(b_copy["extras"])
+                    ex.pop("signature", None)
+                    ex.pop("thought_signature", None)
+                    if ex:
+                        b_copy["extras"] = ex
+                    else:
+                        b_copy.pop("extras", None)
+                cleaned_blocks.append(b_copy)
+            else:
+                cleaned_blocks.append(block)
+
+        # Collapse pure-text (or empty) block lists to a plain string so neither Gemini (`parts=[]`)
+        # nor Anthropic (whitespace-only text blocks) rejects empty content turns.
+        only_text_or_empty = all(
+            isinstance(b, str) or (isinstance(b, dict) and b.get("type") == "text")
+            for b in cleaned_blocks
+        )
+        if only_text_or_empty:
+            non_empty_texts = [
+                t for t in (
+                    b if isinstance(b, str) else str(b.get("text", ""))
+                    for b in cleaned_blocks
+                )
+                if t and t.strip()
+            ]
+            if non_empty_texts:
+                new_content = "\n".join(non_empty_texts)
+            else:
+                new_content = "" if has_tool_calls else "(no text)"
+        else:
+            # Non-text blocks (e.g. multimodal image/file blocks) survive: prune blank text dicts only
+            filtered_blocks = [
+                b for b in cleaned_blocks
+                if not (isinstance(b, dict) and b.get("type") == "text" and not str(b.get("text", "")).strip())
+            ]
+            new_content = filtered_blocks if filtered_blocks else ("" if has_tool_calls else "(no text)")
+    elif isinstance(new_content, str) and not new_content.strip() and not has_tool_calls:
+        new_content = "(no text)"
+
+    # Shallow-copy `additional_kwargs` and remove Gemini/provider signature keys (plus redundant `function_call`)
+    new_ak = dict(getattr(msg, "additional_kwargs", None) or {})
+    new_ak.pop("__gemini_function_call_thought_signatures__", None)
+    new_ak.pop("thought_signature", None)
+    if has_tool_calls:
+        new_ak.pop("function_call", None)
+
+    # Shallow-copy `response_metadata` and strip `output_version` so v1 block unpackers do not re-run on cleaned text
+    new_rm = dict(getattr(msg, "response_metadata", None) or {})
+    new_rm.pop("output_version", None)
+
+    return msg.model_copy(
+        update={
+            "content": new_content,
+            "additional_kwargs": new_ak,
+            "response_metadata": new_rm,
+        }
+    )
+
+
+# `messages: Sequence[BaseMessage]` is the turn-ordered conversation history from `_sanitize_messages()`.
+# `target_provider: str` is the destination provider key (`"gemini"`, `"anthropic"`, `"openai"`).
+# `strip_all_signatures: bool = False` forces stripping across ALL `AIMessage`s (used by reactive 400 recovery).
+# `-> list[BaseMessage]` returns a list safe for the target provider, preserving same-provider message identity.
+def _sanitize_messages_for_provider(
+    messages: Sequence[BaseMessage],
+    target_provider: str,
+    *,
+    strip_all_signatures: bool = False,
+) -> list[BaseMessage]:
+    """Strip foreign-provider thinking blocks and thought signatures before cross-provider model invocation.
+
+    Preserves exact object identity (`msg` untouched) whenever a message originates from `target_provider`,
+    guaranteeing zero KV prompt-cache prefix churn on single-provider conversations (e.g. Gemini -> Gemini
+    or Anthropic -> Anthropic), while preventing `400 INVALID_THOUGHT_SIGNATURE` / `ValueError` crashes when
+    switching models mid-thread (e.g. Claude Opus -> Gemini Flash).
+    """
+    norm_target = _normalize_provider_name(target_provider)
+    result: list[BaseMessage] = []
+    for msg in messages:
+        if not isinstance(msg, AIMessage):
+            result.append(msg)
+            continue
+
+        if strip_all_signatures:
+            result.append(
+                _strip_ai_message_thought_artifacts(msg)
+                if _has_provider_thought_artifacts(msg)
+                else msg
+            )
+            continue
+
+        src_provider = _infer_message_provider(msg)
+        if src_provider is not None and src_provider == norm_target:
+            # Same provider: preserve cryptographic signatures and original object identity for KV caching
+            result.append(msg)
+        elif _has_provider_thought_artifacts(msg):
+            # Foreign or unattributed message carrying provider signatures/thinking blocks: strip ephemerally
+            result.append(_strip_ai_message_thought_artifacts(msg))
+        else:
+            result.append(msg)
+
+    return result
+
+
 # ── Helper: Sanitize Dangling Tool Calls & Mid-Turn Pruned History ───────────
 
 def _sanitize_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
@@ -1202,7 +1481,10 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     # remain byte-identical for automatic provider KV prompt caching across turns (with explicit cache_control on Anthropic).
     system_prompt_content = inject_root_instructions()
     ephemeral_sys_msg = _build_system_message(system_prompt_content, active_provider)
-    messages_for_llm: list[BaseMessage] = [ephemeral_sys_msg] + cleaned_messages
+    # Ephemerally strip foreign-provider thinking/signature blocks (e.g., Anthropic -> Gemini) while keeping
+    # same-provider signatures and persisted `SqliteSaver` checkpoints completely untouched.
+    provider_safe_messages = _sanitize_messages_for_provider(cleaned_messages, active_provider)
+    messages_for_llm: list[BaseMessage] = [ephemeral_sys_msg] + provider_safe_messages
 
     # Record active provider scoped to active_convo_id so parallel subagents match their exact turn's provider family
     set_active_turn_provider(active_provider, thread_id=active_convo_id)
@@ -1231,7 +1513,7 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
             for token in ("504", "deadline_exceeded", "timeout", "timed out")
         )
         # Resilient Tier Fallback: If the active strong/medium model hits a deadline timeout, fallback to the high-throughput
-        # low-latency tier (`gemini-4-hydrogen` / `claude-sonnet-4-5` / `low`) to preserve the user's conversation session without crashing.
+        # low-latency tier (`gemini-4-hydrogen` / `claude-haiku-5-5` / `low`) to preserve the user's conversation session without crashing.
         if is_deadline_or_timeout and effective_tier != "low":
             fallback_tier_arg = "anthropic:low" if active_provider == "anthropic" else "low"
             fallback_resolved = resolve_model_config(fallback_tier_arg)
@@ -1239,10 +1521,16 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
                 f"⚠️ Primary model tier ({effective_tier} · {active_model_name}) exceeded deadline (504 DEADLINE_EXCEEDED). "
                 f"Gracefully falling back to low-latency tier ({fallback_resolved['model_name']}) to complete the turn..."
             )
+            fallback_provider = fallback_resolved["provider"]
+            fallback_sys_msg = _build_system_message(system_prompt_content, fallback_provider)
+            fallback_messages: list[BaseMessage] = [fallback_sys_msg] + _sanitize_messages_for_provider(
+                cleaned_messages,
+                fallback_provider,
+            )
             fallback_llm = get_chat_model(tier=fallback_tier_arg, temperature=0.0)
             response = _invoke_llm_with_resilience(
                 llm=fallback_llm.bind_tools(TOOLS),
-                messages=messages_for_llm,
+                messages=fallback_messages,
                 tracer=nexus_tracer,
                 thread_ids=[active_thread_id, active_convo_id],
                 model_name=fallback_resolved["model_name"],

@@ -25,27 +25,43 @@ def test_resolve_model_pricing():
     assert hydrogen_rates["cached"] == 0.075
     assert hydrogen_rates["output"] == 7.50
 
-    # Legacy Gemini 3.8 Flash rates preserved for retrospective run audits
+    # Active Gemini 3.8 Flash introductory rates ($0.75 in / $0.075 cached / $3.75 out)
     flash_rates = resolve_model_pricing("gemini-3.8-flash")
-    assert flash_rates["input"] == 0.10
-    assert flash_rates["cached"] == 0.025
-    assert flash_rates["output"] == 0.40
+    assert flash_rates["input"] == 0.75
+    assert flash_rates["cached"] == 0.075
+    assert flash_rates["output"] == 3.75
 
+    # Active Gemini 4 Argon promotional rates ($2.00 in / $0.10 cached / $10.00 out)
     argon_rates = resolve_model_pricing("gemini-4-argon")
-    assert argon_rates["input"] == 1.25
-    assert argon_rates["cached"] == 0.3125
-    assert argon_rates["output"] == 5.00
+    assert argon_rates["input"] == 2.00
+    assert argon_rates["cached"] == 0.10
+    assert argon_rates["output"] == 10.00
 
     mini_rates = resolve_model_pricing("gpt-5.4-mini")
     assert mini_rates["input"] == 0.15
     assert mini_rates["output"] == 0.60
 
-    # Anthropic Claude Opus 5.5, Opus 4.5 & Sonnet 4.5 exact and dot-alias matches
+    # Anthropic Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, and legacy Opus 4.5 / Sonnet 4.5 exact and dot-alias matches
     opus55_rates = resolve_model_pricing("claude-opus-5-5")
     assert opus55_rates["input"] == 4.00
     assert opus55_rates["cached"] == 0.20
     assert opus55_rates["output"] == 20.00
     assert resolve_model_pricing("claude-opus-5.5") == opus55_rates
+
+    sonnet55_rates = resolve_model_pricing("claude-sonnet-5-5")
+    assert sonnet55_rates["input"] == 2.00
+    assert sonnet55_rates["cached"] == 0.10
+    assert sonnet55_rates["output"] == 10.00
+    assert resolve_model_pricing("claude-sonnet-5.5") == sonnet55_rates
+    # Unknown/dated Sonnet aliases resolve to the active Sonnet 5.5 rate card
+    assert resolve_model_pricing("claude-sonnet-latest") == sonnet55_rates
+
+    haiku55_rates = resolve_model_pricing("claude-haiku-5-5")
+    assert haiku55_rates["input"] == 0.10
+    assert haiku55_rates["cached"] == 0.01
+    assert haiku55_rates["output"] == 0.50
+    assert resolve_model_pricing("claude-haiku-5.5") == haiku55_rates
+    assert resolve_model_pricing("claude-haiku-latest") == haiku55_rates
 
     opus45_rates = resolve_model_pricing("claude-opus-4-5")
     assert opus45_rates["input"] == 5.00
@@ -59,8 +75,12 @@ def test_resolve_model_pricing():
     assert sonnet_rates["output"] == 15.00
     assert resolve_model_pricing("claude-sonnet-4.5") == sonnet_rates
 
-    # Anthropic models do NOT double above 128k context (flat rate across 200k window)
+    # Opus and Sonnet stay flat above 128k context, while Haiku 5.5 steps up 5x strictly above 100k input tokens
     assert resolve_model_pricing("claude-opus-5-5", tier="strong", input_tokens=160_000) == opus55_rates
+    assert resolve_model_pricing("claude-sonnet-5-5", tier="medium", input_tokens=160_000) == sonnet55_rates
+    assert resolve_model_pricing("claude-haiku-5-5", tier="low", input_tokens=100_000) == haiku55_rates
+    haiku55_long_rates = resolve_model_pricing("claude-haiku-5-5", tier="low", input_tokens=150_000)
+    assert haiku55_long_rates == {"input": 0.50, "cached": 0.05, "output": 2.50}
     assert resolve_model_pricing("claude-opus-4-5", tier="strong", input_tokens=160_000) == opus45_rates
     assert resolve_model_pricing("claude-sonnet-4-5", tier="low", input_tokens=160_000) == sonnet_rates
 
@@ -81,15 +101,24 @@ def test_resolve_model_pricing():
 
 
 def test_context_stepup_pricing_threshold():
-    """Verifies that Gemini Pro / Argon rates double when prompt context exceeds 128k tokens."""
-    # Context <= 128k tokens: standard rates apply ($1.25 in / $0.3125 cached / $5.00 out)
-    standard_rates = resolve_model_pricing("gemini-4-argon", input_tokens=100_000)
+    """Verifies legacy Gemini Pro 2x >128k step-up while Gemini 4 Argon, Hydrogen, and Flash stay flat across 1M context."""
+    # Gemini 4 Argon stays flat at $2.00 in / $0.10 cached / $10.00 out across its 1M unified context window
+    argon_standard = resolve_model_pricing("gemini-4-argon", input_tokens=100_000)
+    assert argon_standard["input"] == 2.00
+    assert argon_standard["cached"] == 0.10
+    assert argon_standard["output"] == 10.00
+
+    argon_long = resolve_model_pricing("gemini-4-argon", input_tokens=150_000)
+    assert argon_long == argon_standard
+
+    # Legacy Gemini 2.5 Pro <= 128k tokens: standard rates apply ($1.25 in / $0.3125 cached / $5.00 out)
+    standard_rates = resolve_model_pricing("gemini-2.5-pro", input_tokens=100_000)
     assert standard_rates["input"] == 1.25
     assert standard_rates["cached"] == 0.3125
     assert standard_rates["output"] == 5.00
 
-    # Context > 128k tokens: 2x step-up rates apply ($2.50 in / $0.625 cached / $10.00 out)
-    stepup_rates = resolve_model_pricing("gemini-4-argon", input_tokens=150_000)
+    # Legacy Gemini 2.5 Pro > 128k tokens: 2x step-up rates apply ($2.50 in / $0.625 cached / $10.00 out)
+    stepup_rates = resolve_model_pricing("gemini-2.5-pro", input_tokens=150_000)
     assert stepup_rates["input"] == 2.50
     assert stepup_rates["cached"] == 0.625
     assert stepup_rates["output"] == 10.00
@@ -104,11 +133,11 @@ def test_context_stepup_pricing_threshold():
     assert hydrogen_stepup_med == hydrogen_stepup_low
 
     flash_stepup = resolve_model_pricing("gemini-3.8-flash", input_tokens=150_000)
-    assert flash_stepup["input"] == 0.10
-    assert flash_stepup["cached"] == 0.025
-    assert flash_stepup["output"] == 0.40
+    assert flash_stepup["input"] == 0.75
+    assert flash_stepup["cached"] == 0.075
+    assert flash_stepup["output"] == 3.75
 
-    # Verify calculate_token_cost applies 2x rates above 128k
+    # Verify calculate_token_cost applies 2x rates above 128k for legacy Gemini 2.5 Pro
     # 200k input total (150k cached @ $0.625/1M, 50k uncached @ $2.50/1M) + 10k output @ $10.00/1M:
     # Uncached: 50,000 * 2.50 / 1M = $0.125
     # Cached:   150,000 * 0.625 / 1M = $0.09375
@@ -118,23 +147,23 @@ def test_context_stepup_pricing_threshold():
         input_tokens=200_000,
         output_tokens=10_000,
         cached_tokens=150_000,
-        model_name="gemini-4-argon",
+        model_name="gemini-2.5-pro",
     )
     assert cost == 0.31875
 
 
 def test_calculate_token_cost_uncached():
     """Verifies cost computation for purely uncached token usage."""
-    # 1,000,000 input tokens on Flash @ $0.10/1M = $0.10
-    # 1,000,000 output tokens on Flash @ $0.40/1M = $0.40
-    # Total = $0.50
+    # 1,000,000 input tokens on Gemini 3.8 Flash @ $0.75/1M = $0.75
+    # 1,000,000 output tokens on Gemini 3.8 Flash @ $3.75/1M = $3.75
+    # Total = $4.50
     cost = calculate_token_cost(
         input_tokens=1_000_000,
         output_tokens=1_000_000,
         cached_tokens=0,
         model_name="gemini-3.8-flash",
     )
-    assert cost == 0.50
+    assert cost == 4.50
 
 
 def test_calculate_token_cost_with_caching_discount():
@@ -160,26 +189,26 @@ def test_calculate_token_cost_with_caching_discount():
     )
     assert hydrogen_savings == 1.14
 
-    # 1,000,000 input tokens total, where 800,000 are cached on legacy Flash (75% discount):
-    # Uncached: 200,000 * $0.10 / 1M = $0.020
-    # Cached:   800,000 * $0.025 / 1M = $0.020
-    # Output:   100,000 * $0.40 / 1M = $0.040
-    # Expected: $0.080
+    # 1,000,000 input tokens total, where 800,000 are cached on Gemini 3.8 Flash (90% discount):
+    # Uncached: 200,000 * $0.75 / 1M = $0.150
+    # Cached:   800,000 * $0.075 / 1M = $0.060
+    # Output:   100,000 * $3.75 / 1M = $0.375
+    # Expected: $0.585
     cost = calculate_token_cost(
         input_tokens=1_000_000,
         output_tokens=100_000,
         cached_tokens=800_000,
         model_name="gemini-3.8-flash",
     )
-    assert cost == 0.08
+    assert cost == 0.585
 
-    # Savings calculation: 800k * ($0.10 - $0.025) / 1M = 800k * 0.075 / 1M = $0.060
+    # Savings calculation: 800k * ($0.75 - $0.075) / 1M = 800k * 0.675 / 1M = $0.540
     savings = calculate_cache_savings(
         input_tokens=1_000_000,
         cached_tokens=800_000,
         model_name="gemini-3.8-flash",
     )
-    assert savings == 0.06
+    assert savings == 0.54
 
 
 def test_calculate_token_cost_zero_tokens():
