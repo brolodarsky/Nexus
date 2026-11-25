@@ -324,14 +324,19 @@ def get_available_models() -> dict[str, Any]:
 # `tier: ModelTier | str | None` selects the capability/cost level (`"low"`, `"medium"`, `"strong"`, or explicit model ID). If `None`, reads `nexus_primary_tier` fresh from `.env`.
 # `provider: str | None` optionally forces the provider family (`"gemini"`, `"anthropic"`, `"openai"`), e.g. for subagent provider matching.
 # `-> BaseChatModel` returns a configured LangChain chat model (`ChatGoogleGenerativeAI`, `ChatAnthropic`, or `ChatOpenAI`) ready for `.invoke()` or `.bind_tools()`.
+# `tier: ModelTier | str | None` selects the capability/cost level (`"low"`, `"medium"`, `"strong"`, or explicit model ID). If `None`, reads `nexus_primary_tier` fresh from `.env`.
+# `provider: str | None` optionally forces the provider family (`"gemini"`, `"anthropic"`, `"openai"`), e.g. for subagent provider matching.
+# `include_thoughts: bool | None` optionally overrides `EngineSettings.ai_include_thoughts` (e.g. `False` for lightweight background titling).
+# `-> BaseChatModel` returns a configured LangChain chat model (`ChatGoogleGenerativeAI`, `ChatAnthropic`, or `ChatOpenAI`) ready for `.invoke()` or `.bind_tools()`.
 def get_chat_model(
     tier: ModelTier | str | None = None,
     temperature: float = 0.0,
     provider: str | None = None,
+    include_thoughts: bool | None = None,
 ) -> BaseChatModel:
     """Instantiate a tiered chat model routed to native Gemini (`ChatGoogleGenerativeAI`), Anthropic (`ChatAnthropic`), or OpenAI (`ChatOpenAI`).
 
-    Re-reads `EngineSettings()` dynamically so `.env` model/tier edits and per-turn UI model overrides take effect
+    Re-reads `EngineSettings()` dynamically so `.env` model/tier edits and per-turn UI model selections take effect
     on the very next turn without needing to edit `.py` files (which would cause `uvicorn --reload` to kill in-flight HTTP/SSE streams).
     """
     live_settings = EngineSettings()
@@ -339,6 +344,10 @@ def get_chat_model(
     # Reasoning models (`gemini-4-argon`, `claude-opus-5-5`) require >90s on massive context histories to prevent 504 DEADLINE_EXCEEDED
     timeout = live_settings.ai_request_timeout
     max_retries = live_settings.ai_max_retries
+    # Resolve whether Gemini/Anthropic should return visible reasoning summaries (per-call override wins over .env default)
+    effective_include_thoughts = (
+        bool(live_settings.ai_include_thoughts) if include_thoughts is None else bool(include_thoughts)
+    )
 
     resolved = resolve_model_config(tier, provider=provider)
     effective_tier = resolved["tier"]
@@ -356,6 +365,25 @@ def get_chat_model(
             tok in lower_name
             for tok in ("opus-5", "opus 5", "opus-4-7", "opus 4.7", "sonnet-5", "sonnet 5", "haiku-5", "haiku 5")
         )
+        # Adaptive thinking (`type="adaptive", display="summarized"`) is supported by Claude 4.6+ / 5.x models;
+        # legacy 4.5 models keep standard non-thinking invocation unless configured otherwise.
+        is_adaptive_thinking_model = any(
+            tok in lower_name
+            for tok in (
+                "opus-5",
+                "opus 5",
+                "opus-4-6",
+                "opus 4.6",
+                "opus-4-7",
+                "opus 4.7",
+                "sonnet-5",
+                "sonnet 5",
+                "sonnet-4-6",
+                "sonnet 4.6",
+                "haiku-5",
+                "haiku 5",
+            )
+        )
         # Enable Anthropic Prompt Caching automatically across the conversation and tool-loop prefix:
         # Top-level `cache_control={"type": "ephemeral"}` instructs the Anthropic Messages API to place an
         # automatic ephemeral cache breakpoint (5-minute TTL, 0.05x–0.1x cached read rate on hits) on the final cacheable
@@ -366,7 +394,13 @@ def get_chat_model(
             "max_retries": max_retries,
             "model_kwargs": {"cache_control": {"type": "ephemeral"}},
         }
-        if not is_temp_deprecated and temperature is not None:
+        if effective_include_thoughts and is_adaptive_thinking_model:
+            # Summarized adaptive thinking returns readable `thinking` blocks + cryptographic signatures;
+            # raise `max_tokens` above LangChain's 4096 fallback so thinking tokens do not starve final output.
+            anthropic_kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
+            anthropic_kwargs["max_tokens"] = max(4096, int(live_settings.anthropic_thinking_max_tokens or 16384))
+        # Anthropic rejects requests that combine `thinking` with a custom `temperature`
+        if not is_temp_deprecated and "thinking" not in anthropic_kwargs and temperature is not None:
             anthropic_kwargs["temperature"] = temperature
         if anthropic_key:
             anthropic_kwargs["api_key"] = anthropic_key
@@ -379,6 +413,7 @@ def get_chat_model(
             temperature=temperature,
             timeout=timeout,
             max_retries=max_retries,
+            include_thoughts=effective_include_thoughts,
         )
 
     # OpenAI tier map: `"low"` uses mini for fast/cheap subagent & summarizer work; `"medium"` / `"strong"` for synthesis

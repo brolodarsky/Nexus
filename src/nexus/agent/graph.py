@@ -459,6 +459,57 @@ def extract_message_text(msg: BaseMessage | None) -> str:
     return str(raw_content)
 
 
+# `msg: BaseMessage | None` is a LangChain message (typically an `AIMessage` returned by Gemini or Anthropic).
+# `-> str` returns concatenated readable thinking/reasoning summaries without mutating `msg` or its signatures.
+def extract_message_thinking(msg: BaseMessage | None) -> str:
+    """Extract readable model thinking/reasoning text from an `AIMessage` without mutating persisted state.
+
+    Supports:
+    - Anthropic & Gemini structured content blocks (`{'type': 'thinking', 'thinking': '...'}`).
+    - Reasoning/summary blocks (`{'type': 'reasoning'|'reasoning_content', 'reasoning'|'summary'|'text': ...}`).
+    - Legacy provider `additional_kwargs['reasoning_content']` strings.
+
+    Never mutates `msg.content` or strips cryptographic signatures so `SqliteSaver` and KV caches stay intact.
+    """
+    if msg is None:
+        return ""
+    parts: list[str] = []
+    raw_content = getattr(msg, "content", None)
+
+    if isinstance(raw_content, list):
+        for block in raw_content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "thinking":
+                thought_val = block.get("thinking")
+                if not isinstance(thought_val, str) or not thought_val.strip():
+                    thought_val = block.get("text")
+                if isinstance(thought_val, str) and thought_val.strip():
+                    parts.append(thought_val.strip())
+            elif btype in ("reasoning", "reasoning_content"):
+                # Inspect flat string fields first, then OpenAI-style `summary` lists
+                for key in ("reasoning", "reasoning_content", "text"):
+                    val = block.get(key)
+                    if isinstance(val, str) and val.strip():
+                        parts.append(val.strip())
+                        break
+                summary_items = block.get("summary")
+                if isinstance(summary_items, list):
+                    for item in summary_items:
+                        if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip():
+                            parts.append(item["text"].strip())
+
+    if not parts:
+        ak = getattr(msg, "additional_kwargs", None) or {}
+        if isinstance(ak, dict):
+            rc = ak.get("reasoning_content")
+            if isinstance(rc, str) and rc.strip():
+                parts.append(rc.strip())
+
+    return "\n\n".join(parts)
+
+
 def _log_token_usage(
     tracer: AgentTracer,
     ai_msg: BaseMessage,
@@ -468,11 +519,15 @@ def _log_token_usage(
     """Extracts and logs prompt token counts, cached token hits (`cache_read`), output tokens, and estimated USD cost from an AIMessage."""
     usage = getattr(ai_msg, "usage_metadata", None)
     if not isinstance(usage, dict):
-        return {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "cost_usd": 0.0}
+        return {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0, "cost_usd": 0.0}
     in_tok = int(usage.get("input_tokens", 0) or 0)
     out_tok = int(usage.get("output_tokens", 0) or 0)
     details = usage.get("input_token_details") or {}
     cached_tok = int(details.get("cache_read", 0) or 0) if isinstance(details, dict) else 0
+    # `output_token_details.reasoning` is already included in `out_tok` by LangChain's Gemini/Anthropic adapters;
+    # log it separately for observability without adding it to `out_tok` (prevents double-counting cost).
+    out_details = usage.get("output_token_details") or {}
+    reasoning_tok = int(out_details.get("reasoning", 0) or 0) if isinstance(out_details, dict) else 0
     cost_usd = calculate_token_cost(
         input_tokens=in_tok,
         output_tokens=out_tok,
@@ -482,22 +537,27 @@ def _log_token_usage(
     )
     if in_tok or out_tok:
         cache_pct = int((cached_tok / in_tok) * 100) if in_tok > 0 else 0
+        reasoning_suffix = f" ({reasoning_tok:,} reasoning)" if reasoning_tok > 0 else ""
+        info_data: dict[str, Any] = {
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+            "cached_tokens": cached_tok,
+            "cache_pct": cache_pct,
+            "cost_usd": cost_usd,
+            "model_name": model_name,
+            "model_tier": tier,
+        }
+        if reasoning_tok > 0:
+            info_data["reasoning_tokens"] = reasoning_tok
         tracer.info(
-            f"Tokens: {in_tok:,} in ({cached_tok:,} cached, {cache_pct}%) | {out_tok:,} out · ~${cost_usd:.4f}",
-            data={
-                "input_tokens": in_tok,
-                "output_tokens": out_tok,
-                "cached_tokens": cached_tok,
-                "cache_pct": cache_pct,
-                "cost_usd": cost_usd,
-                "model_name": model_name,
-                "model_tier": tier,
-            },
+            f"Tokens: {in_tok:,} in ({cached_tok:,} cached, {cache_pct}%) | {out_tok:,} out{reasoning_suffix} · ~${cost_usd:.4f}",
+            data=info_data,
         )
     return {
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "cached_tokens": cached_tok,
+        "reasoning_tokens": reasoning_tok,
         "cost_usd": cost_usd,
     }
 
@@ -646,6 +706,7 @@ def _invoke_llm_with_resilience(
     # Bounded retry/self-healing state: each one-shot flag may fire at most once; rate_limit_attempts <= max_retries
     rate_limit_attempts = 0
     has_cleared_temp = False
+    has_cleared_thinking = False
     has_stripped_signatures = False
 
     while True:
@@ -676,6 +737,41 @@ def _invoke_llm_with_resilience(
                     tracer.info(
                         f"ℹ️ Model '{model_name}' deprecated custom temperature sampling. Cleared temperature parameter and retrying...",
                         data={"model": model_name, "model_tier": tier},
+                    )
+                    continue
+
+            # Dynamic Thinking Parameter Self-Healing:
+            # If an Anthropic/Gemini model variant rejects `thinking` (or `include_thoughts`), clear the parameter
+            # once from the active client (direct BaseChatModel or tool-bound RunnableBinding) and retry cleanly.
+            if (
+                not has_cleared_thinking
+                and not _is_invalid_signature_error(e)
+                and "thinking" in err_msg_lower
+                and any(
+                    tok in err_msg_lower
+                    for tok in (
+                        "not supported",
+                        "unsupported",
+                        "does not support",
+                        "not allowed",
+                        "invalid_request_error",
+                        "extra inputs",
+                        "unknown field",
+                    )
+                )
+            ):
+                cleared_thinking_now = False
+                if hasattr(llm, "thinking") and getattr(llm, "thinking", None) is not None:
+                    llm.thinking = None
+                    cleared_thinking_now = True
+                if hasattr(llm, "bound") and hasattr(llm.bound, "thinking") and getattr(llm.bound, "thinking", None) is not None:
+                    llm.bound.thinking = None
+                    cleared_thinking_now = True
+                if cleared_thinking_now:
+                    has_cleared_thinking = True
+                    tracer.info(
+                        f"ℹ️ Model '{model_name}' rejected thinking parameter. Cleared thinking configuration and retrying...",
+                        data={"model": model_name, "model_tier": tier, "self_healed": "thinking"},
                     )
                     continue
 
@@ -949,6 +1045,12 @@ def spawn_subagent(
             )
             usage_stats = _log_token_usage(local_tracer, ai_msg, model_name=sub_model_name, tier=effective_tier)
             cumulative_input_tokens += int(usage_stats.get("input_tokens", 0) or 0)
+            thinking_text = extract_message_thinking(ai_msg)
+            if thinking_text:
+                local_tracer.llm_thinking(
+                    thinking_text,
+                    metadata={"turn": turn_idx, "model_tier": effective_tier, "model_name": sub_model_name},
+                )
             sub_messages.append(ai_msg)
 
             if not getattr(ai_msg, "tool_calls", None):
@@ -997,6 +1099,17 @@ def spawn_subagent(
                     max_retries=settings.ai_max_retries,
                 )
                 _log_token_usage(local_tracer, final_ai_msg, model_name=sub_model_name, tier=effective_tier)
+                final_thinking = extract_message_thinking(final_ai_msg)
+                if final_thinking:
+                    local_tracer.llm_thinking(
+                        final_thinking,
+                        metadata={
+                            "turn": turn_idx + 1,
+                            "budget_reached": True,
+                            "model_tier": effective_tier,
+                            "model_name": sub_model_name,
+                        },
+                    )
                 final_text = extract_message_text(final_ai_msg).strip() or (
                     f"Subagent #{serial} reached {budget_reason} without returning synthesis text."
                 )
@@ -1548,6 +1661,14 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
 
     # Log input tokens, cached prompt tokens (`cache_read`), output tokens, and estimated cost to console and SSE trace bus
     _log_token_usage(nexus_tracer, response, model_name=active_model_name, tier=effective_tier)
+
+    # Emit visible model thinking/reasoning summary (when returned by Gemini/Anthropic) before tool calls or final text
+    thinking_text = extract_message_thinking(response)
+    if thinking_text:
+        nexus_tracer.llm_thinking(
+            thinking_text,
+            metadata={"model_tier": effective_tier, "model_name": active_model_name},
+        )
 
     # Refresh HITL execution provenance so any tool calls executed next by `traced_tool_node` record exact session/agent metadata
     set_hitl_execution_context(

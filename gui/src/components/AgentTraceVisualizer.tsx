@@ -12,6 +12,7 @@ export const TRACE_ICONS: Record<string, string> = {
   agent_start: "▶",
   agent_end: "■",
   llm_call: "🤖",
+  llm_thinking: "🧠",
   llm_response: "💬",
   tool_call: "🔧",
   tool_result: "✅",
@@ -355,6 +356,12 @@ function TraceStepCard({
       : typeof data.context === "string"
         ? data.context
         : null;
+  const fullLlmThinking =
+    typeof data.thinking === "string"
+      ? data.thinking
+      : evt.type === "llm_thinking" && evt.message
+        ? evt.message
+        : null;
   const fullLlmResponse =
     typeof data.response === "string" ? data.response : null;
 
@@ -384,6 +391,7 @@ function TraceStepCard({
     toolResult ||
     toolError ||
     fullTaskPrompt ||
+    fullLlmThinking ||
     fullLlmResponse
   );
 
@@ -552,6 +560,18 @@ function TraceStepCard({
               <pre className="p-2.5 rounded-lg bg-rose-950/30 border border-rose-500/30 text-rose-200 font-mono text-[0.72rem] leading-relaxed whitespace-pre-wrap break-words">
                 {toolError}
               </pre>
+            </div>
+          )}
+
+          {/* Full Model Reasoning / Thinking Summary */}
+          {fullLlmThinking && (
+            <div>
+              <div className="text-[0.65rem] font-mono uppercase tracking-wider text-amber-300/90 mb-1">
+                Model Reasoning ({fullLlmThinking.length.toLocaleString()} chars):
+              </div>
+              <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/20 text-text-primary">
+                <MarkdownMessage content={fullLlmThinking} openInNewTab={true} />
+              </div>
             </div>
           )}
 

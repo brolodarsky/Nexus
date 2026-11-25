@@ -418,6 +418,8 @@ export default function AuditPage() {
                   ) : (
                     activeSnapshot.subagents.map((sub, idx) => {
                       const theme = AGENT_THEME[sub.color] ?? AGENT_THEME.magenta;
+                      // Filter per-turn thinking trace events emitted by this subagent for direct audit visibility
+                      const thinkingSteps = (sub.steps ?? []).filter((s) => s.type === "llm_thinking");
                       return (
                         <div
                           key={sub.agent_id ?? idx}
@@ -459,6 +461,30 @@ export default function AuditPage() {
                               {sub.task_prompt}
                             </pre>
                           </div>
+
+                          {/* Subagent Natural-Language Reasoning Steps */}
+                          {thinkingSteps.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="text-[0.65rem] font-mono uppercase tracking-wider text-amber-300/90">
+                                Subagent Reasoning ({thinkingSteps.length}):
+                              </div>
+                              {thinkingSteps.map((step, stepIdx) => {
+                                const stepData = (step.data ?? {}) as Record<string, unknown>;
+                                const thoughtText =
+                                  typeof stepData.thinking === "string"
+                                    ? stepData.thinking
+                                    : step.message;
+                                return (
+                                  <div
+                                    key={step.id ?? stepIdx}
+                                    className="p-3.5 rounded-xl bg-amber-500/5 border border-amber-500/20 text-text-primary text-xs"
+                                  >
+                                    <MarkdownMessage content={thoughtText} />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
 
                           {/* Tool Invocations inside this Subagent */}
                           {sub.tool_calls && sub.tool_calls.length > 0 && (

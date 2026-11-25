@@ -637,3 +637,64 @@ def test_subagent_input_token_budget_triggers_tool_free_synthesis(monkeypatch: p
     # Turn 1 = 600 tokens (< 1000) -> tool ran; Turn 2 = 1200 tokens (>= 1000) -> jumped straight to sub_base_llm
     assert tool_exec_count == 1
     assert invoked_llms == [mock_bound_llm, mock_bound_llm, mock_base_llm]
+
+
+def test_agent_tracer_and_log_run_preserve_llm_thinking(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify AgentTracer.llm_thinking emits lossless thinking events and log_run preserves them + reasoning_tokens."""
+    monkeypatch.setattr("nexus.core.run_logger.RUNS_DIR", tmp_path)
+
+    emitted: list[dict] = []
+    unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-think-audit")
+    tok = set_trace_thread_id("conv-think-audit")
+    try:
+        root_tracer = AgentTracer("Head Agent", color="cyan", agent_id="nexus", parent_id=None)
+        sub_tracer = AgentTracer("Subagent #1 (low)", color="magenta", agent_id="subagent-1", parent_id="nexus")
+
+        # Blank thinking strings are ignored
+        root_tracer.llm_thinking("   ")
+        assert len(emitted) == 0
+
+        long_thought = "Analyze files carefully. " * 30
+        root_tracer.llm_thinking(long_thought, metadata={"model_name": "gemini-4-argon", "model_tier": "strong"})
+        sub_tracer.agent_start("Starting subtask", metadata={"task_prompt": "Inspect log", "model_tier": "low"})
+        sub_tracer.llm_thinking("Subagent thought step 1", metadata={"turn": 1, "model_name": "gemini-3.8-flash"})
+        sub_tracer.info(
+            "Tokens: 500 in (0 cached, 0%) | 150 out (90 reasoning) · ~$0.0009",
+            data={
+                "input_tokens": 500,
+                "output_tokens": 150,
+                "cached_tokens": 0,
+                "reasoning_tokens": 90,
+                "cost_usd": 0.000938,
+                "model_name": "gemini-3.8-flash",
+                "model_tier": "low",
+            },
+        )
+        sub_tracer.llm_response("Subagent findings")
+        sub_tracer.agent_end("Done")
+    finally:
+        reset_trace_thread_id(tok)
+        unsub()
+
+    root_think_evt = next(e for e in emitted if e["type"] == "llm_thinking" and e["agent_id"] == "nexus")
+    assert root_think_evt["data"]["thinking"] == long_thought
+    assert root_think_evt["message"] == long_thought
+
+    run_path = log_run(
+        agent_name="nexus",
+        query="Audit reasoning logs",
+        response="All set.",
+        thread_id="conv-think-audit",
+        trace_events=emitted,
+        metadata={"model_tier": "strong", "model_name": "gemini-4-argon"},
+    )
+    saved = json.loads(run_path.read_text(encoding="utf-8"))
+    assert any(e["type"] == "llm_thinking" and e["data"]["thinking"] == long_thought for e in saved["trace_events"])
+    assert len(saved["subagents"]) == 1
+    assert any(
+        s["type"] == "llm_thinking" and s["data"]["thinking"] == "Subagent thought step 1"
+        for s in saved["subagents"][0]["steps"]
+    )
+    assert saved["metadata"]["token_usage"]["output_tokens"] == 150
+    assert saved["metadata"]["token_usage"]["reasoning_tokens"] == 90
+

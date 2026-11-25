@@ -81,6 +81,7 @@ def log_run(
     total_in_tokens = 0
     total_out_tokens = 0
     total_cached_tokens = 0
+    total_reasoning_tokens = 0
 
     for evt in events_list:
         evt_type = evt.get("type")
@@ -91,13 +92,16 @@ def log_run(
         in_tok = 0
         out_tok = 0
         cached_tok = 0
+        reasoning_tok = 0
         if evt_type == "info" and isinstance(evt_data, dict) and ("input_tokens" in evt_data or "output_tokens" in evt_data):
             in_tok = int(evt_data.get("input_tokens", 0) or 0)
             out_tok = int(evt_data.get("output_tokens", 0) or 0)
             cached_tok = int(evt_data.get("cached_tokens", 0) or 0)
+            reasoning_tok = int(evt_data.get("reasoning_tokens", 0) or 0)
             total_in_tokens += in_tok
             total_out_tokens += out_tok
             total_cached_tokens += cached_tok
+            total_reasoning_tokens += reasoning_tok
 
         # Group isolated subagent lifecycles by their unique agent_id (or agent label for legacy traces)
         is_sub = str(evt_agent_id).startswith("subagent") or str(evt.get("agent", "")).lower().startswith("subagent")
@@ -215,7 +219,7 @@ def log_run(
     )
 
     if total_in_tokens or total_out_tokens:
-        merged_metadata["token_usage"] = {
+        token_usage_summary: dict[str, Any] = {
             "input_tokens": total_in_tokens,
             "output_tokens": total_out_tokens,
             "cached_tokens": total_cached_tokens,
@@ -223,6 +227,9 @@ def log_run(
             "cost_usd": total_run_cost,
             "cache_savings_usd": total_cache_savings,
         }
+        if total_reasoning_tokens > 0:
+            token_usage_summary["reasoning_tokens"] = total_reasoning_tokens
+        merged_metadata["token_usage"] = token_usage_summary
 
     snapshot = {
         "run_id": run_id,

@@ -927,5 +927,149 @@ def test_run_nexus_agent_with_trace_invalid_signature_diagnostic_message(monkeyp
     assert res["confidence"] == 0.0
 
 
+def test_get_chat_model_enables_thinking_for_gemini_and_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify get_chat_model configures Gemini include_thoughts and Anthropic adaptive thinking with overrides."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    monkeypatch.setenv("AI_PROVIDER", "gemini")
+
+    # Gemini defaults to include_thoughts=True, overridable per call or via AI_INCLUDE_THOUGHTS
+    gem_default = get_chat_model(tier="strong")
+    assert getattr(gem_default, "include_thoughts", None) is True
+
+    gem_disabled = get_chat_model(tier="low", include_thoughts=False)
+    assert getattr(gem_disabled, "include_thoughts", None) is False
+
+    # Anthropic 5.5 models enable summarized adaptive thinking and 16384 max_tokens floor without temperature
+    for claude_model in ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"):
+        ant_llm = get_chat_model(tier=claude_model)
+        assert getattr(ant_llm, "thinking", None) == {"type": "adaptive", "display": "summarized"}
+        assert getattr(ant_llm, "max_tokens", None) == 16384
+        assert getattr(ant_llm, "temperature", None) is None
+
+    # Legacy Anthropic 4.5 models keep standard non-thinking behavior
+    legacy_ant = get_chat_model(tier="claude-sonnet-4-5")
+    assert getattr(legacy_ant, "thinking", None) is None
+    assert getattr(legacy_ant, "temperature", None) == 0.0
+
+    # Global .env toggle AI_INCLUDE_THOUGHTS=false disables thinking on both Gemini and Anthropic 5.5
+    monkeypatch.setenv("AI_INCLUDE_THOUGHTS", "false")
+    assert getattr(get_chat_model(tier="strong"), "include_thoughts", None) is False
+    opus_off = get_chat_model(tier="claude-opus-5-5")
+    assert getattr(opus_off, "thinking", None) is None
+    assert getattr(opus_off, "temperature", None) is None
+
+
+def test_extract_message_thinking_and_call_model_telemetry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify extract_message_thinking extracts thoughts read-only and call_model emits llm_thinking without double-counting cost."""
+    from nexus.agent.graph import extract_message_text, extract_message_thinking
+    from nexus.core.cost import calculate_token_cost
+    from nexus.core.trace import trace_bus, set_trace_thread_id, reset_trace_thread_id
+
+    anth_msg = AIMessage(
+        content=[
+            {"type": "thinking", "thinking": "Step 1: inspect Vault.\n\nStep 2: synthesize.", "signature": "sig_a"},
+            {"type": "redacted_thinking", "data": "encrypted_blob"},
+            {"type": "text", "text": "Final user answer."},
+        ],
+        usage_metadata={
+            "input_tokens": 1000,
+            "output_tokens": 350,
+            "total_tokens": 1350,
+            "input_token_details": {"cache_read": 500},
+            "output_token_details": {"reasoning": 200},
+        },
+        response_metadata={"model_provider": "anthropic", "model_name": "claude-opus-5-5"},
+    )
+    assert extract_message_thinking(anth_msg) == "Step 1: inspect Vault.\n\nStep 2: synthesize."
+    assert extract_message_text(anth_msg) == "Final user answer."
+    # Original message content and signatures remain untouched
+    assert anth_msg.content[0]["signature"] == "sig_a"
+    assert extract_message_thinking(None) == ""
+    assert extract_message_thinking(AIMessage(content="Plain text")) == ""
+
+    # Multi-block Gemini/OpenAI reasoning extraction
+    gem_msg = AIMessage(
+        content=[
+            {"type": "thinking", "thinking": "First thought", "signature": "g1"},
+            {"type": "thinking", "thinking": "Second thought", "signature": "g2"},
+            {"type": "text", "text": "Reply", "extras": {"signature": "g3"}},
+        ]
+    )
+    assert extract_message_thinking(gem_msg) == "First thought\n\nSecond thought"
+    assert extract_message_text(gem_msg) == "Reply"
+
+    # Verify call_model emits llm_thinking before llm_response and logs reasoning_tokens without inflating cost
+    emitted: list[dict] = []
+    unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="t_think")
+    tok = set_trace_thread_id("t_think")
+
+    mock_llm = MagicMock()
+    mock_bound = MagicMock()
+    mock_llm.bind_tools.return_value = mock_bound
+    mock_bound.invoke.return_value = anth_msg
+    monkeypatch.setattr("nexus.agent.graph.get_chat_model", lambda tier=None, temperature=0.0: mock_llm)
+
+    try:
+        call_model(
+            {"messages": [HumanMessage(content="Explain architecture")]},
+            config={"configurable": {"thread_id": "t_think", "conversation_id": "t_think", "model_tier": "claude-opus-5-5"}},
+        )
+    finally:
+        reset_trace_thread_id(tok)
+        unsub()
+
+    types = [e["type"] for e in emitted]
+    assert "llm_thinking" in types
+    assert types.index("llm_thinking") < types.index("llm_response")
+
+    think_evt = next(e for e in emitted if e["type"] == "llm_thinking")
+    assert think_evt["data"]["thinking"] == "Step 1: inspect Vault.\n\nStep 2: synthesize."
+
+    info_evt = next(e for e in emitted if e["type"] == "info" and "reasoning_tokens" in (e.get("data") or {}))
+    assert info_evt["data"]["output_tokens"] == 350
+    assert info_evt["data"]["reasoning_tokens"] == 200
+    expected_cost = calculate_token_cost(
+        input_tokens=1000,
+        output_tokens=350,
+        cached_tokens=500,
+        model_name="claude-opus-5-5",
+        tier="strong",
+    )
+    assert info_evt["data"]["cost_usd"] == expected_cost
+    assert "200 reasoning" in info_evt["message"]
+
+
+def test_invoke_llm_with_resilience_thinking_unsupported_self_heals() -> None:
+    """Verify _invoke_llm_with_resilience clears thinking and retries once when an API rejects thinking."""
+    mock_llm = MagicMock()
+    mock_llm.thinking = {"type": "adaptive", "display": "summarized"}
+    expected_response = AIMessage(content="Recovered without thinking")
+
+    seen_thinking = []
+
+    def fake_invoke(_msgs):
+        seen_thinking.append(mock_llm.thinking)
+        if len(seen_thinking) == 1:
+            raise Exception("400 invalid_request_error: `thinking` is not supported for this model.")
+        return expected_response
+
+    mock_llm.invoke.side_effect = fake_invoke
+    tracer = MagicMock()
+    res = _invoke_llm_with_resilience(
+        llm=mock_llm,
+        messages=[HumanMessage(content="Hello")],
+        tracer=tracer,
+        thread_ids=["t_think_heal"],
+        model_name="claude-haiku-5-5",
+        tier="low",
+    )
+    assert res == expected_response
+    assert mock_llm.thinking is None
+    assert len(seen_thinking) == 2
+    tracer.info.assert_called_once()
+
+
+
 
 

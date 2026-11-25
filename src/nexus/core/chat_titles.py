@@ -297,7 +297,8 @@ def auto_generate_title_sync(
             from nexus.core.constants import get_chat_model
             from nexus.agent.graph import extract_message_text
 
-            chat_model = get_chat_model(tier="low", temperature=0.2)
+            # Disable visible thinking overhead for short 3-6 word background title generation
+            chat_model = get_chat_model(tier="low", temperature=0.2, include_thoughts=False)
             prompt = _build_title_prompt(
                 first_user_msg,
                 first_assistant_msg,
@@ -431,7 +432,8 @@ async def auto_generate_title_async(
             from nexus.core.constants import get_chat_model
             from nexus.agent.graph import extract_message_text
 
-            chat_model = get_chat_model(tier="low", temperature=0.2)
+            # Disable visible thinking overhead for short 3-6 word background title generation
+            chat_model = get_chat_model(tier="low", temperature=0.2, include_thoughts=False)
             prompt = _build_title_prompt(
                 first_user_msg,
                 first_assistant_msg,

@@ -12,6 +12,7 @@ export interface TraceEvent {
   | "agent_start"   // Agent began execution with initial context
   | "agent_end"     // Agent completed its graph cycle
   | "llm_call"      // Agent dispatched a prompt to the LLM
+  | "llm_thinking"  // Model internal reasoning summary emitted before tool calls or final answer
   | "llm_response"  // LLM returned text or tool invocation request
   | "tool_call"     // Graph invoked a specific Python tool with arguments
   | "tool_result"   // Tool returned stdout/data payload

@@ -236,6 +236,22 @@ class AgentTracer:
         self._print("🤖", "Calling LLM...")
         self._emit("llm_call", "Calling LLM...", metadata)
 
+    # `thinking_text: str` is the untruncated natural-language reasoning summary extracted from an AIMessage.
+    # `metadata: Optional[dict[str, Any]]` optionally carries turn/model telemetry (e.g. `model_tier`, `model_name`, `turn`).
+    def llm_thinking(self, thinking_text: str, metadata: Optional[dict[str, Any]] = None):
+        """Traces the model's natural-language thinking/reasoning summary losslessly to trace_bus with a bounded stdout preview."""
+        if not thinking_text or not thinking_text.strip():
+            return
+        # Bound stdout preview to 300 chars so multi-paragraph thinking blocks do not flood terminal scrollback
+        terminal_preview = (
+            thinking_text if len(thinking_text) <= 300 else f"{thinking_text[:300]}… ({len(thinking_text):,} chars)"
+        )
+        self._print("🧠", f"{DIM}{terminal_preview}{RESET}")
+        payload: dict[str, Any] = {"thinking": thinking_text}
+        if metadata:
+            payload.update(metadata)
+        self._emit("llm_thinking", thinking_text, payload)
+
     def llm_response(self, full_text: str = "", metadata: Optional[dict[str, Any]] = None):
         """Traces the receipt of text or tool calls back from the language model without truncation."""
         if full_text:

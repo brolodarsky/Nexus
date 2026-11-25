@@ -39,8 +39,14 @@ class EngineSettings(BaseSettings):
     # - ai_request_timeout: HTTP request timeout in seconds (default 300s / 5 minutes) passed to provider chat clients.
     #   Deep reasoning models (`gemini-4-argon` / thinking mode) require ample headroom for complex multi-turn synthesis.
     # - ai_max_retries: Maximum automatic retry attempts on transient HTTP/gRPC errors (e.g. 504 DEADLINE_EXCEEDED, 429, 503).
+    # - ai_include_thoughts: Enables visible thought/reasoning summaries for Gemini (`include_thoughts=True`) and Anthropic
+    #   adaptive thinking models (`thinking={"type": "adaptive", "display": "summarized"}`) for audit & Thinking Panel visibility.
+    # - anthropic_thinking_max_tokens: Explicit `max_tokens` floor when Anthropic adaptive thinking is active so reasoning
+    #   tokens do not starve final text/tool output against LangChain's 4096 fallback ceiling on newer Claude 5.5 profiles.
     ai_request_timeout: int = 300
     ai_max_retries: int = 3
+    ai_include_thoughts: bool = True
+    anthropic_thinking_max_tokens: int = 16384
     # Wall-clock execution timeouts (seconds) preventing hung external sockets/APIs from freezing worker threads:
     # - nexus_tool_timeout: Maximum wait for a single non-subagent tool batch (e.g. fetch_emails, web_search, CLI tools).
     # - nexus_subagent_timeout: Maximum total wall-clock budget for a single `spawn_subagent` worker loop.
