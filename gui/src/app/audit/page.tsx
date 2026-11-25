@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useDeferredValue } from "react";
 import MarkdownMessage from "@/components/MarkdownMessage";
 import { AgentGraphView, AGENT_THEME, formatHeaderArgValue } from "@/components/AgentTraceVisualizer";
+import { formatShortCallId } from "@/lib/traceToolPairing";
 import { getAgentRuns, getAgentRun } from "@/lib/api";
 import type { RunSummary, RunSnapshot } from "@/lib/api";
 
@@ -518,11 +519,21 @@ export default function AuditPage() {
                                         ) : null}
                                         <span className="text-text-muted">)</span>
                                       </div>
-                                      {tc.timestamp && (
-                                        <span className="text-text-muted text-[0.65rem]">
-                                          {new Date(tc.timestamp).toLocaleTimeString()}
-                                        </span>
-                                      )}
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        {tc.call_id && (
+                                          <span
+                                            className="px-1.5 py-0.5 rounded bg-bg-tertiary/70 border border-border-subtle text-text-muted text-[0.62rem]"
+                                            title={`Call ID: ${tc.call_id}`}
+                                          >
+                                            #{formatShortCallId(tc.call_id)}
+                                          </span>
+                                        )}
+                                        {tc.timestamp && (
+                                          <span className="text-text-muted text-[0.65rem]">
+                                            {new Date(tc.timestamp).toLocaleTimeString()}
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                     {tc.args && Object.keys(tc.args).length > 0 && (
                                       <div>

@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import type { TraceEvent } from "@/lib/api";
 import { getMessageTrace } from "@/lib/api/agents";
 import MarkdownMessage from "@/components/MarkdownMessage";
+import { buildToolCallPairMap, type ToolCallPairInfo } from "@/lib/traceToolPairing";
 
 // ── Icon & Color Maps ────────────────────────────────────────────────────────
 
@@ -322,11 +323,23 @@ function TraceStepCard({
   index,
   forceExpanded,
   expandVersion,
+  pairInfo,
+  isLive,
+  onJumpToStep,
+  isHighlighted,
+  jumpExpandNonce,
+  cardRef,
 }: {
   evt: TraceEvent;
   index: number;
   forceExpanded?: boolean;
   expandVersion?: number;
+  pairInfo?: ToolCallPairInfo;          // Bidirectional pairing metadata linking tool_call <-> tool_result/tool_error
+  isLive?: boolean;                     // Distinguishes live streaming pending calls from finished runs
+  onJumpToStep?: (targetIndex: number) => void; // Callback to scroll to, auto-expand, and flash the paired step
+  isHighlighted?: boolean;              // True briefly after jumping to draw focus to the target card
+  jumpExpandNonce?: number;             // Incremented when jumped to; triggers auto-expand even if clicked repeatedly
+  cardRef?: (el: HTMLDivElement | null) => void; // Ref callback registering this card's DOM node in TraceStepList
 }) {
   // isOpen: controls individual disclosure of this specific step card's payload body; defaults to false (collapsed by default)
   const [isOpen, setIsOpen] = useState(false);
@@ -337,6 +350,13 @@ function TraceStepCard({
       queueMicrotask(() => setIsOpen(forceExpanded));
     }
   }, [forceExpanded, expandVersion]);
+
+  // Auto-expand this card whenever a counterpart step jumps to it (queued via microtask to satisfy React 19 lint rules)
+  useEffect(() => {
+    if (jumpExpandNonce && jumpExpandNonce > 0) {
+      queueMicrotask(() => setIsOpen(true));
+    }
+  }, [jumpExpandNonce]);
 
   const icon = TRACE_ICONS[evt.type] ?? "·";
   const theme = AGENT_THEME[evt.color ?? "cyan"] ?? AGENT_THEME.white;
@@ -373,6 +393,34 @@ function TraceStepCard({
     return match ? match[1].trim() : null;
   }, [toolArgs, evt.type, evt.message]);
 
+  // Propagate tool name & arguments from the paired `tool_call` so `tool_result` / `tool_error` headers show full signatures
+  const effectiveToolName = toolName ?? pairInfo?.toolName ?? null;
+  const effectiveArgs =
+    toolArgs && Object.keys(toolArgs).length > 0
+      ? toolArgs
+      : (pairInfo?.callArgs ?? null);
+  const effectiveLegacyArgs = legacyArgsStr ?? pairInfo?.legacyArgsStr ?? null;
+  const counterpartIdx = pairInfo?.counterpartIndex ?? null;
+  const canJumpToCounterpart = Boolean(counterpartIdx !== null && onJumpToStep);
+
+  // Build descriptive hover tooltip summarizing call_id, counterpart step, execution duration, and output size
+  const jumpTargetLabel =
+    pairInfo?.counterpartRole === "call"
+      ? `Tool Call (Step #${(counterpartIdx ?? 0) + 1})`
+      : pairInfo?.isError
+        ? `Tool Error (Step #${(counterpartIdx ?? 0) + 1})`
+        : `Tool Result (Step #${(counterpartIdx ?? 0) + 1})`;
+  const badgeTitle = [
+    pairInfo?.callId ? `Call ID: ${pairInfo.callId}` : null,
+    counterpartIdx !== null ? `Click to jump to ${jumpTargetLabel}` : null,
+    pairInfo?.durationLabel ? `Duration: ${pairInfo.durationLabel}` : null,
+    pairInfo?.resultCharCount != null
+      ? `Output: ${pairInfo.resultCharCount.toLocaleString()} chars`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" • ");
+
   // agentId: Unique machine/DAG identifier for the agent (e.g. "nexus", "subagent-1", "subagent-2")
   // Resolves explicit `evt.agent_id` first, falling back to heuristic parsing for legacy historical traces
   const agentId =
@@ -403,9 +451,49 @@ function TraceStepCard({
     })
     : "";
 
+  const highlightClasses = isHighlighted
+    ? evt.type === "tool_error"
+      ? "ring-2 ring-rose-400/80 border-rose-400 shadow-[0_0_20px_rgba(251,113,133,0.28)]"
+      : "ring-2 ring-accent-cyan/80 border-accent-cyan shadow-[0_0_20px_rgba(56,189,248,0.28)]"
+    : theme.border;
+
+  const signatureContent = effectiveToolName ? (
+    <>
+      <span className="text-accent-cyan font-semibold shrink-0">
+        {effectiveToolName}
+      </span>
+      <span className="text-text-muted">(</span>
+      {effectiveArgs && Object.keys(effectiveArgs).length > 0 ? (
+        Object.entries(effectiveArgs).map(([key, val], idx, arr) => (
+          <span key={key} className="inline-flex items-baseline">
+            <span className="text-cyan-300/80 font-medium">{key}</span>
+            <span className="text-text-muted">=</span>
+            <span
+              className="text-text-primary"
+              title={typeof val === "string" ? val : JSON.stringify(val, null, 2)}
+            >
+              {formatHeaderArgValue(val)}
+            </span>
+            {idx < arr.length - 1 && (
+              <span className="text-text-muted mr-1.5">,</span>
+            )}
+          </span>
+        ))
+      ) : effectiveLegacyArgs ? (
+        <span className="text-text-primary" title={effectiveLegacyArgs}>
+          {effectiveLegacyArgs.length > 100
+            ? `${effectiveLegacyArgs.slice(0, 100)}…`
+            : effectiveLegacyArgs}
+        </span>
+      ) : null}
+      <span className="text-text-muted">)</span>
+    </>
+  ) : null;
+
   return (
     <div
-      className={`rounded-lg border ${theme.border} bg-bg-primary/60 p-2.5 transition-colors`}
+      ref={cardRef}
+      className={`rounded-lg border ${highlightClasses} bg-bg-primary/60 p-2.5 transition-all duration-300`}
     >
       {/* Header bar for the step: clicking toggles payload disclosure if structured data exists */}
       <div
@@ -432,36 +520,25 @@ function TraceStepCard({
             {evt.type}
           </span>
 
-          {/* Tool Call signature and parameters in header */}
-          {toolName ? (
-            <div className="inline-flex items-baseline gap-0.5 flex-wrap min-w-0">
-              <span className="text-accent-cyan font-semibold shrink-0">
-                {toolName}
-              </span>
-              <span className="text-text-muted">(</span>
-              {toolArgs && Object.keys(toolArgs).length > 0 ? (
-                Object.entries(toolArgs).map(([key, val], idx, arr) => (
-                  <span key={key} className="inline-flex items-baseline">
-                    <span className="text-cyan-300/80 font-medium">{key}</span>
-                    <span className="text-text-muted">=</span>
-                    <span
-                      className="text-text-primary"
-                      title={typeof val === "string" ? val : JSON.stringify(val, null, 2)}
-                    >
-                      {formatHeaderArgValue(val)}
-                    </span>
-                    {idx < arr.length - 1 && (
-                      <span className="text-text-muted mr-1.5">,</span>
-                    )}
-                  </span>
-                ))
-              ) : legacyArgsStr ? (
-                <span className="text-text-primary" title={legacyArgsStr}>
-                  {legacyArgsStr.length > 100 ? `${legacyArgsStr.slice(0, 100)}…` : legacyArgsStr}
-                </span>
-              ) : null}
-              <span className="text-text-muted">)</span>
-            </div>
+          {/* Tool Call signature and parameters in header (clickable to jump when paired) */}
+          {effectiveToolName ? (
+            canJumpToCounterpart ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onJumpToStep!(counterpartIdx!);
+                }}
+                title={badgeTitle || `Jump to ${jumpTargetLabel}`}
+                className="text-left inline-flex items-baseline gap-0.5 flex-wrap min-w-0 rounded px-1 -mx-1 hover:bg-accent-cyan/10 hover:underline decoration-accent-cyan/60 underline-offset-2 transition-colors cursor-pointer"
+              >
+                {signatureContent}
+              </button>
+            ) : (
+              <div className="inline-flex items-baseline gap-0.5 flex-wrap min-w-0">
+                {signatureContent}
+              </div>
+            )
           ) : (
             !hasStructuredPayload && (
               <span className="text-text-primary whitespace-pre-wrap break-words">
@@ -469,6 +546,54 @@ function TraceStepCard({
               </span>
             )
           )}
+
+          {/* Bidirectional pairing badge: short call_id, counterpart step jump link, and elapsed duration */}
+          {canJumpToCounterpart && pairInfo ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onJumpToStep!(counterpartIdx!);
+              }}
+              title={badgeTitle}
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[0.62rem] font-mono transition-colors cursor-pointer shrink-0 ${
+                pairInfo.role === "call"
+                  ? pairInfo.isError
+                    ? "bg-rose-500/15 border-rose-500/35 text-rose-300 hover:bg-rose-500/25"
+                    : "bg-emerald-500/15 border-emerald-500/35 text-emerald-300 hover:bg-emerald-500/25"
+                  : "bg-cyan-500/15 border-cyan-500/35 text-cyan-300 hover:bg-cyan-500/25"
+              }`}
+            >
+              {pairInfo.shortCallId && (
+                <span className="text-text-muted">#{pairInfo.shortCallId}</span>
+              )}
+              <span>
+                {pairInfo.role === "call"
+                  ? pairInfo.isError
+                    ? `↳ Error #${counterpartIdx! + 1}`
+                    : `↳ Result #${counterpartIdx! + 1}`
+                  : `↰ Call #${counterpartIdx! + 1}`}
+              </span>
+              {pairInfo.durationLabel && (
+                <span className="text-text-secondary">· {pairInfo.durationLabel}</span>
+              )}
+            </button>
+          ) : pairInfo?.role === "call" ? (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border-subtle/70 bg-bg-tertiary/60 text-text-muted text-[0.62rem] font-mono shrink-0"
+              title={pairInfo.callId ? `Call ID: ${pairInfo.callId}` : undefined}
+            >
+              {pairInfo.shortCallId && <span>#{pairInfo.shortCallId}</span>}
+              <span>{isLive ? "⏳ pending" : "no result"}</span>
+            </span>
+          ) : pairInfo?.shortCallId ? (
+            <span
+              className="inline-flex items-center px-1.5 py-0.5 rounded border border-border-subtle/70 bg-bg-tertiary/60 text-text-muted text-[0.62rem] font-mono shrink-0"
+              title={pairInfo.callId ? `Call ID: ${pairInfo.callId}` : undefined}
+            >
+              #{pairInfo.shortCallId}
+            </span>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -587,6 +712,24 @@ function TraceStepCard({
               </div>
             </div>
           )}
+
+          {/* Expanded Footer Jump Action: allows jumping straight to the paired end after inspecting arguments/output */}
+          {canJumpToCounterpart && pairInfo && (
+            <div className="pt-1 flex justify-end">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onJumpToStep!(counterpartIdx!);
+                }}
+                className="text-[0.65rem] font-mono px-2 py-1 rounded-md border border-border-subtle bg-bg-secondary/80 text-accent-cyan hover:bg-accent-cyan/15 hover:border-accent-cyan/40 transition-colors cursor-pointer"
+              >
+                {pairInfo.role === "call"
+                  ? `Jump to ${pairInfo.isError ? "Tool Error" : "Tool Result"} (#${counterpartIdx! + 1}${pairInfo.durationLabel ? ` · ${pairInfo.durationLabel}` : ""}) ↓`
+                  : `↑ Jump to Tool Call (#${counterpartIdx! + 1}${pairInfo.durationLabel ? ` · ${pairInfo.durationLabel}` : ""})`}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -599,6 +742,95 @@ function TraceStepCard({
     </div>
   );
 }
+
+/**
+ * TraceStepList — Memoized chronological step container that pairs tool calls with their results/errors
+ * and manages local DOM refs for collision-free smooth scrolling, auto-expansion, and highlight flashing.
+ */
+const TraceStepList = memo(function TraceStepList({
+  events,
+  isLive = false,
+  forceExpanded,
+  expandVersion,
+}: {
+  events: TraceEvent[];
+  isLive?: boolean;
+  forceExpanded?: boolean;
+  expandVersion?: number;
+}) {
+  // Build bidirectional `tool_call <-> tool_result/tool_error` index once per events array update
+  const pairMap = useMemo(() => buildToolCallPairMap(events), [events]);
+
+  // Per-list DOM ref map keyed by step index (avoids global HTML `id` collisions across multiple chat drawers)
+  const cardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks which card was jumped to plus an incrementing nonce so repeated jumps re-open a collapsed card
+  const [jumpExpandTarget, setJumpExpandTarget] = useState<{
+    index: number;
+    nonce: number;
+  } | null>(null);
+
+  // Clear pending highlight timeout on unmount so stale timers never fire after navigation
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+      }
+    };
+  }, []);
+
+  const registerCardRef = useCallback((idx: number, el: HTMLDivElement | null) => {
+    if (el) {
+      cardRefs.current.set(idx, el);
+    } else {
+      cardRefs.current.delete(idx);
+    }
+  }, []);
+
+  const handleJumpToStep = useCallback((targetIndex: number) => {
+    setJumpExpandTarget((prev) => ({
+      index: targetIndex,
+      nonce: (prev?.nonce ?? 0) + 1,
+    }));
+    setHighlightedIndex(targetIndex);
+
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+    }
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedIndex(null);
+    }, 1800);
+
+    // Wait one animation frame so auto-expansion layout settles before scrolling smoothly to the counterpart
+    requestAnimationFrame(() => {
+      const el = cardRefs.current.get(targetIndex);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, []);
+
+  return (
+    <div className="space-y-2">
+      {events.map((evt, idx) => (
+        <TraceStepCard
+          key={evt.id ? `${evt.id}-${idx}` : `step-${idx}`}
+          evt={evt}
+          index={idx}
+          forceExpanded={forceExpanded}
+          expandVersion={expandVersion}
+          pairInfo={pairMap.get(idx)}
+          isLive={isLive}
+          onJumpToStep={handleJumpToStep}
+          isHighlighted={highlightedIndex === idx}
+          jumpExpandNonce={
+            jumpExpandTarget?.index === idx ? jumpExpandTarget.nonce : undefined
+          }
+          cardRef={(el) => registerCardRef(idx, el)}
+        />
+      ))}
+    </div>
+  );
+});
 
 // ── Visual DAG Graph View & Node Inspector ───────────────────────────────────
 
@@ -913,17 +1145,12 @@ export const AgentGraphView = memo(function AgentGraphView({
                 <span>{expandAllSteps ? "Collapse All" : "Expand All"}</span>
               </button>
             </div>
-            <div className="space-y-2">
-              {selectedNode.events.map((evt, idx) => (
-                <TraceStepCard
-                  key={evt.id ? `${evt.id}-${idx}` : `step-${idx}`}
-                  evt={evt}
-                  index={idx}
-                  forceExpanded={expandAllSteps}
-                  expandVersion={expandVersion}
-                />
-              ))}
-            </div>
+            <TraceStepList
+              events={selectedNode.events}
+              isLive={isLive}
+              forceExpanded={expandAllSteps}
+              expandVersion={expandVersion}
+            />
           </div>
 
           {/* 3. Final Synthesis Returned by this Agent (Collapsible card, collapsed by default) */}
@@ -983,15 +1210,12 @@ export const AgentGraphView = memo(function AgentGraphView({
               <span>{expandAllSteps ? "Collapse All" : "Expand All"}</span>
             </button>
           </div>
-          {events.map((evt, idx) => (
-            <TraceStepCard
-              key={evt.id ? `${evt.id}-${idx}` : `step-${idx}`}
-              evt={evt}
-              index={idx}
-              forceExpanded={expandAllSteps}
-              expandVersion={expandVersion}
-            />
-          ))}
+          <TraceStepList
+            events={events}
+            isLive={isLive}
+            forceExpanded={expandAllSteps}
+            expandVersion={expandVersion}
+          />
         </div>
       )}
     </div>
@@ -1231,17 +1455,12 @@ export const ThinkingPanel = memo(function ThinkingPanel({
               )}
 
               {viewMode === "steps" && (
-                <div className="space-y-2">
-                  {activeEvents.map((evt, i) => (
-                    <TraceStepCard
-                      key={evt.id ? `${evt.id}-${i}` : `step-${i}`}
-                      evt={evt}
-                      index={i}
-                      forceExpanded={expandAllSteps}
-                      expandVersion={expandVersion}
-                    />
-                  ))}
-                </div>
+                <TraceStepList
+                  events={activeEvents}
+                  isLive={isLive}
+                  forceExpanded={expandAllSteps}
+                  expandVersion={expandVersion}
+                />
               )}
 
               {viewMode === "raw" && (
