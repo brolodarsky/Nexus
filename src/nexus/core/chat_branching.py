@@ -18,14 +18,16 @@ And supports `distill_and_merge_branch`:
 from typing import Any, Optional
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from nexus.agent.graph import extract_message_text, nexus_graph
+from nexus.agent.graph import extract_message_text
 from nexus.core.chats_db import (
+    append_thread_lc_messages,
     create_branch_conversation,
     create_conversation,
     get_chat_history,
     get_conversation,
     log_message,
     mark_branch_merged,
+    replace_thread_lc_messages,
 )
 from nexus.core.constants import get_chat_model, resolve_model_config
 from nexus.core.conversation_cache import format_captures_manifest, inherit_captures
@@ -84,16 +86,16 @@ def _derive_branch_title(parent_title: str, focal_messages: list[dict], explicit
 
 def seed_langgraph_thread_from_messages(conversation_id: str, messages: list[dict]) -> None:
     """
-    Seeds the LangGraph SQLite checkpointer (`memory.sqlite`) for `conversation_id` with initial messages.
+    Seeds the canonical `thread_messages` history in `chats.db` for `conversation_id` with initial messages.
 
     Why this exists:
-      When a child branch is created in `chats.db`, LangGraph's `SqliteSaver` has no checkpoint for the new
-      `conversation_id` yet. Calling `nexus_graph.update_state` writes an initial checkpoint containing the
-      seeded `HumanMessage` / `AIMessage` history so the very first turn in the child branch has full context.
+      When a child branch is created in `chats.db`, it has no `thread_messages` rows yet. Seeding the
+      canonical `HumanMessage` / `AIMessage` history ensures Turn 1 in the child branch has full context
+      without relying on a separate `memory.sqlite` checkpointer.
 
     Parameters:
       conversation_id: UUID of the target conversation thread.
-      messages: Chronological list of `chats.db` message dicts to seed into LangGraph state.
+      messages: Chronological list of `chats.db` message dicts to seed into canonical state.
     """
     if not conversation_id or not messages:
         return
@@ -122,17 +124,16 @@ def seed_langgraph_thread_from_messages(conversation_id: str, messages: list[dic
             ),
         )
 
-    config = {"configurable": {"thread_id": conversation_id, "conversation_id": conversation_id}}
     try:
-        nexus_graph.update_state(config, {"messages": lc_messages})
+        replace_thread_lc_messages(conversation_id, lc_messages, turn_id="branch_seed")
     except Exception:
-        # Non-fatal guard: if checkpointer state update fails, chat history in chats.db remains authoritative
+        # Non-fatal guard: if seeding fails, `load_thread_lc_messages` still falls back to `messages`
         pass
 
 
 def append_message_to_langgraph_thread(conversation_id: str, role: str, content: str) -> None:
     """
-    Appends a single message (such as a Distilled Branch Merge) into an existing thread's LangGraph state.
+    Appends a single message (such as a Distilled Branch Merge) into an existing thread's canonical `thread_messages` state.
 
     Parameters:
       conversation_id: UUID of the target parent conversation thread.
@@ -143,9 +144,8 @@ def append_message_to_langgraph_thread(conversation_id: str, role: str, content:
         return
 
     lc_msg: BaseMessage = HumanMessage(content=content) if role == "user" else AIMessage(content=content)
-    config = {"configurable": {"thread_id": conversation_id, "conversation_id": conversation_id}}
     try:
-        nexus_graph.update_state(config, {"messages": [lc_msg]})
+        append_thread_lc_messages(conversation_id, [lc_msg], turn_id="branch_merge")
     except Exception:
         pass
 

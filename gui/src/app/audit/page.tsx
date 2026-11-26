@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useDeferredValue } from "react";
 import MarkdownMessage from "@/components/MarkdownMessage";
-import { AgentGraphView, AGENT_THEME, formatHeaderArgValue } from "@/components/AgentTraceVisualizer";
+import { AgentGraphView, AGENT_THEME, formatHeaderArgValue, formatCharsAndTokens } from "@/components/AgentTraceVisualizer";
 import { formatShortCallId } from "@/lib/traceToolPairing";
 import { getAgentRuns, getAgentRun } from "@/lib/api";
 import type { RunSummary, RunSnapshot } from "@/lib/api";
@@ -167,7 +167,7 @@ export default function AuditPage() {
             </div>
           ) : filteredRuns.length === 0 ? (
             <div className="text-center py-12 px-4 opacity-60 text-xs text-text-muted">
-              No matching run snapshots found in `logs/runs/`.
+              No matching run snapshots found in telemetry database.
             </div>
           ) : (
             filteredRuns.map((r) => {
@@ -456,7 +456,7 @@ export default function AuditPage() {
                           {/* Full Untruncated Subagent Prompt */}
                           <div>
                             <div className="text-[0.65rem] font-mono uppercase tracking-wider text-accent-cyan mb-1">
-                              Full Subagent Task Prompt (Untruncated, {sub.task_prompt?.length.toLocaleString()} chars):
+                              Full Subagent Task Prompt (Untruncated, {formatCharsAndTokens(sub.task_prompt?.length ?? 0)}):
                             </div>
                             <pre className="p-3.5 rounded-xl bg-bg-primary/90 border border-border-subtle text-text-primary font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
                               {sub.task_prompt}
@@ -548,7 +548,7 @@ export default function AuditPage() {
                                     {tc.result && (
                                       <div>
                                         <div className="text-[0.62rem] font-mono uppercase tracking-wider text-emerald-400 mb-0.5">
-                                          Output ({tc.result.length.toLocaleString()} chars):
+                                          Output ({formatCharsAndTokens(tc.result.length)}):
                                         </div>
                                         <pre className="p-2 rounded bg-bg-secondary text-text-primary font-mono text-[0.7rem] whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
                                           {tc.result}
@@ -565,7 +565,7 @@ export default function AuditPage() {
                           {sub.final_response && (
                             <div>
                               <div className="text-[0.65rem] font-mono uppercase tracking-wider text-emerald-400 mb-1">
-                                Synthesis Returned to Orchestrator ({sub.final_response.length.toLocaleString()} chars):
+                                Synthesis Returned to Orchestrator ({formatCharsAndTokens(sub.final_response.length)}):
                               </div>
                               <div className="p-4 rounded-xl bg-bg-primary/90 border border-emerald-500/30 text-text-primary text-xs">
                                 <MarkdownMessage content={sub.final_response} />

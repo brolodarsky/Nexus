@@ -6,13 +6,13 @@ immediately (flush=True) with a colored prefix so you can visually scan the
 scrollback and see which agent did what.
 
 Additionally, all trace events are pushed to a global TraceEventBus so they
-can be streamed to the GUI via SSE. Console printing and event bus emission
-are independent — disabling one does not affect the other.
+can be streamed to the GUI via SSE and persisted live to SQLite (`trace_events`).
+Console printing and event bus emission are independent — disabling one does not affect the other.
 
 No external dependencies — uses ANSI escape codes directly.
 """
 
-# contextvars: Provides execution-context-local variable storage for thread_id / conversation_id isolation across concurrent agent runs
+# contextvars: Provides execution-context-local variable storage for thread_id / conversation_id / run_id isolation
 import contextvars
 # threading: Used for thread synchronization (Lock) to prevent race conditions during concurrent subscriber registration
 import threading
@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 # Callable: Type hint for functions passed as arguments (callbacks)
 # Optional, Any, Tuple: Type hints for nullable values, arbitrary dictionary payloads, and subscriber tuples
 from typing import Any, Callable, Optional, Tuple
+
+from nexus.core.secret_scrubber import approx_token_count
 
 # ── ANSI Escape Codes ────────────────────────────────────────────────────────
 # ANSI sequences (ESC [ <code > m) instruct terminal emulators to change text color and style
@@ -49,6 +51,14 @@ RESULT_TRUNCATE_LEN = 100000
 _current_trace_thread_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "_current_trace_thread_id", default=None
 )
+# Context variable holding the currently active `runs.run_id` so emitted events stream live into SQLite
+_current_trace_run_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "_current_trace_run_id", default=None
+)
+
+# Thread-safe fallback lookup mapping `thread_id -> run_id` for worker threads where contextvars weren't copied
+_thread_run_lock = threading.Lock()
+_thread_run_ids: dict[str, str] = {}
 
 
 def set_trace_thread_id(thread_id: Optional[str]) -> contextvars.Token:
@@ -64,6 +74,48 @@ def get_trace_thread_id() -> Optional[str]:
 def reset_trace_thread_id(token: contextvars.Token) -> None:
     """Restores the prior conversation/thread UUID in the execution context using the supplied Token."""
     _current_trace_thread_id.reset(token)
+
+
+def set_trace_run_id(run_id: Optional[str]) -> contextvars.Token:
+    """Sets the active `runs.run_id` in the execution context, returning a reset Token."""
+    return _current_trace_run_id.set(run_id)
+
+
+def get_trace_run_id() -> Optional[str]:
+    """Retrieves the active `runs.run_id` from the execution context, or None."""
+    return _current_trace_run_id.get()
+
+
+def reset_trace_run_id(token: contextvars.Token) -> None:
+    """Restores the prior `runs.run_id` in the execution context using the supplied Token."""
+    _current_trace_run_id.reset(token)
+
+
+def bind_thread_run_id(thread_id: Optional[str], run_id: Optional[str]) -> None:
+    """Associate a `thread_id` with its active `run_id` so spawned worker threads inherit live DB persistence."""
+    if not thread_id or not run_id:
+        return
+    with _thread_run_lock:
+        _thread_run_ids[thread_id] = run_id
+
+
+def unbind_thread_run_id(thread_id: Optional[str]) -> None:
+    """Clear the `thread_id -> run_id` mapping once a turn completes or aborts."""
+    if not thread_id:
+        return
+    with _thread_run_lock:
+        _thread_run_ids.pop(thread_id, None)
+
+
+def resolve_thread_run_id(thread_id: Optional[str]) -> Optional[str]:
+    """Look up the active `run_id` from contextvars first, then thread mapping."""
+    ctx_run = _current_trace_run_id.get()
+    if ctx_run:
+        return ctx_run
+    if thread_id:
+        with _thread_run_lock:
+            return _thread_run_ids.get(thread_id)
+    return None
 
 
 # ── Trace Event Bus (Pub/Sub Pattern) ────────────────────────────────────────
@@ -146,9 +198,9 @@ trace_bus = TraceEventBus()
 class AgentTracer:
     """
     Dual-output telemetry logger for an individual agent or isolated subagent instance.
-    1. Terminal Output: Formats and prints ANSI-colored logs to stdout with full fidelity.
-    2. SSE Event Stream: Emits 100% lossless, untruncated structured event dictionaries to the global trace_bus,
-       enriched with hierarchical `agent_id` and `parent_id` lineage for DAG/Graph visualization.
+    1. Terminal Output: Formats and prints ANSI-colored logs to stdout with bounded previews.
+    2. SSE & SQLite Stream: Emits lossless, content-addressed structured event dictionaries to `trace_bus`,
+       enriched with hierarchical `agent_id`, `parent_id`, and `run_id` lineage.
     """
 
     # Optional[str] allows parent_id to be None for root agents (NexusAgent) or set to the parent's agent_id for subagents
@@ -195,6 +247,10 @@ class AgentTracer:
             or get_trace_thread_id()
             or (data.get("thread_id") if isinstance(data, dict) else None)
         )
+        effective_run_id = (
+            (data.get("run_id") if isinstance(data, dict) else None)
+            or resolve_thread_run_id(effective_thread_id)
+        )
         event: dict[str, Any] = {
             "id": str(uuid.uuid4())[:8],
             "step": self._step_counter,
@@ -207,6 +263,8 @@ class AgentTracer:
             "message": message,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        if effective_run_id:
+            event["run_id"] = effective_run_id
         if data is not None:
             event["data"] = data
         trace_bus.emit(event)
@@ -217,7 +275,12 @@ class AgentTracer:
         """Signals that an agent has begun its execution loop, preserving the full untruncated prompt/context."""
         self._step_counter = 0
         msg = f"Starting — {context}" if context else "Starting..."
-        self._print("▶", f"{BOLD}{msg}{RESET}")
+        terminal_preview = (
+            msg
+            if len(msg) <= 500
+            else f"{msg[:500]}… ({len(msg):,} chars · ~{approx_token_count(len(msg)):,} tok)"
+        )
+        self._print("▶", f"{BOLD}{terminal_preview}{RESET}")
         payload: dict[str, Any] = {"context": context}
         if metadata:
             payload.update(metadata)
@@ -233,8 +296,16 @@ class AgentTracer:
 
     def llm_call(self, metadata: Optional[dict[str, Any]] = None):
         """Traces the dispatch of a prompt payload to the language model."""
-        self._print("🤖", "Calling LLM...")
-        self._emit("llm_call", "Calling LLM...", metadata)
+        ctx_summary = metadata.get("context_summary") if isinstance(metadata, dict) else None
+        if isinstance(ctx_summary, dict) and ctx_summary.get("approx_tokens"):
+            msg = (
+                f"Calling LLM (ctx: {int(ctx_summary.get('total_chars', 0)):,} chars · "
+                f"~{int(ctx_summary['approx_tokens']):,} tok across {int(ctx_summary.get('section_count', 0))} blocks)..."
+            )
+        else:
+            msg = "Calling LLM..."
+        self._print("🤖", msg)
+        self._emit("llm_call", msg, metadata)
 
     # `thinking_text: str` is the untruncated natural-language reasoning summary extracted from an AIMessage.
     # `metadata: Optional[dict[str, Any]]` optionally carries turn/model telemetry (e.g. `model_tier`, `model_name`, `turn`).
@@ -244,7 +315,9 @@ class AgentTracer:
             return
         # Bound stdout preview to 300 chars so multi-paragraph thinking blocks do not flood terminal scrollback
         terminal_preview = (
-            thinking_text if len(thinking_text) <= 300 else f"{thinking_text[:300]}… ({len(thinking_text):,} chars)"
+            thinking_text
+            if len(thinking_text) <= 300
+            else f"{thinking_text[:300]}… ({len(thinking_text):,} chars · ~{approx_token_count(len(thinking_text)):,} tok)"
         )
         self._print("🧠", f"{DIM}{terminal_preview}{RESET}")
         payload: dict[str, Any] = {"thinking": thinking_text}
@@ -278,7 +351,7 @@ class AgentTracer:
             val_str = str(v)
             # Bound key-value previews in the string summary while preserving full data in payload['args']
             if len(val_str) > 150:
-                pairs.append(f"{k}={val_str[:150]}… ({len(val_str):,} chars)")
+                pairs.append(f"{k}={val_str[:150]}… ({len(val_str):,} chars · ~{approx_token_count(len(val_str)):,} tok)")
             else:
                 pairs.append(f"{k}={val_str}")
         args_str = f"({', '.join(pairs)})" if pairs else ""
@@ -295,13 +368,20 @@ class AgentTracer:
         while formatting a bounded summary string in `message` and terminal output to prevent multi-megabyte string duplication.
         """
         # Bounded terminal output prevents multi-hundred-kilobyte file dumps from choking stdout / console buffers
-        terminal_preview = result if len(result) <= 300 else f"{result[:300]}… ({len(result):,} chars)"
+        tok_est = approx_token_count(len(result))
+        terminal_preview = (
+            result if len(result) <= 300 else f"{result[:300]}… ({len(result):,} chars · ~{tok_est:,} tok)"
+        )
         self._print("✅", f"{tool_name} → {DIM}{terminal_preview}{RESET}")
         payload: dict[str, Any] = {"tool": tool_name, "result": result}
         if call_id:
             payload["call_id"] = call_id
         # Bounded summary message: prevents storing the exact same multi-hundred KB payload twice in the same JSON event
-        summary_msg = f"{tool_name} → ({len(result):,} chars output)" if len(result) > 200 else f"{tool_name} → {result}"
+        summary_msg = (
+            f"{tool_name} → ({len(result):,} chars output · ~{tok_est:,} tok)"
+            if len(result) > 200
+            else f"{tool_name} → {result}"
+        )
         self._emit("tool_result", summary_msg, payload)
 
     def tool_error(self, tool_name: str, error: str, call_id: Optional[str] = None):
@@ -341,5 +421,3 @@ def _truncate(text: str, max_len: int = RESULT_TRUNCATE_LEN) -> str:
     Returns the full text untouched so no trace steps or tool outputs are cut off.
     """
     return text.strip() if isinstance(text, str) else str(text)
-
-

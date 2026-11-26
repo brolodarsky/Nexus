@@ -19,11 +19,9 @@ or restricting directory access, Nexus runs ONE universal agent design (`NexusAg
 import contextvars
 # concurrent.futures: Enables bounded wall-clock timeouts on tool batches without blocking on hung sockets
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-# sqlite3: Standard library SQL engine used for local thread checkpointing (`SqliteSaver`)
 import json
 # re: Regular expressions used to parse provider error payloads (e.g. `retryDelay` intervals on 429)
 import re
-import sqlite3
 # threading: Provides thread-safe locking (`Lock`) for assigning unique serial numbers to parallel subagents
 import threading
 import time
@@ -46,8 +44,6 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 # RunnableConfig: LangChain configuration dictionary carrying per-invocation metadata (`thread_id`, `model_tier`)
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
-# SqliteSaver: LangGraph checkpointer that persists graph state snapshots across turns
-from langgraph.checkpoint.sqlite import SqliteSaver
 # LangGraph orchestration primitives:
 # - StateGraph: Directed graph orchestrating state transitions between Python nodes
 # - START / END: Virtual graph entry and terminal nodes
@@ -60,6 +56,10 @@ from langgraph.prebuilt import ToolNode
 from langchain_openai import ChatOpenAI
 
 from nexus.core.config import settings
+from nexus.core.context_telemetry import (
+    build_llm_call_manifest,
+    build_subagent_start_manifest,
+)
 from nexus.core.cost import calculate_token_cost
 from nexus.core.constants import (
     AI_MODEL_LOW,
@@ -85,6 +85,7 @@ from nexus.core.trace import (
     RESULT_TRUNCATE_LEN,
     AgentTracer,
     _truncate,
+    get_trace_run_id,
     reset_trace_thread_id,
     set_trace_thread_id,
 )
@@ -247,9 +248,7 @@ def _next_subagent_tracer(tier: str, thread_id: Optional[str] = None) -> tuple[i
     return serial, sub_id, tracer
 
 
-# ── Thread Cancellation Registry & Checkpoint Rollback (Stop & Revert) ───────
-MEMORY_DB_PATH = Path(__file__).parent / "memory.sqlite"
-
+# ── Thread Cancellation Registry (Stop & Revert) ───────────────────────────────
 # Thread-safe dictionary mapping active conversation UUIDs to cancellation events (`threading.Event`)
 _CANCEL_EVENTS: dict[str, threading.Event] = {}
 _CANCEL_LOCK = threading.Lock()
@@ -280,90 +279,6 @@ def is_thread_cancelled(thread_id: Optional[str]) -> bool:
     with _CANCEL_LOCK:
         event = _CANCEL_EVENTS.get(thread_id) or _CANCEL_EVENTS.get(root_thread)
         return event.is_set() if event else False
-
-
-def get_latest_checkpoint_id(thread_id: str) -> Optional[str]:
-    """Returns the most recent checkpoint_id for a given thread_id in `memory.sqlite`, or None if none exists."""
-    if not thread_id or not MEMORY_DB_PATH.exists():
-        return None
-    try:
-        with sqlite3.connect(MEMORY_DB_PATH, timeout=30.0) as check_conn:
-            check_conn.execute("PRAGMA journal_mode=WAL;")
-            check_conn.execute("PRAGMA busy_timeout=30000;")
-            cursor = check_conn.cursor()
-            cursor.execute(
-                "SELECT checkpoint_id FROM checkpoints WHERE thread_id = ? ORDER BY checkpoint_id DESC LIMIT 1",
-                (thread_id,),
-            )
-            row = cursor.fetchone()
-            return str(row[0]) if row else None
-    except Exception:
-        return None
-
-
-def rollback_checkpoints_for_thread(thread_id: str, pre_turn_checkpoint_id: Optional[str] = None) -> int:
-    """Rolls back LangGraph checkpointer SQLite database (`memory.sqlite`) to pre-turn state.
-
-    Ensures that conversation memory in LangGraph does not remember an aborted or reverted turn.
-
-    Parameters:
-      thread_id: Unique UUID string identifying the conversation thread.
-      pre_turn_checkpoint_id: Optional checkpoint ID captured immediately before this turn ran.
-
-    Returns:
-      Number of deleted checkpoint rows.
-    """
-    if not thread_id or not MEMORY_DB_PATH.exists():
-        return 0
-
-    deleted_checkpoints = 0
-    with sqlite3.connect(MEMORY_DB_PATH, timeout=30.0) as rollback_conn:
-        rollback_conn.execute("PRAGMA journal_mode=WAL;")
-        rollback_conn.execute("PRAGMA busy_timeout=30000;")
-        cursor = rollback_conn.cursor()
-
-        target_checkpoint_id = pre_turn_checkpoint_id
-        if target_checkpoint_id is None:
-            # Fallback inspection: find the most recent checkpoint with metadata.source == 'input'
-            cursor.execute(
-                """
-                SELECT checkpoint_id, parent_checkpoint_id, metadata
-                FROM checkpoints
-                WHERE thread_id = ?
-                ORDER BY checkpoint_id DESC
-                """,
-                (thread_id,),
-            )
-            rows = cursor.fetchall()
-            for cid, parent_id, meta_raw in rows:
-                try:
-                    meta = json.loads(meta_raw) if meta_raw else {}
-                except Exception:
-                    meta = {}
-                if meta.get("source") == "input":
-                    target_checkpoint_id = parent_id if parent_id else ""
-                    break
-
-        if target_checkpoint_id:
-            # Delete channel writes and checkpoints newer than target_checkpoint_id
-            cursor.execute(
-                "DELETE FROM writes WHERE thread_id = ? AND checkpoint_id > ?",
-                (thread_id, target_checkpoint_id),
-            )
-            cursor.execute(
-                "DELETE FROM checkpoints WHERE thread_id = ? AND checkpoint_id > ?",
-                (thread_id, target_checkpoint_id),
-            )
-            deleted_checkpoints = cursor.rowcount
-        else:
-            # First turn of the thread or no prior checkpoint exists: prune entire thread from checkpointer
-            cursor.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))
-            cursor.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
-            deleted_checkpoints = cursor.rowcount
-
-        rollback_conn.commit()
-
-    return deleted_checkpoints
 
 
 # ── State Schema ─────────────────────────────────────────────────────────────
@@ -975,20 +890,6 @@ def spawn_subagent(
     # Scope trace context variable so all subagent events and tool calls inherit the conversation UUID
     trace_token = set_trace_thread_id(parent_convo)
 
-    # Emit full, untruncated task_prompt so the Thinking Panel, Graph View, and Run Logs capture 100% of the prompt
-    local_tracer.agent_start(
-        f"Subtask #{serial} ({effective_tier} · {sub_model_name}): {task_prompt}",
-        metadata={
-            "serial": serial,
-            "subagent_id": sub_id,
-            "thread_id": parent_convo,
-            "model_tier": effective_tier,
-            "model_name": sub_model_name,
-            "task_prompt": task_prompt,
-            "context_files": list(context_files) if context_files else [],
-        },
-    )
-
     sub_thread_id = f"{parent_thread}:{sub_id}" if parent_thread else sub_id
     sub_ctx_token = set_hitl_execution_context(
         conversation_id=parent_convo,
@@ -1010,6 +911,18 @@ def spawn_subagent(
             auto_discover_section_instructions=True,
         )
         if hydration_error:
+            local_tracer.agent_start(
+                f"Subtask #{serial} ({effective_tier} · {sub_model_name}): {task_prompt}",
+                metadata={
+                    "serial": serial,
+                    "subagent_id": sub_id,
+                    "thread_id": parent_convo,
+                    "model_tier": effective_tier,
+                    "model_name": sub_model_name,
+                    "task_prompt": task_prompt,
+                    "context_files": list(context_files) if context_files else [],
+                },
+            )
             err_report = (
                 f"❌ Subagent #{serial} ({effective_tier} · {sub_model_name}) aborted before execution:\n\n"
                 f"{hydration_error}"
@@ -1034,8 +947,8 @@ def spawn_subagent(
 
         # Static subagent system prefix (no per-subagent serial numbers) so parallel and sequential subagents
         # share the exact same byte-identical prefix for Turn-1 KV prompt caching across Gemini and Anthropic.
-        sub_sys_content = (
-            f"{inject_root_instructions()}\n\n"
+        root_instructions = inject_root_instructions()
+        subagent_protocol = (
             "### SUBAGENT EXECUTION PROTOCOL\n"
             "You are an ephemeral, isolated Subagent worker spawned by the Supervisor (NexusAgent).\n"
             "1. Read any relevant `Section Instructions.md` and Vault notes needed to execute your assigned task thoroughly.\n"
@@ -1043,6 +956,33 @@ def spawn_subagent(
             "3. **Two-Phase Email Sweeps:** Call `fetch_emails(...)` with default metadata + snippets first (combining related terms with `OR` in one query), then pass ONLY the relevant `message_ids=[...]` to hydrate full bodies—skip newsletters and irrelevant hits.\n"
             "4. Return a concise, high-signal, grounded synthesis of your findings in your final response "
             "so the Supervisor can integrate your work directly."
+        )
+        sub_sys_content = f"{root_instructions}\n\n{subagent_protocol}"
+
+        # Build deduplicated SHA-256 context manifest after pre-hydration so `agent_start` captures the exact injected context
+        active_run_id = get_trace_run_id()
+        sub_manifest, sub_ctx_summary = build_subagent_start_manifest(
+            root_instructions=root_instructions,
+            subagent_protocol=subagent_protocol,
+            tools=CORE_TOOLS,
+            prehydrated_block=prehydrated_block,
+            task_prompt=task_prompt,
+            context_files=context_files,
+            run_id=active_run_id,
+        )
+        local_tracer.agent_start(
+            f"Subtask #{serial} ({effective_tier} · {sub_model_name}): {task_prompt}",
+            metadata={
+                "serial": serial,
+                "subagent_id": sub_id,
+                "thread_id": parent_convo,
+                "model_tier": effective_tier,
+                "model_name": sub_model_name,
+                "task_prompt": task_prompt,
+                "context_files": list(context_files) if context_files else [],
+                "context_manifest": sub_manifest,
+                "context_summary": sub_ctx_summary,
+            },
         )
 
         # Run ReAct loop until the subagent finishes tool calls or hits its turn / uncached-token budget cap
@@ -1073,7 +1013,20 @@ def spawn_subagent(
                 )
 
             turn_idx += 1
-            local_tracer.llm_call(metadata={"turn": turn_idx, "model_tier": effective_tier, "model_name": sub_model_name})
+            call_manifest, call_summary = build_llm_call_manifest(
+                messages=sub_messages,
+                tools=CORE_TOOLS,
+                run_id=active_run_id,
+            )
+            local_tracer.llm_call(
+                metadata={
+                    "turn": turn_idx,
+                    "model_tier": effective_tier,
+                    "model_name": sub_model_name,
+                    "context_manifest": call_manifest,
+                    "context_summary": call_summary,
+                }
+            )
             ai_msg = _invoke_llm_with_resilience(
                 llm=sub_llm,
                 messages=sub_messages,
@@ -1139,6 +1092,11 @@ def spawn_subagent(
                 sub_messages.extend(_build_budget_refusal_tool_messages(ai_msg, budget_reason))
                 cache_preserved = True
                 synth_turn = turn_idx + 1
+                synth_manifest, synth_summary = build_llm_call_manifest(
+                    messages=sub_messages,
+                    tools=CORE_TOOLS,
+                    run_id=active_run_id,
+                )
                 local_tracer.llm_call(
                     metadata={
                         "turn": synth_turn,
@@ -1146,6 +1104,8 @@ def spawn_subagent(
                         "model_name": sub_model_name,
                         "budget_synthesis": True,
                         "cache_preserved_synthesis": True,
+                        "context_manifest": synth_manifest,
+                        "context_summary": synth_summary,
                     }
                 )
                 final_ai_msg = _invoke_llm_with_resilience(
@@ -1175,6 +1135,11 @@ def spawn_subagent(
                     )
                     sub_messages.append(final_ai_msg)
                     synthesis_messages = _build_tool_free_synthesis_messages(sub_messages)
+                    fb_manifest, fb_summary = build_llm_call_manifest(
+                        messages=synthesis_messages,
+                        tools=None,
+                        run_id=active_run_id,
+                    )
                     local_tracer.llm_call(
                         metadata={
                             "turn": synth_turn,
@@ -1182,6 +1147,8 @@ def spawn_subagent(
                             "model_name": sub_model_name,
                             "budget_synthesis": True,
                             "cache_preserved_synthesis": False,
+                            "context_manifest": fb_manifest,
+                            "context_summary": fb_summary,
                         }
                     )
                     final_ai_msg = _invoke_llm_with_resilience(
@@ -1746,7 +1713,19 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     _active_turn_provider = active_provider
 
     # Resolve `get_chat_model(tier=requested_tier)` dynamically on each turn so UI model switches and `.env` edits apply immediately
-    nexus_tracer.llm_call(metadata={"model_tier": effective_tier, "model_name": active_model_name})
+    call_manifest, call_summary = build_llm_call_manifest(
+        messages=messages_for_llm,
+        tools=TOOLS,
+        run_id=get_trace_run_id(),
+    )
+    nexus_tracer.llm_call(
+        metadata={
+            "model_tier": effective_tier,
+            "model_name": active_model_name,
+            "context_manifest": call_manifest,
+            "context_summary": call_summary,
+        }
+    )
     active_llm = get_chat_model(tier=requested_tier, temperature=0.0)
     try:
         response = _invoke_llm_with_resilience(
@@ -1898,14 +1877,5 @@ workflow.add_edge(START, "agent")
 workflow.add_conditional_edges("agent", route_after_agent, {"tools": "tools", END: END})
 workflow.add_edge("tools", "agent")
 
-# 3. Persistent Checkpointer: Co-located SQLite database for multi-turn conversation state
-# `check_same_thread=False` allows FastAPI background worker threads to share the SQLite connection safely
-# `timeout=30.0` and Write-Ahead Logging (WAL) enable concurrent readers without blocking checkpoint writes
-db_path = MEMORY_DB_PATH
-conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
-conn.execute("PRAGMA journal_mode=WAL;")
-conn.execute("PRAGMA busy_timeout=30000;")
-memory = SqliteSaver(conn)
-
-# 4. Compile into executable stateful LangGraph runnable
-nexus_graph = workflow.compile(checkpointer=memory)
+# 3. Compile statelessly: durable multi-turn history lives canonically in `logs/chats.db` (`thread_messages`)
+nexus_graph = workflow.compile()

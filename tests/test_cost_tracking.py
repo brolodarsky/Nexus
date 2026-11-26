@@ -217,11 +217,8 @@ def test_calculate_token_cost_zero_tokens():
     assert cost == 0.0
 
 
-def test_log_run_persists_cost_and_subagent_breakdown(tmp_path, monkeypatch):
-    """Verifies log_run calculates and attaches cost_usd to the run snapshot and subagents."""
-    import nexus.core.run_logger as rl
-    monkeypatch.setattr(rl, "RUNS_DIR", tmp_path)
-
+def test_log_run_persists_cost_and_subagent_breakdown():
+    """Verifies log_run calculates and attaches cost_usd to the SQLite run snapshot and subagents."""
     trace_events = [
         # Root agent info
         {
@@ -254,7 +251,7 @@ def test_log_run_persists_cost_and_subagent_breakdown(tmp_path, monkeypatch):
         },
     ]
 
-    file_path = log_run(
+    run_id = log_run(
         agent_name="nexus",
         query="Test cost logging query",
         response="Test response",
@@ -262,9 +259,9 @@ def test_log_run_persists_cost_and_subagent_breakdown(tmp_path, monkeypatch):
         metadata={"model_tier": "strong", "model_name": "gemini-4-argon"},
     )
 
-    assert file_path.is_file()
-    with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    assert isinstance(run_id, str)
+    data = get_run(run_id)
+    assert data is not None
 
     # Validate root cost_usd field exists and is positive
     assert "cost_usd" in data

@@ -28,20 +28,20 @@ from nexus.api.routers.agents import (
     _active_runs_lock,
 )
 from nexus.agent.graph import (
-    MEMORY_DB_PATH,
-    get_latest_checkpoint_id,
     is_thread_cancelled,
     register_cancel_event,
-    rollback_checkpoints_for_thread,
     unregister_cancel_event,
 )
 import nexus.core.chats_db as chats_db
 from nexus.core.chats_db import (
+    append_thread_lc_messages,
     create_conversation,
     delete_conversation,
     get_chat_history,
+    load_thread_lc_messages,
     log_message,
     revert_last_turn,
+    start_run_record,
 )
 import nexus.core.hitl_queue as hitl_queue
 from nexus.core.hitl_queue import (
@@ -206,55 +206,59 @@ def test_checkpoint_cancellation_lifecycle(temp_conv):
     assert not is_thread_cancelled(temp_conv)
 
 
-def test_rollback_checkpoints_for_thread(temp_conv):
-    """Verify that rollback_checkpoints_for_thread prunes newer checkpoints and writes from memory.sqlite."""
-    if not MEMORY_DB_PATH.exists():
-        pytest.skip("memory.sqlite not present")
+def test_revert_last_turn_rolls_back_thread_messages_and_preserves_restored_images(
+    temp_conv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Verify revert_last_turn prunes canonical thread_messages + run telemetry while keeping restored upload files on disk."""
+    from langchain_core.messages import AIMessage, HumanMessage
 
-    try:
-        with sqlite3.connect(MEMORY_DB_PATH) as conn:
-            # Insert baseline checkpoint
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-                VALUES (?, '', 'cp-001', '', 'state', '{}', ?)
-                """,
-                (temp_conv, json.dumps({"source": "loop", "step": 1})),
-            )
-            # Insert turn 2 input checkpoint
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-                VALUES (?, '', 'cp-002', 'cp-001', 'state', '{}', ?)
-                """,
-                (temp_conv, json.dumps({"source": "input", "step": 2})),
-            )
-            # Insert turn 2 tool loop checkpoint
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-                VALUES (?, '', 'cp-003', 'cp-002', 'state', '{}', ?)
-                """,
-                (temp_conv, json.dumps({"source": "loop", "step": 3})),
-            )
-            conn.commit()
+    uploads_dir = tmp_path / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    img_file = uploads_dir / "keep_me.png"
+    img_file.write_bytes(b"fake-png-bytes")
+    monkeypatch.setattr(chats_db, "UPLOADS_DIR", uploads_dir)
 
-        # Rollback turn 2
-        deleted = rollback_checkpoints_for_thread(temp_conv, pre_turn_checkpoint_id="cp-001")
-        assert deleted >= 1
+    # Turn 1
+    log_message(role="user", content="Turn 1", conversation_id=temp_conv)
+    log_message(role="assistant", content="Reply 1", conversation_id=temp_conv, run_id="run_t1")
+    append_thread_lc_messages(
+        temp_conv,
+        [HumanMessage(content="Turn 1"), AIMessage(content="Reply 1")],
+        turn_id="run_t1",
+    )
 
-        with sqlite3.connect(MEMORY_DB_PATH) as conn:
-            remaining = conn.execute(
-                "SELECT checkpoint_id FROM checkpoints WHERE thread_id = ? ORDER BY checkpoint_id ASC",
-                (temp_conv,),
-            ).fetchall()
-            cids = [r[0] for r in remaining]
-            assert "cp-001" in cids
-            assert "cp-002" not in cids
-            assert "cp-003" not in cids
-    finally:
-        # Rollback all checkpoints for this temp thread to clean up even if assertions fail
-        rollback_checkpoints_for_thread(temp_conv, pre_turn_checkpoint_id=None)
+    # Turn 2 with uploaded image + run record
+    start_run_record(
+        run_id="run_t2",
+        thread_id=temp_conv,
+        query="Turn 2",
+        image_refs=["/api/agents/uploads/keep_me.png"],
+    )
+    log_message(
+        role="user",
+        content="Turn 2",
+        conversation_id=temp_conv,
+        images=["/api/agents/uploads/keep_me.png"],
+    )
+    log_message(role="assistant", content="Reply 2", conversation_id=temp_conv, run_id="run_t2")
+    append_thread_lc_messages(
+        temp_conv,
+        [HumanMessage(content="Turn 2"), AIMessage(content="Reply 2")],
+        turn_id="run_t2",
+        image_refs=["/api/agents/uploads/keep_me.png"],
+    )
+
+    revert_data = revert_last_turn(temp_conv)
+    assert revert_data is not None
+    assert revert_data["deleted_count"] == 2
+    assert revert_data["images"] == ["/api/agents/uploads/keep_me.png"]
+    # Restored image must remain on disk so the user can re-submit from composer
+    assert img_file.exists()
+
+    remaining_lc = load_thread_lc_messages(temp_conv)
+    assert len(remaining_lc) == 2
+    assert remaining_lc[0].content == "Turn 1"
+    assert remaining_lc[1].content == "Reply 1"
 
 
 def test_api_stop_and_revert_in_flight_run(client, temp_conv):

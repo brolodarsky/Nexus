@@ -12,36 +12,25 @@ import threading
 import pytest
 from pathlib import Path
 
-from nexus.agent.graph import MEMORY_DB_PATH, get_latest_checkpoint_id
-import nexus.core.chats_db as chats_db
 from nexus.core.chats_db import _get_conn as get_chats_conn, create_conversation, log_message, get_chat_history
+import nexus.core.chats_db as chats_db
 from nexus.core.hitl_queue import get_db_connection as get_hitl_conn, add_transaction, get_pending_transactions
 
 
 def test_chats_db_wal_mode_and_busy_timeout():
-    """Verify chats.db initializes with WAL mode and 30s busy timeout."""
+    """Verify chats.db initializes with WAL mode, foreign_keys=ON, and 30s busy timeout."""
     with get_chats_conn() as conn:
         journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0].upper()
         busy_timeout = conn.execute("PRAGMA busy_timeout;").fetchone()[0]
+        foreign_keys = conn.execute("PRAGMA foreign_keys;").fetchone()[0]
         assert journal_mode == "WAL"
         assert busy_timeout == 30000
+        assert foreign_keys == 1
 
 
 def test_hitl_db_wal_mode_and_busy_timeout():
     """Verify hitl.db initializes with WAL mode and 30s busy timeout."""
     with get_hitl_conn() as conn:
-        journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0].upper()
-        busy_timeout = conn.execute("PRAGMA busy_timeout;").fetchone()[0]
-        assert journal_mode == "WAL"
-        assert busy_timeout == 30000
-
-
-def test_memory_db_wal_mode_and_busy_timeout():
-    """Verify memory.sqlite checkpointer database operates in WAL mode with 30s busy timeout."""
-    if not MEMORY_DB_PATH.exists():
-        pytest.skip("memory.sqlite has not been initialized yet on this disk.")
-
-    with sqlite3.connect(MEMORY_DB_PATH, timeout=30.0) as conn:
         journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0].upper()
         busy_timeout = conn.execute("PRAGMA busy_timeout;").fetchone()[0]
         assert journal_mode == "WAL"

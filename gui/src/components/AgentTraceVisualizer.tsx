@@ -2,9 +2,27 @@
 
 import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import type { TraceEvent } from "@/lib/api";
-import { getMessageTrace } from "@/lib/api/agents";
+import {
+  getMessageTrace,
+  getTraceBlobContent,
+  getTraceBlobsBatch,
+  type ContextManifestEntry,
+  type ContextSummary,
+} from "@/lib/api/agents";
 import MarkdownMessage from "@/components/MarkdownMessage";
 import { buildToolCallPairMap, type ToolCallPairInfo } from "@/lib/traceToolPairing";
+
+// Deterministic character-to-token estimator matching backend `approx_token_count()` (ceil(chars / 4))
+export function estimateTokensFromChars(chars: number): number {
+  if (!Number.isFinite(chars) || chars <= 0) return 0;
+  return Math.ceil(chars / 4);
+}
+
+// Formats character length together with estimated token count (e.g. "31,424 chars · ~7,856 tok")
+export function formatCharsAndTokens(chars: number): string {
+  const safeChars = Number.isFinite(chars) && chars > 0 ? Math.floor(chars) : 0;
+  return `${safeChars.toLocaleString()} chars · ~${estimateTokensFromChars(safeChars).toLocaleString()} tok`;
+}
 
 // ── Icon & Color Maps ────────────────────────────────────────────────────────
 
@@ -89,6 +107,8 @@ export interface AgentGraphNode {
   color: string;                  // Theme color key ("cyan", "magenta", "yellow", etc.)
   modelTier?: string;             // Model tier ("low", "medium", "strong")
   taskPrompt: string;             // Full untruncated prompt or initial query context
+  contextManifest?: ContextManifestEntry[]; // Content-addressed boot manifest from `agent_start`
+  contextSummary?: ContextSummary;          // Total chars / ~tokens summary from `agent_start`
   finalResponse: string | null;   // Final output synthesis emitted by this agent
   status: "running" | "done" | "error";
   startedAt: string | null;
@@ -210,6 +230,12 @@ export function buildAgentExecutionGraph(events: TraceEvent[]): {
 
     // Enrich node metadata based on event type
     if (evt.type === "agent_start") {
+      if (Array.isArray(data.context_manifest)) {
+        node.contextManifest = data.context_manifest as ContextManifestEntry[];
+      }
+      if (data.context_summary && typeof data.context_summary === "object") {
+        node.contextSummary = data.context_summary as ContextSummary;
+      }
       const fullPromptFromData =
         typeof data.task_prompt === "string"
           ? data.task_prompt
@@ -318,6 +344,234 @@ export function formatHeaderArgValue(val: unknown, maxLen = 80): string {
   }
 }
 
+// Role badge styling lookup for folded `ContextManifestEntry` rows
+const MANIFEST_ROLE_BADGE: Record<string, string> = {
+  system: "bg-cyan-500/20 text-cyan-300 border-cyan-400/40",
+  protocol: "bg-indigo-500/20 text-indigo-300 border-indigo-400/40",
+  tools: "bg-amber-500/20 text-amber-300 border-amber-400/40",
+  prehydrated: "bg-emerald-500/20 text-emerald-300 border-emerald-400/40",
+  history: "bg-zinc-500/20 text-zinc-300 border-zinc-400/40",
+  prompt: "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-400/40",
+};
+
+/**
+ * ContextManifestInspector — Lazy-loaded, folded-by-default viewer for content-addressed `agent_start`
+ * and `llm_call` context injection manifests. Supports per-block lazy fetching (`GET /trace-blobs/{hash}`)
+ * and one-click `Summon Full Context` (`POST /trace-blobs/batch`) reconstruction.
+ */
+function ContextManifestInspector({
+  manifest,
+  summary,
+  title = "Injected Context",
+}: {
+  manifest: ContextManifestEntry[];
+  summary?: ContextSummary;
+  title?: string;
+}) {
+  const [openRows, setOpenRows] = useState<Record<number, boolean>>({});
+  const [loadedBlobs, setLoadedBlobs] = useState<Record<string, string>>({});
+  const [loadingHashes, setLoadingHashes] = useState<Record<string, boolean>>({});
+  const [blobErrors, setBlobErrors] = useState<Record<string, string>>({});
+  const [showFullContext, setShowFullContext] = useState(false);
+  const [loadingFull, setLoadingFull] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const totalChars = useMemo(
+    () =>
+      summary?.total_chars ??
+      manifest.reduce((acc, item) => acc + (item.chars || 0), 0),
+    [manifest, summary]
+  );
+
+  const toggleRow = async (idx: number, hash: string) => {
+    const nextOpen = !openRows[idx];
+    setOpenRows((prev) => ({ ...prev, [idx]: nextOpen }));
+    if (nextOpen && loadedBlobs[hash] === undefined && !loadingHashes[hash]) {
+      setLoadingHashes((prev) => ({ ...prev, [hash]: true }));
+      setBlobErrors((prev) => {
+        const copy = { ...prev };
+        delete copy[hash];
+        return copy;
+      });
+      try {
+        const text = await getTraceBlobContent(hash);
+        setLoadedBlobs((prev) => ({ ...prev, [hash]: text }));
+      } catch (err) {
+        setBlobErrors((prev) => ({
+          ...prev,
+          [hash]: err instanceof Error ? err.message : "Failed to load blob",
+        }));
+      } finally {
+        setLoadingHashes((prev) => ({ ...prev, [hash]: false }));
+      }
+    }
+  };
+
+  const assembleFullText = (blobsMap: Record<string, string>) =>
+    manifest
+      .map(
+        (entry, i) =>
+          `=== [${i + 1}/${manifest.length}] ${entry.label} (${formatCharsAndTokens(entry.chars)}) ===\n${
+            blobsMap[entry.hash] ?? loadedBlobs[entry.hash] ?? "(blob unavailable)"
+          }`
+      )
+      .join("\n\n");
+
+  const handleSummonFullContext = async () => {
+    if (showFullContext) {
+      setShowFullContext(false);
+      return;
+    }
+    const hashes = manifest.map((m) => m.hash).filter(Boolean);
+    const missing = hashes.filter((h) => loadedBlobs[h] === undefined);
+    if (missing.length > 0) {
+      setLoadingFull(true);
+      try {
+        const fetched = await getTraceBlobsBatch(hashes);
+        setLoadedBlobs((prev) => ({ ...prev, ...fetched }));
+      } catch (err) {
+        console.error("Failed to batch-load trace blobs:", err);
+      } finally {
+        setLoadingFull(false);
+      }
+    }
+    setShowFullContext(true);
+  };
+
+  const handleCopy = (key: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey((prev) => (prev === key ? null : prev)), 1500);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[0.65rem] font-mono uppercase tracking-wider text-accent-cyan flex items-center gap-1.5 flex-wrap">
+          <span>{title}</span>
+          <span className="text-text-muted font-normal normal-case">
+            ({manifest.length} block{manifest.length === 1 ? "" : "s"} · {formatCharsAndTokens(totalChars)})
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSummonFullContext();
+            }}
+            disabled={loadingFull}
+            className="text-[0.65rem] font-mono px-2 py-0.5 rounded border border-accent-cyan/40 bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            {loadingFull
+              ? "Summoning..."
+              : showFullContext
+                ? "Hide Full Context"
+                : "Summon Full Context"}
+          </button>
+          {showFullContext && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCopy("full", assembleFullText(loadedBlobs));
+              }}
+              className="text-[0.65rem] font-mono px-2 py-0.5 rounded border border-border-subtle bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+            >
+              {copiedKey === "full" ? "Copied!" : "Copy Full Context"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showFullContext && (
+        <pre className="p-3 rounded-lg bg-bg-secondary/95 border border-accent-cyan/35 text-text-primary font-mono text-[0.72rem] leading-relaxed whitespace-pre-wrap break-words max-h-[30rem] overflow-y-auto">
+          {assembleFullText(loadedBlobs)}
+        </pre>
+      )}
+
+      <div className="space-y-1">
+        {manifest.map((item, idx) => {
+          const isRowOpen = Boolean(openRows[idx]);
+          const badgeClass =
+            MANIFEST_ROLE_BADGE[item.role] ?? "bg-bg-tertiary text-text-secondary border-border-subtle";
+          const content = loadedBlobs[item.hash];
+          const isLoading = Boolean(loadingHashes[item.hash]);
+          const err = blobErrors[item.hash];
+
+          return (
+            <div
+              key={`${item.hash}-${idx}`}
+              className="rounded-lg border border-border-subtle/80 bg-bg-secondary/70 overflow-hidden"
+            >
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleRow(idx, item.hash);
+                }}
+                className="flex items-center justify-between gap-2 px-2.5 py-1.5 cursor-pointer select-none hover:bg-bg-tertiary/50 transition-colors font-mono text-[0.68rem]"
+              >
+                <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                  <span className="text-text-muted">{isRowOpen ? "▾" : "▸"}</span>
+                  <span className={`px-1.5 py-0.2 rounded border text-[0.6rem] uppercase font-semibold shrink-0 ${badgeClass}`}>
+                    {item.role}
+                  </span>
+                  <span className="text-text-primary font-medium truncate">
+                    {item.label}
+                  </span>
+                  {item.context_files && item.context_files.length > 0 && (
+                    <span className="text-[0.6rem] text-emerald-300/80">
+                      [{item.context_files.length} file{item.context_files.length === 1 ? "" : "s"}]
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0 text-[0.64rem] text-text-muted">
+                  <span>{formatCharsAndTokens(item.chars)}</span>
+                  <span className="opacity-60" title={`SHA-256: ${item.hash}`}>
+                    #{item.hash.slice(0, 7)}
+                  </span>
+                </div>
+              </div>
+
+              {isRowOpen && (
+                <div className="border-t border-border-subtle/60 p-2.5 bg-bg-primary/60 space-y-1.5">
+                  {isLoading ? (
+                    <div className="text-[0.68rem] font-mono text-text-muted animate-pulse">
+                      Fetching blob #{item.hash.slice(0, 8)}...
+                    </div>
+                  ) : err ? (
+                    <div className="text-[0.68rem] font-mono text-rose-300">
+                      Error loading blob: {err}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (content !== undefined) handleCopy(`row-${idx}`, content);
+                          }}
+                          className="text-[0.62rem] font-mono px-1.5 py-0.5 rounded bg-bg-tertiary text-text-secondary hover:text-text-primary cursor-pointer"
+                        >
+                          {copiedKey === `row-${idx}` ? "Copied!" : "Copy Block"}
+                        </button>
+                      </div>
+                      <pre className="p-2.5 rounded bg-bg-secondary/90 border border-border-subtle text-text-primary font-mono text-[0.72rem] leading-relaxed whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
+                        {content ?? ""}
+                      </pre>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function TraceStepCard({
   evt,
   index,
@@ -384,6 +638,13 @@ function TraceStepCard({
         : null;
   const fullLlmResponse =
     typeof data.response === "string" ? data.response : null;
+  const contextManifest = Array.isArray(data.context_manifest)
+    ? (data.context_manifest as ContextManifestEntry[])
+    : null;
+  const contextSummary =
+    data.context_summary && typeof data.context_summary === "object"
+      ? (data.context_summary as ContextSummary)
+      : undefined;
 
   // Extract legacy arguments string from message if structured data.args is missing in older traces
   const legacyArgsStr = useMemo(() => {
@@ -415,7 +676,7 @@ function TraceStepCard({
     counterpartIdx !== null ? `Click to jump to ${jumpTargetLabel}` : null,
     pairInfo?.durationLabel ? `Duration: ${pairInfo.durationLabel}` : null,
     pairInfo?.resultCharCount != null
-      ? `Output: ${pairInfo.resultCharCount.toLocaleString()} chars`
+      ? `Output: ${formatCharsAndTokens(pairInfo.resultCharCount)}`
       : null,
   ]
     .filter(Boolean)
@@ -438,6 +699,7 @@ function TraceStepCard({
     (toolArgs && Object.keys(toolArgs).length > 0) ||
     toolResult ||
     toolError ||
+    (contextManifest && contextManifest.length > 0) ||
     fullTaskPrompt ||
     fullLlmThinking ||
     fullLlmResponse
@@ -547,6 +809,13 @@ function TraceStepCard({
             )
           )}
 
+          {/* Compact wire-level context footprint badge on collapsed llm_call headers */}
+          {evt.type === "llm_call" && contextSummary && contextSummary.approx_tokens > 0 && (
+            <span className="px-1.5 py-0.2 rounded bg-accent-cyan/10 border border-accent-cyan/25 text-accent-cyan text-[0.62rem] font-mono shrink-0">
+              ctx: ~{contextSummary.approx_tokens.toLocaleString()} tok ({contextSummary.section_count} blocks)
+            </span>
+          )}
+
           {/* Bidirectional pairing badge: short call_id, counterpart step jump link, and elapsed duration */}
           {canJumpToCounterpart && pairInfo ? (
             <button
@@ -623,11 +892,24 @@ function TraceStepCard({
       {/* Full Uncut Body / Structured Payload */}
       {hasStructuredPayload && isOpen && (
         <div className="mt-2 pt-2 border-t border-border-subtle/50 space-y-2 text-xs">
-          {/* Agent Start / Subagent Task Prompt */}
-          {fullTaskPrompt && (
+          {/* Content-Addressed Context Injection Manifest (agent_start & llm_call) */}
+          {contextManifest && contextManifest.length > 0 && (
+            <ContextManifestInspector
+              manifest={contextManifest}
+              summary={contextSummary}
+              title={
+                evt.type === "llm_call"
+                  ? "Wire-Level LLM Input Context"
+                  : "Full Injected Agent Context"
+              }
+            />
+          )}
+
+          {/* Legacy Agent Start / Subagent Task Prompt fallback when no content-addressed manifest exists */}
+          {(!contextManifest || contextManifest.length === 0) && fullTaskPrompt && (
             <div>
               <div className="text-[0.65rem] font-mono uppercase tracking-wider text-text-muted mb-1">
-                Full Prompt / Context ({fullTaskPrompt.length.toLocaleString()} chars):
+                Initial Query / Task Prompt ({formatCharsAndTokens(fullTaskPrompt.length)}):
               </div>
               <pre className="p-2.5 rounded-lg bg-bg-secondary/90 border border-border-subtle text-text-primary font-mono text-[0.72rem] leading-relaxed whitespace-pre-wrap break-words overflow-x-auto">
                 {fullTaskPrompt}
@@ -652,7 +934,7 @@ function TraceStepCard({
                     <div className="text-[0.68rem] font-mono font-semibold text-accent-cyan mb-1">
                       {k}{" "}
                       <span className="text-text-muted font-normal">
-                        ({formattedVal.length.toLocaleString()} chars)
+                        ({formatCharsAndTokens(formattedVal.length)})
                       </span>
                     </div>
                     <pre className="text-text-primary font-mono text-[0.72rem] leading-relaxed whitespace-pre-wrap break-words overflow-x-auto">
@@ -668,7 +950,7 @@ function TraceStepCard({
           {toolResult && (
             <div>
               <div className="text-[0.65rem] font-mono uppercase tracking-wider text-emerald-400 mb-1">
-                Tool Output ({toolResult.length.toLocaleString()} chars):
+                Tool Output ({formatCharsAndTokens(toolResult.length)}):
               </div>
               <pre className="p-2.5 rounded-lg bg-bg-secondary/90 border border-emerald-500/20 text-text-primary font-mono text-[0.72rem] leading-relaxed whitespace-pre-wrap break-words overflow-x-auto">
                 {toolResult}
@@ -692,7 +974,7 @@ function TraceStepCard({
           {fullLlmThinking && (
             <div>
               <div className="text-[0.65rem] font-mono uppercase tracking-wider text-amber-300/90 mb-1">
-                Model Reasoning ({fullLlmThinking.length.toLocaleString()} chars):
+                Model Reasoning ({formatCharsAndTokens(fullLlmThinking.length)}):
               </div>
               <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/20 text-text-primary">
                 <MarkdownMessage content={fullLlmThinking} openInNewTab={true} />
@@ -704,7 +986,7 @@ function TraceStepCard({
           {fullLlmResponse && (
             <div>
               <div className="text-[0.65rem] font-mono uppercase tracking-wider text-purple-300 mb-1">
-                LLM Output ({fullLlmResponse.length.toLocaleString()} chars):
+                LLM Output ({formatCharsAndTokens(fullLlmResponse.length)}):
               </div>
               <div className="p-3 rounded-lg bg-bg-secondary/90 border border-border-subtle text-text-primary">
                 {/* Render LLM trace output; note links click into new tabs to prevent interrupting active inspection */}
@@ -1082,8 +1364,20 @@ export const AgentGraphView = memo(function AgentGraphView({
             </div>
           </div>
 
-          {/* 1. Full Untruncated Prompt Dispatched to this Agent / Subagent (Collapsible card, collapsed by default) */}
-          {selectedNode.taskPrompt && (
+          {/* 1. Full Untruncated Context Manifest or Legacy Prompt Dispatched to this Agent / Subagent */}
+          {selectedNode.contextManifest && selectedNode.contextManifest.length > 0 ? (
+            <div className="rounded-lg border border-border-subtle bg-bg-primary/60 p-2.5">
+              <ContextManifestInspector
+                manifest={selectedNode.contextManifest}
+                summary={selectedNode.contextSummary}
+                title={
+                  selectedNode.parentId === null
+                    ? "Head Agent Injected Boot Context"
+                    : "Subagent Injected Boot Context"
+                }
+              />
+            </div>
+          ) : selectedNode.taskPrompt ? (
             <div className="rounded-lg border border-border-subtle bg-bg-primary/60 p-2.5">
               <div
                 onClick={() => setPromptExpanded((prev) => !prev)}
@@ -1096,7 +1390,7 @@ export const AgentGraphView = memo(function AgentGraphView({
                       : "Full Subagent Task Prompt"}
                   </span>
                   <span className="text-text-muted font-normal">
-                    ({selectedNode.taskPrompt.length.toLocaleString()} chars)
+                    ({formatCharsAndTokens(selectedNode.taskPrompt.length)})
                   </span>
                 </div>
                 <button
@@ -1123,7 +1417,7 @@ export const AgentGraphView = memo(function AgentGraphView({
                 </p>
               )}
             </div>
-          )}
+          ) : null}
 
           {/* 2. All Ordered Execution Steps for this Node (with dedicated Expand/Collapse All toggle) */}
           <div>
@@ -1163,7 +1457,7 @@ export const AgentGraphView = memo(function AgentGraphView({
                 <div className="text-[0.65rem] font-mono uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
                   <span>Final Output / Synthesis Returned</span>
                   <span className="text-text-muted font-normal">
-                    ({selectedNode.finalResponse.length.toLocaleString()} chars)
+                    ({formatCharsAndTokens(selectedNode.finalResponse.length)})
                   </span>
                 </div>
                 <button

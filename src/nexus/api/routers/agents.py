@@ -36,20 +36,19 @@ from nexus.core.cost import calculate_token_cost
 from nexus.core.trace import reset_trace_thread_id, set_trace_thread_id, trace_bus
 # run_logger: Persists formatted execution run snapshots to logs/runs/ for observability and evals
 from nexus.core.run_logger import log_run, list_runs, get_run
-# chats_db: SQLite data access layer for conversations and chat history
+# chats_db: SQLite data access layer for conversations, chat history, content-addressed blobs, and runs
 from nexus.core.chats_db import (
     log_message, get_chat_history, get_message_trace,
     create_conversation, get_conversations, get_conversation,
     delete_conversation, update_conversation_title,
-    revert_last_turn,
+    revert_last_turn, delete_run_record,
+    get_trace_blob, get_trace_blobs_batch,
 )
 # conversation_cache: Per-conversation SQLite WAL external capture store (`cache://tab/...`, `cache://web/...`, `cache://email/...`)
 from nexus.core.conversation_cache import get_capture, list_captures
 from nexus.core.chat_titles import auto_generate_title_async, schedule_auto_title
 from nexus.core.hitl_queue import cancel_pending_transactions_for_conversation
 from nexus.agent.graph import (
-    get_latest_checkpoint_id,
-    rollback_checkpoints_for_thread,
     register_cancel_event,
     unregister_cancel_event,
     is_thread_cancelled,
@@ -142,7 +141,7 @@ class ActiveRun:
         query: str,
         images: Optional[list[str]],
         cancel_event: threading.Event,
-        pre_turn_checkpoint_id: Optional[str],
+        pre_turn_checkpoint_id: Optional[str] = None,
         event_queue: Optional[queue.Queue] = None,
         model_tier: Optional[str] = None,
         model_name: Optional[str] = None,
@@ -581,6 +580,7 @@ async def ask_brain(request: AskRequest):
         unsub_sync = trace_bus.subscribe(_on_sync_trace, thread_id=conversation_id)
         trace_token = set_trace_thread_id(conversation_id)
 
+        active_run_id = str(uuid.uuid4())[:8]
         try:
             # Phase 2: Invoke the unified NexusAgent directly with optional per-turn model and image overrides
             from nexus.agent.api import run_nexus_agent_with_trace
@@ -589,11 +589,14 @@ async def ask_brain(request: AskRequest):
                 thread_id=conversation_id,
                 model_tier=request.model_tier,
                 images=request.images,
+                run_id=active_run_id,
+                source="chat",
             )
         finally:
             unsub_sync()
             reset_trace_thread_id(trace_token)
 
+        effective_run_id = result.get("run_id") or active_run_id
         routed_domain = result.get("domain")
         agent_name = "nexus"
         elapsed_sec = time.time() - t0
@@ -621,7 +624,7 @@ async def ask_brain(request: AskRequest):
                 )
         turn_cost_formatted = round(turn_cost_usd, 4) if turn_cost_usd else None
 
-        # Phase 4: Persist assistant response + full trace events to SQLite chats.db
+        # Phase 4: Persist assistant response + link live run telemetry in SQLite chats.db
         log_message(
             role="assistant",
             content=response_text,
@@ -633,12 +636,13 @@ async def ask_brain(request: AskRequest):
             model_tier=used_tier,
             model_name=used_model,
             cost_usd=turn_cost_formatted,
+            run_id=effective_run_id,
         )
 
         # Schedule backend-driven Turn-1 auto-titling for placeholder conversations (non-blocking)
         schedule_auto_title(conversation_id)
 
-        # Phase 5: Persist structured JSON run snapshot to logs/runs/
+        # Phase 5: Finalize unified SQLite run record
         log_run(
             agent_name=agent_name,
             query=request.query,
@@ -650,7 +654,9 @@ async def ask_brain(request: AskRequest):
             tool_calls=result.get("tool_calls"),
             trace_events=trace_events,
             latency_seconds=elapsed_sec,
-            metadata={"model_tier": used_tier, "model_name": used_model},
+            metadata={"model_tier": used_tier, "model_name": used_model, "source": "chat"},
+            run_id=effective_run_id,
+            source="chat",
         )
 
         # Generate ISO-8601 UTC timestamp for chat response serialization
@@ -695,6 +701,7 @@ def _run_pipeline(
     user_msg_id = active_run.user_message_id
 
     trace_token = set_trace_thread_id(conversation_id)
+    active_run_id = str(uuid.uuid4())[:8]
 
     try:
         # Check if already cancelled before invoking graph
@@ -708,12 +715,15 @@ def _run_pipeline(
             thread_id=conversation_id,
             model_tier=model_tier,
             images=images,
+            run_id=active_run_id,
+            source="chat",
         )
 
         # Post-execution cancellation check: do not commit results or logs if cancelled while agent was running
         if is_thread_cancelled(conversation_id) or active_run.is_stopped:
             return
 
+        effective_run_id = result.get("run_id") or active_run_id
         routed_domain = result.get("domain")
         agent_name = "nexus"
         elapsed_sec = time.time() - t0
@@ -747,7 +757,7 @@ def _run_pipeline(
                 )
         turn_cost_formatted = round(turn_cost_usd, 4) if turn_cost_usd else None
 
-        # Persist assistant message along with full trace array to chats.db, capturing its SQLite primary key
+        # Persist assistant message linked to `effective_run_id` in chats.db, capturing its SQLite primary key
         assistant_msg_id = log_message(
             role="assistant",
             content=response_text,
@@ -759,12 +769,13 @@ def _run_pipeline(
             model_tier=used_tier,
             model_name=used_model,
             cost_usd=turn_cost_formatted,
+            run_id=effective_run_id,
         )
 
         # Trigger background Turn-1 auto-titling directly on the backend so switching/closing tabs never skips titling
         schedule_auto_title(conversation_id)
 
-        # Persist structured JSON run snapshot to logs/runs/
+        # Finalize unified SQLite run record
         log_run(
             agent_name=agent_name,
             query=effective_query,
@@ -776,7 +787,9 @@ def _run_pipeline(
             tool_calls=result.get("tool_calls"),
             trace_events=captured_traces,
             latency_seconds=elapsed_sec,
-            metadata={"model_tier": used_tier, "model_name": used_model},
+            metadata={"model_tier": used_tier, "model_name": used_model, "source": "chat"},
+            run_id=effective_run_id,
+            source="chat",
         )
 
         # Publish terminal 'done' event to every active/re-attached SSE subscriber
@@ -795,6 +808,10 @@ def _run_pipeline(
             "assistant_message_id": assistant_msg_id,
         })
     except InterruptedError:
+        try:
+            delete_run_record(active_run_id)
+        except Exception:
+            pass
         # Interrupted cleanly by user via Stop & Revert: push clean terminal event without recording partial error
         active_run.publish_trace({
             "type": "info",
@@ -823,7 +840,7 @@ def _run_pipeline(
             "timestamp": err_now,
         })
 
-        # Persist assistant error reply + trace to chats.db and logs/runs/ if not cancelled via Stop & Revert
+        # Persist assistant error reply + trace to chats.db if not cancelled via Stop & Revert
         if not is_thread_cancelled(conversation_id) and not active_run.is_stopped:
             try:
                 captured_traces = active_run.snapshot_trace()
@@ -833,6 +850,7 @@ def _run_pipeline(
                     agent="nexus",
                     trace=captured_traces,
                     conversation_id=conversation_id,
+                    run_id=active_run_id,
                 )
                 schedule_auto_title(conversation_id)
                 log_run(
@@ -842,7 +860,9 @@ def _run_pipeline(
                     thread_id=conversation_id,
                     trace_events=captured_traces,
                     latency_seconds=time.time() - t0,
-                    metadata={"error": str(e)},
+                    metadata={"error": str(e), "source": "chat"},
+                    run_id=active_run_id,
+                    source="chat",
                 )
             except Exception as persist_exc:
                 print(f"[Nexus] Failed to persist error state for {conversation_id}: {persist_exc}", file=sys.stderr)
@@ -950,7 +970,6 @@ async def ask_brain_stream(request: AskRequest, req: Request):
 
     # Resolve model metadata upfront so re-attaching UIs display the active turn's exact model label
     resolved_model = resolve_model_config(request.model_tier)
-    pre_turn_checkpoint_id = get_latest_checkpoint_id(conversation_id)
     cancel_event = threading.Event()
     register_cancel_event(conversation_id, cancel_event)
 
@@ -970,7 +989,7 @@ async def ask_brain_stream(request: AskRequest, req: Request):
         query=effective_query,
         images=request.images,
         cancel_event=cancel_event,
-        pre_turn_checkpoint_id=pre_turn_checkpoint_id,
+        pre_turn_checkpoint_id=None,
         model_tier=resolved_model.get("tier"),
         model_name=resolved_model.get("model_name"),
         model_label=resolved_model.get("label"),
@@ -1088,11 +1107,7 @@ async def stop_and_revert_turn(req: StopAndRevertRequest):
     # Phase 2: Cancel all staged unapproved HITL transactions for this thread
     cancelled_tx_ids = cancel_pending_transactions_for_conversation(conv_id)
 
-    # Phase 3: Rollback LangGraph checkpointer memory in memory.sqlite
-    pre_checkpoint = active_run.pre_turn_checkpoint_id if active_run else None
-    rollback_checkpoints_for_thread(conv_id, pre_turn_checkpoint_id=pre_checkpoint)
-
-    # Phase 4: Rollback chats.db messages and extract prompt to restore
+    # Phase 3: Rollback chats.db messages, canonical thread_messages, active run telemetry, and orphan blobs
     revert_data = revert_last_turn(conv_id)
 
     restored_query = ""
@@ -1116,12 +1131,38 @@ async def stop_and_revert_turn(req: StopAndRevertRequest):
     )
 
 
-# ── Run Snapshot Inspection Endpoints ─────────────────────────
+# ── Run Snapshot & Content-Addressed Blob Inspection Endpoints ────────────────
+
+class TraceBlobBatchRequest(BaseModel):
+    hashes: list[str]
+
+
+@router.get("/trace-blobs/{blob_hash}")
+async def get_trace_blob_endpoint(blob_hash: str):
+    """Fetch a single deduplicated SHA-256 context blob from SQLite `trace_blobs` on demand."""
+    try:
+        blob = await asyncio.to_thread(get_trace_blob, blob_hash)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not blob:
+        raise HTTPException(status_code=404, detail=f"Trace blob '{blob_hash}' not found.")
+    return blob
+
+
+@router.post("/trace-blobs/batch")
+async def get_trace_blobs_batch_endpoint(req: TraceBlobBatchRequest):
+    """Batch-fetch multiple `trace_blobs` rows for full-context reconstruction."""
+    try:
+        blobs = await asyncio.to_thread(get_trace_blobs_batch, req.hashes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"blobs": blobs}
+
 
 @router.get("/runs")
 async def get_agent_runs(limit: int = 50, agent: Optional[str] = None):
     """
-    Returns recent structured JSON run snapshots from logs/runs/.
+    Returns recent structured run snapshots from SQLite `runs`.
     Supports filtering by agent name and custom limit.
     """
     return list_runs(limit=limit, agent=agent)

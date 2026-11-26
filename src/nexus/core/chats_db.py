@@ -1,26 +1,64 @@
 """
-chats_db.py — Unified UI chat persistence.
-"""
-import sqlite3
-import json
-import uuid
-from contextlib import contextmanager
-from pathlib import Path
-from datetime import datetime, timezone
+chats_db.py — Unified UI chat, execution telemetry, content-addressed blobs, and canonical thread state.
 
-DB_PATH = Path(__file__).parent.parent.parent.parent / "logs" / "chats.db"
+Consolidates what previously spanned three overlapping stores (`chats.db`, `logs/runs/*.json`, and
+LangGraph's `memory.sqlite`) into a single WAL-mode SQLite database with:
+  1. Normalized relational tables: `conversations`, `messages`, `runs`, `trace_events`, `thread_messages`.
+  2. Content-addressed `trace_blobs` (SHA-256 deduplicated after secret scrubbing) + `run_blob_refs`
+     reference-counted garbage collection (`ON DELETE CASCADE` + immediate zero-ref sweep).
+  3. Asset reference tracking (`upload_refs`) so deleted threads also clean up orphaned `logs/uploads/` files.
+  4. Backward-compatible `message_traces` fallback for legacy rows and isolated unit tests.
+"""
+from __future__ import annotations
+
+from contextlib import contextmanager
+from datetime import datetime, timezone
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+import time
+from typing import Any, Callable, Optional
+import uuid
+
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    messages_from_dict,
+    messages_to_dict,
+)
+
+from nexus.core.cost import calculate_cache_savings, calculate_token_cost
+from nexus.core.secret_scrubber import approx_token_count, scrub_secrets, scrub_structure
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_DEFAULT_DB_PATH = PROJECT_ROOT / "logs" / "chats.db"
+DB_PATH = _DEFAULT_DB_PATH
+UPLOADS_DIR = PROJECT_ROOT / "logs" / "uploads"
+
+# Strict hex digest validator (16–64 hex chars) preventing SQL injection or path traversal in blob lookups
+_HEX_HASH_RE = re.compile(r"^[0-9a-fA-F]{16,64}$")
+# Matches `data:image/<ext>;base64,<payload>` URLs so inline image payloads are never duplicated into SQLite
+_DATA_IMAGE_URI_RE = re.compile(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.+)$", re.DOTALL)
+
 
 # @contextmanager: turns a generator into a `with`-statement resource guard that always closes the SQLite handle
 @contextmanager
 def _get_conn():
-    """Yields a WAL-configured SQLite connection, committing on clean exit and closing deterministically."""
+    """Yields a WAL-configured SQLite connection with FK enforcement, committing on clean exit and closing deterministically."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     # timeout=30.0: Waits up to 30s for any transient lock to release before raising OperationalError
     # PRAGMA journal_mode=WAL: Enables Write-Ahead Logging so concurrent readers never block active writers
     # PRAGMA busy_timeout=30000: Configures SQLite engine-level busy handler timeout in milliseconds
+    # PRAGMA foreign_keys=ON: Enforces ON DELETE CASCADE across messages, runs, trace_events, and run_blob_refs
     conn = sqlite3.connect(DB_PATH, timeout=30.0, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout=30000;")
+    conn.execute("PRAGMA foreign_keys = ON;")
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -35,10 +73,10 @@ def _get_conn():
         # Always close the OS file handle so concurrent threads never leak open descriptors on Windows
         conn.close()
 
+
 def init_db():
     migrated_count = 0
     with _get_conn() as conn:
-        
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
@@ -70,6 +108,7 @@ def init_db():
                 model_name TEXT,
                 cost_usd REAL,
                 has_trace INTEGER DEFAULT 0,
+                run_id TEXT,
                 FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             )
         """)
@@ -85,9 +124,10 @@ def init_db():
             conn.execute("ALTER TABLE messages ADD COLUMN cost_usd REAL")
         if "has_trace" not in msg_cols:
             conn.execute("ALTER TABLE messages ADD COLUMN has_trace INTEGER DEFAULT 0")
+        if "run_id" not in msg_cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN run_id TEXT")
 
-        # Create separate message_traces table to isolate heavy execution telemetry from primary chat messages
-        # Keeping trace blobs decoupled prevents SQLite overflow page chaining and ensures chat history queries stay ~1KB/turn
+        # Create separate message_traces table for backward-compatible isolation of legacy/unit-test trace blobs
         conn.execute("""
             CREATE TABLE IF NOT EXISTS message_traces (
                 message_id INTEGER PRIMARY KEY,
@@ -169,6 +209,9 @@ def init_db():
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages (conversation_id, id)"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_run_id ON messages (run_id)"
+        )
 
         # One-time backfill for existing databases upgraded with `last_model_*` columns:
         # populate each conversation from its newest message carrying model metadata
@@ -220,6 +263,127 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_conv_captures_conv_url ON conversation_captures (conversation_id, source_url)"
         )
 
+        # ── Unified Observability, Content-Addressed Blobs & Canonical Thread State ──
+        # Content-addressed deduplicated payloads (system prompts, tool schemas, pre-hydrated files, wire messages)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS trace_blobs (
+                hash TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                content TEXT NOT NULL,
+                char_count INTEGER NOT NULL,
+                approx_tokens INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        # Normalized top-level execution ledger unifying Chat UI, Telegram, CLI, and Eval runs
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                ended_at TEXT,
+                status TEXT NOT NULL DEFAULT 'running',
+                source TEXT NOT NULL DEFAULT 'chat',
+                thread_id TEXT,
+                conversation_id TEXT,
+                agent_name TEXT NOT NULL DEFAULT 'nexus',
+                domain TEXT,
+                confidence REAL,
+                reasoning TEXT,
+                input_query TEXT NOT NULL DEFAULT '',
+                output_response TEXT NOT NULL DEFAULT '',
+                model_tier TEXT,
+                model_name TEXT,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cached_tokens INTEGER NOT NULL DEFAULT 0,
+                reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                cost_usd REAL,
+                cache_savings_usd REAL,
+                latency_seconds REAL,
+                dpfh_injected_files_json TEXT,
+                tool_calls_json TEXT,
+                subagents_count INTEGER NOT NULL DEFAULT 0,
+                trace_events_count INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT,
+                FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_runs_timestamp ON runs (timestamp DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_runs_conv ON runs (conversation_id, timestamp DESC)"
+        )
+
+        # Incremental live step log appended at emission time via AgentTracer -> trace_bus
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS trace_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                event_json TEXT NOT NULL,
+                FOREIGN KEY(run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_trace_events_run_seq ON trace_events (run_id, seq)"
+        )
+
+        # Reference ledger tying runs to SHA-256 blobs so deleting a run reclaims only zero-ref blobs
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS run_blob_refs (
+                run_id TEXT NOT NULL,
+                blob_hash TEXT NOT NULL,
+                PRIMARY KEY (run_id, blob_hash),
+                FOREIGN KEY(run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+                FOREIGN KEY(blob_hash) REFERENCES trace_blobs(hash) ON DELETE CASCADE
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_run_blob_refs_hash ON run_blob_refs (blob_hash)"
+        )
+
+        # Asset reference ledger tying `logs/uploads/<filename>` files to messages and runs
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS upload_refs (
+                owner_key TEXT NOT NULL,
+                upload_filename TEXT NOT NULL,
+                PRIMARY KEY (owner_key, upload_filename)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_upload_refs_filename ON upload_refs (upload_filename)"
+        )
+
+        # Canonical LangChain message state replacing LangGraph's 1.49 GB `memory.sqlite` SqliteSaver
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS thread_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thread_id TEXT NOT NULL,
+                turn_id TEXT,
+                msg_type TEXT NOT NULL,
+                msg_json TEXT NOT NULL,
+                blob_hash TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_thread_messages_thread_id ON thread_messages (thread_id, id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_thread_messages_turn_id ON thread_messages (thread_id, turn_id)"
+        )
+
+        # Migration ledger tracking one-time legacy data imports
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                name TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL,
+                details TEXT
+            )
+        """)
+
     # If legacy rows were migrated out of the primary messages table, vacuum the database file to reclaim disk space
     if migrated_count > 0:
         with _get_conn() as vacuum_conn:
@@ -228,6 +392,1119 @@ def init_db():
 
 
 init_db()
+
+
+# ── Content-Addressed Blob Store & Upload Reference Helpers ──────────────────
+
+# `ref: str` is an image URL, upload route (`/api/agents/uploads/<file>`), or local filename.
+# `-> str | None` returns the safe filename if `ref` points to a local upload asset, else None.
+def _normalize_upload_filename(ref: str) -> str | None:
+    """Extract the local upload basename when `ref` refers to a `logs/uploads/` asset."""
+    if not isinstance(ref, str):
+        return None
+    cleaned = ref.strip()
+    if not cleaned or cleaned.startswith(("http://", "https://", "data:", "blob:")):
+        return None
+    # Restrict cleanup tracking to `/api/agents/uploads/...` or bare/relative upload paths
+    if "/uploads/" in cleaned or "\\" in cleaned or "/" not in cleaned:
+        name = Path(cleaned.split("?")[0]).name
+        return name if name and name not in (".", "..") else None
+    return None
+
+
+def _register_upload_refs_conn(
+    conn: sqlite3.Connection,
+    owner_key: str,
+    image_refs: list[str] | None,
+) -> None:
+    """Record upload filename references in `upload_refs` inside an open SQLite transaction."""
+    if not owner_key or not image_refs:
+        return
+    for ref in image_refs:
+        fname = _normalize_upload_filename(ref)
+        if fname:
+            conn.execute(
+                "INSERT OR IGNORE INTO upload_refs (owner_key, upload_filename) VALUES (?, ?)",
+                (owner_key, fname),
+            )
+
+
+# `event: dict` is a structured trace event emitted by `AgentTracer` or loaded from legacy JSON.
+# `-> set[str]` extracts every valid hex `hash` / `blob_hash` referenced inside the event payload.
+def extract_blob_hashes_from_event(event: dict) -> set[str]:
+    """Collect all content-addressed blob hashes referenced inside a trace event's `data` payload."""
+    hashes: set[str] = set()
+    if not isinstance(event, dict):
+        return hashes
+    data = event.get("data")
+    if not isinstance(data, dict):
+        return hashes
+
+    manifest = data.get("context_manifest")
+    if isinstance(manifest, list):
+        for entry in manifest:
+            if isinstance(entry, dict):
+                h = entry.get("hash") or entry.get("blob_hash")
+                if isinstance(h, str) and _HEX_HASH_RE.match(h):
+                    hashes.add(h)
+
+    direct_hash = data.get("blob_hash")
+    if isinstance(direct_hash, str) and _HEX_HASH_RE.match(direct_hash):
+        hashes.add(direct_hash)
+    return hashes
+
+
+# `content: str` is raw text to scrub and deduplicate.
+# `kind: str` categorizes the blob (e.g. `"system_prompt"`, `"tool_schemas"`, `"prehydrated_context"`).
+# `run_id: str | None` optionally links the blob to a run in `run_blob_refs` in the same operation.
+def store_trace_blob(
+    content: str,
+    kind: str = "text",
+    run_id: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Scrub secrets, SHA-256 hash `content`, deduplicate into `trace_blobs`, and return compact manifest metadata."""
+    cleaned = scrub_secrets(content if isinstance(content, str) else str(content or ""))
+    digest = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
+    char_count = len(cleaned)
+    approx_tok = approx_token_count(char_count)
+    now = datetime.now(timezone.utc).isoformat()
+
+    def _write(active_conn: sqlite3.Connection) -> None:
+        active_conn.execute(
+            """
+            INSERT OR IGNORE INTO trace_blobs (hash, kind, content, char_count, approx_tokens, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (digest, kind, cleaned, char_count, approx_tok, now),
+        )
+        if run_id:
+            # Link only if the parent `runs` row already exists; `append_trace_event_record` also links via manifest
+            has_run = active_conn.execute(
+                "SELECT 1 FROM runs WHERE run_id = ? LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            if has_run:
+                active_conn.execute(
+                    "INSERT OR IGNORE INTO run_blob_refs (run_id, blob_hash) VALUES (?, ?)",
+                    (run_id, digest),
+                )
+
+    if conn is not None:
+        _write(conn)
+    else:
+        with _get_conn() as local_conn:
+            _write(local_conn)
+            local_conn.commit()
+
+    return {
+        "hash": digest,
+        "kind": kind,
+        "chars": char_count,
+        "approx_tokens": approx_tok,
+    }
+
+
+def get_trace_blob(blob_hash: str) -> dict[str, Any] | None:
+    """Fetch a single deduplicated blob from `trace_blobs` by SHA-256 hex digest."""
+    if not isinstance(blob_hash, str) or not _HEX_HASH_RE.match(blob_hash.strip()):
+        raise ValueError(f"Invalid trace blob hash: {blob_hash!r}")
+    norm_hash = blob_hash.strip().lower()
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT hash, kind, content, char_count, approx_tokens, created_at FROM trace_blobs WHERE hash = ?",
+            (norm_hash,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_trace_blobs_batch(blob_hashes: list[str]) -> dict[str, dict[str, Any]]:
+    """Batch-fetch multiple `trace_blobs` rows in one indexed SQLite query keyed by hash."""
+    if not blob_hashes:
+        return {}
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in blob_hashes:
+        if not isinstance(raw, str) or not _HEX_HASH_RE.match(raw.strip()):
+            raise ValueError(f"Invalid trace blob hash in batch request: {raw!r}")
+        h = raw.strip().lower()
+        if h not in seen:
+            seen.add(h)
+            cleaned.append(h)
+
+    if not cleaned:
+        return {}
+
+    result: dict[str, dict[str, Any]] = {}
+    with _get_conn() as conn:
+        # Chunk at 500 parameters to stay well below SQLite's bind parameter limit
+        for i in range(0, len(cleaned), 500):
+            chunk = cleaned[i : i + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = conn.execute(
+                f"SELECT hash, kind, content, char_count, approx_tokens, created_at FROM trace_blobs WHERE hash IN ({placeholders})",
+                tuple(chunk),
+            ).fetchall()
+            for r in rows:
+                d = dict(r)
+                result[d["hash"]] = d
+    return result
+
+
+# ── Unified Run & Live Trace Event Persistence ───────────────────────────────
+
+def _ensure_run_exists_conn(
+    conn: sqlite3.Connection,
+    run_id: str,
+    *,
+    thread_id: str | None = None,
+    agent_name: str = "nexus",
+    query: str = "",
+    source: str = "chat",
+    model_tier: str | None = None,
+    model_name: str | None = None,
+    timestamp: str | None = None,
+) -> str | None:
+    """Insert a `runs` row if missing and resolve `conversation_id` when `thread_id` exists in `conversations`."""
+    conv_id: str | None = None
+    if thread_id and thread_id != "unspecified":
+        conv_row = conn.execute(
+            "SELECT 1 FROM conversations WHERE id = ? LIMIT 1",
+            (thread_id,),
+        ).fetchone()
+        if conv_row:
+            conv_id = thread_id
+
+    now = timestamp or datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO runs (
+            run_id, timestamp, status, source, thread_id, conversation_id,
+            agent_name, input_query, model_tier, model_name
+        )
+        VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            run_id,
+            now,
+            source,
+            thread_id or "unspecified",
+            conv_id,
+            agent_name or "nexus",
+            scrub_secrets(query or ""),
+            model_tier,
+            model_name,
+        ),
+    )
+    return conv_id
+
+
+def start_run_record(
+    run_id: str,
+    thread_id: str | None,
+    agent_name: str = "nexus",
+    query: str = "",
+    source: str = "chat",
+    model_tier: str | None = None,
+    model_name: str | None = None,
+    image_refs: list[str] | None = None,
+    timestamp: str | None = None,
+) -> str:
+    """Create a `runs` row with `status='running'` at turn start so live steps survive crashes."""
+    with _get_conn() as conn:
+        _ensure_run_exists_conn(
+            conn,
+            run_id,
+            thread_id=thread_id,
+            agent_name=agent_name,
+            query=query,
+            source=source,
+            model_tier=model_tier,
+            model_name=model_name,
+            timestamp=timestamp,
+        )
+        _register_upload_refs_conn(conn, f"run:{run_id}", image_refs)
+        conn.commit()
+    return run_id
+
+
+def append_trace_event_record(run_id: str, event: dict[str, Any]) -> None:
+    """Append a single emitted trace event live into `trace_events` and link any referenced `trace_blobs`."""
+    if not run_id or not isinstance(event, dict):
+        return
+    scrubbed_event = scrub_structure(event)
+    event_json = json.dumps(scrubbed_event, ensure_ascii=False, default=str)
+    blob_hashes = extract_blob_hashes_from_event(scrubbed_event)
+
+    with _get_conn() as conn:
+        _ensure_run_exists_conn(
+            conn,
+            run_id,
+            thread_id=scrubbed_event.get("thread_id") or "unspecified",
+            agent_name="nexus",
+            timestamp=scrubbed_event.get("timestamp"),
+        )
+        conn.execute(
+            """
+            INSERT INTO trace_events (run_id, seq, event_json)
+            VALUES (?, COALESCE((SELECT MAX(seq) FROM trace_events WHERE run_id = ?), 0) + 1, ?)
+            """,
+            (run_id, run_id, event_json),
+        )
+        conn.execute(
+            "UPDATE runs SET trace_events_count = trace_events_count + 1 WHERE run_id = ?",
+            (run_id,),
+        )
+        for bh in blob_hashes:
+            has_blob = conn.execute("SELECT 1 FROM trace_blobs WHERE hash = ? LIMIT 1", (bh,)).fetchone()
+            if has_blob:
+                conn.execute(
+                    "INSERT OR IGNORE INTO run_blob_refs (run_id, blob_hash) VALUES (?, ?)",
+                    (run_id, bh),
+                )
+        conn.commit()
+
+
+def finalize_run_record(
+    *,
+    run_id: str,
+    timestamp: str,
+    ended_at: str | None,
+    status: str,
+    source: str,
+    thread_id: str | None,
+    agent_name: str,
+    domain: str | None,
+    confidence: float | None,
+    reasoning: str | None,
+    input_query: str,
+    output_response: str,
+    model_tier: str | None,
+    model_name: str | None,
+    input_tokens: int,
+    output_tokens: int,
+    cached_tokens: int,
+    reasoning_tokens: int,
+    cost_usd: float | None,
+    cache_savings_usd: float | None,
+    latency_seconds: float | None,
+    dpfh_injected_files: list[str],
+    tool_calls: list[dict[str, Any]],
+    subagents_count: int,
+    trace_events: list[dict[str, Any]],
+    metadata: dict[str, Any],
+) -> None:
+    """Persist or finalize a `runs` row and ensure all `trace_events` + `run_blob_refs` are stored in SQLite."""
+    scrubbed_query = scrub_secrets(input_query or "")
+    scrubbed_response = scrub_secrets(output_response or "")
+    scrubbed_tool_calls = scrub_structure(tool_calls or [])
+    scrubbed_meta = scrub_structure(metadata or {})
+
+    with _get_conn() as conn:
+        conv_id = _ensure_run_exists_conn(
+            conn,
+            run_id,
+            thread_id=thread_id,
+            agent_name=agent_name,
+            query=scrubbed_query,
+            source=source,
+            model_tier=model_tier,
+            model_name=model_name,
+            timestamp=timestamp,
+        )
+
+        # Backfill `trace_events` if live streaming didn't insert them (e.g. direct `log_run()` calls or imports)
+        existing_evt_count = conn.execute(
+            "SELECT COUNT(*) FROM trace_events WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()[0]
+
+        effective_evt_count = existing_evt_count
+        if existing_evt_count == 0 and trace_events:
+            scrubbed_events = scrub_structure(trace_events)
+            rows_to_insert: list[tuple[str, int, str]] = []
+            all_blob_hashes: set[str] = set()
+            for seq_idx, evt in enumerate(scrubbed_events, start=1):
+                rows_to_insert.append(
+                    (run_id, seq_idx, json.dumps(evt, ensure_ascii=False, default=str))
+                )
+                all_blob_hashes.update(extract_blob_hashes_from_event(evt))
+
+            conn.executemany(
+                "INSERT INTO trace_events (run_id, seq, event_json) VALUES (?, ?, ?)",
+                rows_to_insert,
+            )
+            effective_evt_count = len(rows_to_insert)
+
+            for bh in all_blob_hashes:
+                has_blob = conn.execute("SELECT 1 FROM trace_blobs WHERE hash = ? LIMIT 1", (bh,)).fetchone()
+                if has_blob:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO run_blob_refs (run_id, blob_hash) VALUES (?, ?)",
+                        (run_id, bh),
+                    )
+
+        conn.execute(
+            """
+            UPDATE runs
+            SET timestamp = ?,
+                ended_at = ?,
+                status = ?,
+                source = ?,
+                thread_id = ?,
+                conversation_id = COALESCE(conversation_id, ?),
+                agent_name = ?,
+                domain = ?,
+                confidence = ?,
+                reasoning = ?,
+                input_query = ?,
+                output_response = ?,
+                model_tier = ?,
+                model_name = ?,
+                input_tokens = ?,
+                output_tokens = ?,
+                cached_tokens = ?,
+                reasoning_tokens = ?,
+                cost_usd = ?,
+                cache_savings_usd = ?,
+                latency_seconds = ?,
+                dpfh_injected_files_json = ?,
+                tool_calls_json = ?,
+                subagents_count = ?,
+                trace_events_count = ?,
+                metadata_json = ?
+            WHERE run_id = ?
+            """,
+            (
+                timestamp,
+                ended_at,
+                status,
+                source,
+                thread_id or "unspecified",
+                conv_id,
+                agent_name,
+                domain,
+                confidence,
+                reasoning,
+                scrubbed_query,
+                scrubbed_response,
+                model_tier,
+                model_name,
+                int(input_tokens or 0),
+                int(output_tokens or 0),
+                int(cached_tokens or 0),
+                int(reasoning_tokens or 0),
+                cost_usd,
+                cache_savings_usd,
+                round(latency_seconds, 3) if latency_seconds is not None else None,
+                json.dumps(dpfh_injected_files or [], ensure_ascii=False),
+                json.dumps(scrubbed_tool_calls, ensure_ascii=False, default=str),
+                int(subagents_count or 0),
+                int(effective_evt_count),
+                json.dumps(scrubbed_meta, ensure_ascii=False, default=str),
+                run_id,
+            ),
+        )
+        conn.commit()
+
+
+def list_run_records(limit: int = 50, agent: Optional[str] = None) -> list[dict[str, Any]]:
+    """Query indexed `runs` summaries newest-first without scanning JSON files on disk."""
+    with _get_conn() as conn:
+        if agent:
+            rows = conn.execute(
+                """
+                SELECT * FROM runs
+                WHERE lower(agent_name) = lower(?)
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (agent, max(1, int(limit))),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT * FROM runs
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
+            ).fetchall()
+
+        summaries: list[dict[str, Any]] = []
+        for r in rows:
+            meta = json.loads(r["metadata_json"]) if r["metadata_json"] else {}
+            tool_calls = json.loads(r["tool_calls_json"]) if r["tool_calls_json"] else []
+            full_query = r["input_query"] or ""
+            full_response = r["output_response"] or ""
+            summaries.append({
+                "run_id": r["run_id"],
+                "filename": f"{r['run_id']}.sqlite",
+                "timestamp": r["timestamp"],
+                "status": r["status"],
+                "source": r["source"],
+                "thread_id": r["thread_id"] or "unspecified",
+                "agent_name": r["agent_name"],
+                "domain": r["domain"],
+                "input_query": full_query,
+                "output_response": full_response,
+                "query_preview": full_query,
+                "response_preview": full_response,
+                "latency_seconds": r["latency_seconds"],
+                "cost_usd": r["cost_usd"],
+                "tool_calls_count": len(tool_calls),
+                "subagents_count": r["subagents_count"] or 0,
+                "trace_events_count": r["trace_events_count"] or 0,
+                "metadata": meta,
+            })
+        return summaries
+
+
+def get_run_record(run_id: str) -> dict[str, Any] | None:
+    """Load one complete run record and its ordered `trace_events` from SQLite by `run_id`."""
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM runs WHERE run_id = ? LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        if not row:
+            # Support partial ID or legacy filename prefix matching cleanly
+            row = conn.execute(
+                "SELECT * FROM runs WHERE run_id LIKE ? ORDER BY timestamp DESC LIMIT 1",
+                (f"%{run_id}%",),
+            ).fetchone()
+        if not row:
+            return None
+
+        exact_id = row["run_id"]
+        evt_rows = conn.execute(
+            "SELECT event_json FROM trace_events WHERE run_id = ? ORDER BY seq ASC",
+            (exact_id,),
+        ).fetchall()
+        trace_events: list[dict[str, Any]] = []
+        for er in evt_rows:
+            try:
+                trace_events.append(json.loads(er["event_json"]))
+            except Exception:
+                continue
+
+        meta = json.loads(row["metadata_json"]) if row["metadata_json"] else {}
+        tool_calls = json.loads(row["tool_calls_json"]) if row["tool_calls_json"] else []
+        dpfh_files = json.loads(row["dpfh_injected_files_json"]) if row["dpfh_injected_files_json"] else []
+
+        return {
+            "run_id": exact_id,
+            "timestamp": row["timestamp"],
+            "ended_at": row["ended_at"],
+            "status": row["status"],
+            "source": row["source"],
+            "thread_id": row["thread_id"] or "unspecified",
+            "agent_name": row["agent_name"],
+            "domain": row["domain"],
+            "confidence": row["confidence"],
+            "reasoning": row["reasoning"],
+            "input_query": row["input_query"] or "",
+            "output_response": row["output_response"] or "",
+            "cost_usd": row["cost_usd"],
+            "latency_seconds": row["latency_seconds"],
+            "dpfh_injected_files": dpfh_files,
+            "tool_calls": tool_calls,
+            "subagents_count": row["subagents_count"] or 0,
+            "trace_events_count": len(trace_events) or (row["trace_events_count"] or 0),
+            "trace_events": trace_events,
+            "metadata": meta,
+        }
+
+
+def get_latest_run_record() -> dict[str, Any] | None:
+    """Return the newest run record stored in `runs`."""
+    with _get_conn() as conn:
+        row = conn.execute("SELECT run_id FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    if not row:
+        return None
+    return get_run_record(row["run_id"])
+
+
+def delete_run_record(run_id: str) -> bool:
+    """Delete a run (cascading `trace_events` + `run_blob_refs`) and reclaim orphaned blobs/uploads."""
+    if not run_id:
+        return False
+    with _get_conn() as conn:
+        candidate_hashes = {
+            r["blob_hash"]
+            for r in conn.execute("SELECT blob_hash FROM run_blob_refs WHERE run_id = ?", (run_id,)).fetchall()
+        }
+        owner_key = f"run:{run_id}"
+        candidate_uploads = {
+            r["upload_filename"]
+            for r in conn.execute("SELECT upload_filename FROM upload_refs WHERE owner_key = ?", (owner_key,)).fetchall()
+        }
+        conn.execute("DELETE FROM upload_refs WHERE owner_key = ?", (owner_key,))
+        conn.execute("UPDATE messages SET run_id = NULL WHERE run_id = ?", (run_id,))
+        cur = conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))
+        gc_unreferenced_telemetry(
+            conn=conn,
+            candidate_hashes=candidate_hashes,
+            candidate_uploads=candidate_uploads,
+            delete_uploads=True,
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+# ── Canonical LangChain Thread Messages (Replaces LangGraph `memory.sqlite`) ─
+
+def _save_base64_image_to_uploads(mime_subtype: str, b64_payload: str) -> str | None:
+    """Decode an inline base64 image once onto `logs/uploads/` and return its `/api/agents/uploads/...` URL."""
+    try:
+        raw_bytes = base64.b64decode(b64_payload, validate=False)
+    except Exception:
+        return None
+    ext_map = {"jpeg": ".jpg", "jpg": ".jpg", "png": ".png", "webp": ".webp", "gif": ".gif", "bmp": ".bmp"}
+    ext = ext_map.get(mime_subtype.lower(), ".png")
+    digest = hashlib.sha256(raw_bytes).hexdigest()[:16]
+    fname = f"migrated_{digest}{ext}"
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    target = UPLOADS_DIR / fname
+    if not target.exists():
+        target.write_bytes(raw_bytes)
+    return f"/api/agents/uploads/{fname}"
+
+
+def _dehydrate_lc_message_dict(
+    msg_dict: dict[str, Any],
+    image_refs: list[str] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Replace inline `data:image/...;base64,...` blocks with lightweight `nexus_image_ref` pointers."""
+    copied = json.loads(json.dumps(msg_dict, ensure_ascii=False, default=str))
+    data = copied.get("data")
+    if not isinstance(data, dict):
+        return copied, []
+
+    content = data.get("content")
+    tracked_uploads: list[str] = []
+    if isinstance(content, list):
+        ref_idx = 0
+        new_blocks: list[Any] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "image_url":
+                img_obj = block.get("image_url") if isinstance(block.get("image_url"), dict) else {}
+                url = str(img_obj.get("url") or "")
+                if url.startswith("data:image/"):
+                    mapped_ref: str | None = None
+                    if image_refs and ref_idx < len(image_refs):
+                        mapped_ref = image_refs[ref_idx]
+                    else:
+                        m = _DATA_IMAGE_URI_RE.match(url)
+                        if m:
+                            mapped_ref = _save_base64_image_to_uploads(m.group(1), m.group(2))
+                    ref_idx += 1
+                    if mapped_ref:
+                        fname = _normalize_upload_filename(mapped_ref)
+                        if fname:
+                            tracked_uploads.append(fname)
+                        new_blocks.append({"type": "nexus_image_ref", "url": mapped_ref})
+                        continue
+            new_blocks.append(block)
+        data["content"] = new_blocks
+
+    # Also track any explicitly supplied image refs even if block didn't start with `data:`
+    if image_refs:
+        for ref in image_refs:
+            fname = _normalize_upload_filename(ref)
+            if fname and fname not in tracked_uploads:
+                tracked_uploads.append(fname)
+
+    return copied, tracked_uploads
+
+
+def _rehydrate_lc_message_dict(
+    msg_dict: dict[str, Any],
+    image_resolver: Optional[Callable[[str], str]] = None,
+) -> dict[str, Any]:
+    """Expand `nexus_image_ref` placeholders back into provider-ready `image_url` data URIs or safe text."""
+    copied = json.loads(json.dumps(msg_dict))
+    data = copied.get("data")
+    if not isinstance(data, dict):
+        return copied
+
+    content = data.get("content")
+    if isinstance(content, list):
+        new_blocks: list[Any] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "nexus_image_ref":
+                url = str(block.get("url") or "")
+                if image_resolver and url:
+                    try:
+                        resolved_data_url = image_resolver(url)
+                        new_blocks.append({"type": "image_url", "image_url": {"url": resolved_data_url}})
+                        continue
+                    except Exception:
+                        pass
+                new_blocks.append({"type": "text", "text": f"[Attached Image: {url or 'unavailable'}]"})
+            else:
+                new_blocks.append(block)
+        data["content"] = new_blocks
+    return copied
+
+
+def append_thread_lc_messages(
+    thread_id: str,
+    new_messages: list[BaseMessage],
+    *,
+    turn_id: str | None = None,
+    image_refs: list[str] | None = None,
+) -> None:
+    """Persist incremental LangChain `BaseMessage` objects for `thread_id` losslessly (preserving signatures & tool calls)."""
+    if not thread_id or not new_messages:
+        return
+    serialized = messages_to_dict(list(new_messages))
+    now = datetime.now(timezone.utc).isoformat()
+    with _get_conn() as conn:
+        for item in serialized:
+            msg_type = str(item.get("type") or "unknown")
+            refs_for_msg = image_refs if msg_type == "human" else None
+            dehydrated, tracked_uploads = _dehydrate_lc_message_dict(item, image_refs=refs_for_msg)
+            conn.execute(
+                """
+                INSERT INTO thread_messages (thread_id, turn_id, msg_type, msg_json, blob_hash, created_at)
+                VALUES (?, ?, ?, ?, NULL, ?)
+                """,
+                (thread_id, turn_id, msg_type, json.dumps(dehydrated, ensure_ascii=False, default=str), now),
+            )
+            if turn_id and tracked_uploads:
+                _register_upload_refs_conn(conn, f"run:{turn_id}", tracked_uploads)
+        conn.commit()
+
+
+def replace_thread_lc_messages(
+    thread_id: str,
+    messages: list[BaseMessage],
+    *,
+    turn_id: str | None = None,
+) -> None:
+    """Replace the canonical `thread_messages` sequence for `thread_id` atomically."""
+    if not thread_id:
+        return
+    serialized = messages_to_dict(list(messages))
+    now = datetime.now(timezone.utc).isoformat()
+    with _get_conn() as conn:
+        conn.execute("DELETE FROM thread_messages WHERE thread_id = ?", (thread_id,))
+        for item in serialized:
+            msg_type = str(item.get("type") or "unknown")
+            dehydrated, _ = _dehydrate_lc_message_dict(item)
+            conn.execute(
+                """
+                INSERT INTO thread_messages (thread_id, turn_id, msg_type, msg_json, blob_hash, created_at)
+                VALUES (?, ?, ?, ?, NULL, ?)
+                """,
+                (thread_id, turn_id, msg_type, json.dumps(dehydrated, ensure_ascii=False, default=str), now),
+            )
+        conn.commit()
+
+
+def load_thread_lc_messages(
+    thread_id: str,
+    image_resolver: Optional[Callable[[str], str]] = None,
+) -> list[BaseMessage]:
+    """Load the ordered LangChain `BaseMessage` history for `thread_id` from `thread_messages` (with `messages` fallback)."""
+    if not thread_id:
+        return []
+
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT msg_json FROM thread_messages WHERE thread_id = ? ORDER BY id ASC",
+            (thread_id,),
+        ).fetchall()
+
+        if rows:
+            raw_dicts: list[dict[str, Any]] = []
+            for r in rows:
+                try:
+                    raw_dicts.append(_rehydrate_lc_message_dict(json.loads(r["msg_json"]), image_resolver=image_resolver))
+                except Exception:
+                    continue
+            return list(messages_from_dict(raw_dicts)) if raw_dicts else []
+
+        # Fallback: reconstruct completed turns from `messages` if `thread_messages` has not been seeded yet.
+        # Guard against Turn-1 duplication: `agents.py` & `telegram_bridge.py` persist the active `user` message
+        # into `messages` *before* calling `run_nexus_agent_with_trace`, so strip a trailing `user` row here!
+        msg_rows = conn.execute(
+            "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id ASC",
+            (thread_id,),
+        ).fetchall()
+        if not msg_rows:
+            return []
+        if msg_rows[-1]["role"] == "user":
+            msg_rows = msg_rows[:-1]
+        if not msg_rows:
+            return []
+
+        lc_msgs: list[BaseMessage] = []
+        for r in msg_rows:
+            body = r["content"] or ""
+            if r["role"] == "user":
+                lc_msgs.append(HumanMessage(content=body))
+            else:
+                lc_msgs.append(AIMessage(content=body))
+        if lc_msgs and isinstance(lc_msgs[0], AIMessage):
+            lc_msgs.insert(0, HumanMessage(content="[Prior conversation context restored from history]"))
+        return lc_msgs
+
+
+# ── Garbage Collection (Reference-Counted Blobs & Uploads) ───────────────────
+
+def gc_unreferenced_telemetry(
+    conn: sqlite3.Connection | None = None,
+    candidate_hashes: set[str] | None = None,
+    candidate_uploads: set[str] | None = None,
+    delete_uploads: bool = True,
+    uploads_dir: Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """Delete unreferenced `trace_blobs` rows and (optionally) unreferenced `logs/uploads/` files."""
+    target_uploads_dir = (uploads_dir or UPLOADS_DIR).resolve()
+
+    def _run_gc(active_conn: sqlite3.Connection) -> dict[str, int]:
+        deleted_blobs = 0
+        deleted_uploads = 0
+
+        if candidate_hashes is not None:
+            valid_candidates = [h for h in candidate_hashes if isinstance(h, str) and _HEX_HASH_RE.match(h)]
+            for i in range(0, len(valid_candidates), 400):
+                chunk = valid_candidates[i : i + 400]
+                ph = ",".join("?" for _ in chunk)
+                if dry_run:
+                    cnt = active_conn.execute(
+                        f"""
+                        SELECT COUNT(*) FROM trace_blobs
+                        WHERE hash IN ({ph})
+                          AND NOT EXISTS (SELECT 1 FROM run_blob_refs WHERE blob_hash = trace_blobs.hash)
+                          AND NOT EXISTS (SELECT 1 FROM thread_messages WHERE blob_hash = trace_blobs.hash)
+                        """,
+                        tuple(chunk),
+                    ).fetchone()[0]
+                    deleted_blobs += int(cnt)
+                else:
+                    cur = active_conn.execute(
+                        f"""
+                        DELETE FROM trace_blobs
+                        WHERE hash IN ({ph})
+                          AND NOT EXISTS (SELECT 1 FROM run_blob_refs WHERE blob_hash = trace_blobs.hash)
+                          AND NOT EXISTS (SELECT 1 FROM thread_messages WHERE blob_hash = trace_blobs.hash)
+                        """,
+                        tuple(chunk),
+                    )
+                    deleted_blobs += cur.rowcount
+        else:
+            if dry_run:
+                deleted_blobs = int(
+                    active_conn.execute(
+                        """
+                        SELECT COUNT(*) FROM trace_blobs
+                        WHERE NOT EXISTS (SELECT 1 FROM run_blob_refs WHERE blob_hash = trace_blobs.hash)
+                          AND NOT EXISTS (SELECT 1 FROM thread_messages WHERE blob_hash = trace_blobs.hash)
+                        """
+                    ).fetchone()[0]
+                )
+            else:
+                cur = active_conn.execute(
+                    """
+                    DELETE FROM trace_blobs
+                    WHERE NOT EXISTS (SELECT 1 FROM run_blob_refs WHERE blob_hash = trace_blobs.hash)
+                      AND NOT EXISTS (SELECT 1 FROM thread_messages WHERE blob_hash = trace_blobs.hash)
+                    """
+                )
+                deleted_blobs = cur.rowcount
+
+        if delete_uploads and target_uploads_dir.is_dir():
+            files_to_check: list[str] = []
+            if candidate_uploads is not None:
+                files_to_check = [f for f in candidate_uploads if f]
+            else:
+                # Full sweep: check disk uploads older than 1 hour that have 0 refs in `upload_refs` or `messages.images`
+                cutoff = time.time() - 3600.0
+                known_msg_imgs: set[str] = set()
+                for mr in active_conn.execute("SELECT images FROM messages WHERE images IS NOT NULL").fetchall():
+                    try:
+                        for img_ref in json.loads(mr["images"]) or []:
+                            fn = _normalize_upload_filename(img_ref)
+                            if fn:
+                                known_msg_imgs.add(fn)
+                    except Exception:
+                        continue
+                for p in target_uploads_dir.iterdir():
+                    if p.is_file():
+                        try:
+                            if p.stat().st_mtime < cutoff and p.name not in known_msg_imgs:
+                                files_to_check.append(p.name)
+                        except OSError:
+                            continue
+
+            for fname in files_to_check:
+                safe_name = Path(fname).name
+                if not safe_name or safe_name != fname:
+                    continue
+                ref_exists = active_conn.execute(
+                    "SELECT 1 FROM upload_refs WHERE upload_filename = ? LIMIT 1",
+                    (safe_name,),
+                ).fetchone()
+                if ref_exists:
+                    continue
+                candidate_path = (target_uploads_dir / safe_name).resolve()
+                if not candidate_path.is_relative_to(target_uploads_dir) or not candidate_path.is_file():
+                    continue
+                if dry_run:
+                    deleted_uploads += 1
+                else:
+                    try:
+                        candidate_path.unlink()
+                        deleted_uploads += 1
+                    except OSError:
+                        pass
+
+        return {"deleted_blobs": deleted_blobs, "deleted_uploads": deleted_uploads}
+
+    if conn is not None:
+        return _run_gc(conn)
+
+    with _get_conn() as local_conn:
+        stats = _run_gc(local_conn)
+        if not dry_run:
+            local_conn.commit()
+        return stats
+
+
+# ── Legacy Telemetry Migration (`memory.sqlite` + `logs/runs/*.json`) ────────
+
+def _resolve_model_from_legacy_doc(data: dict[str, Any], meta: dict[str, Any]) -> tuple[str | None, str | None]:
+    raw_name = meta.get("model_name")
+    raw_tier = meta.get("model_tier")
+    if raw_name and raw_name != "unknown":
+        return raw_tier, raw_name
+    reasoning_str = str(data.get("reasoning") or "").lower()
+    if "claude-opus" in reasoning_str:
+        return raw_tier or "strong", "claude-opus-5-5"
+    if "claude-sonnet" in reasoning_str:
+        return raw_tier or "medium", "claude-sonnet-5-5"
+    if "claude-haiku" in reasoning_str:
+        return raw_tier or "low", "claude-haiku-5-5"
+    if "gemini-4-argon" in reasoning_str:
+        return raw_tier or "strong", "gemini-4-argon"
+    if "gemini-4-hydrogen" in reasoning_str:
+        return raw_tier or "low", "gemini-4-hydrogen"
+    if "gemini-3.8-flash" in reasoning_str:
+        return raw_tier or "low", "gemini-3.8-flash"
+    return raw_tier, raw_name
+
+
+def migrate_legacy_telemetry_if_needed(force: bool = False) -> dict[str, Any]:
+    """One-time idempotent migration importing active `memory.sqlite` threads and `logs/runs/*.json` into SQLite."""
+    # Safety guard: never touch production `logs/runs/` or `memory.sqlite` during pytest or when DB_PATH is overridden
+    if not force:
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return {"skipped": "pytest"}
+        if DB_PATH.resolve() != _DEFAULT_DB_PATH.resolve():
+            return {"skipped": "custom_db_path"}
+
+    migration_name = "legacy_memory_and_runs_v1"
+    with _get_conn() as conn:
+        already = conn.execute(
+            "SELECT 1 FROM schema_migrations WHERE name = ?",
+            (migration_name,),
+        ).fetchone()
+        if already and not force:
+            return {"skipped": "already_applied"}
+
+    migrated_threads = 0
+    migrated_runs = 0
+    memory_db_path = PROJECT_ROOT / "src" / "nexus" / "agent" / "memory.sqlite"
+    legacy_runs_dir = PROJECT_ROOT / "logs" / "runs"
+
+    # Phase A: Import active conversation message checkpoints from `memory.sqlite` into `thread_messages`
+    if memory_db_path.is_file():
+        try:
+            from langgraph.checkpoint.sqlite import SqliteSaver
+
+            mem_conn = sqlite3.connect(memory_db_path, timeout=30.0, check_same_thread=False)
+            mem_conn.execute("PRAGMA busy_timeout=30000;")
+            saver = SqliteSaver(mem_conn)
+            try:
+                with _get_conn() as conn:
+                    active_convs = [
+                        r["id"] for r in conn.execute("SELECT id FROM conversations").fetchall()
+                    ]
+                    already_seeded = {
+                        r["thread_id"]
+                        for r in conn.execute("SELECT DISTINCT thread_id FROM thread_messages").fetchall()
+                    }
+                for cid in active_convs:
+                    if cid in already_seeded:
+                        continue
+                    tup = saver.get_tuple({"configurable": {"thread_id": cid}})
+                    if not tup or not isinstance(tup.checkpoint, dict):
+                        continue
+                    channel_vals = tup.checkpoint.get("channel_values") or {}
+                    msgs = channel_vals.get("messages") or []
+                    if msgs:
+                        replace_thread_lc_messages(cid, list(msgs), turn_id="migrated_memory_sqlite")
+                        migrated_threads += 1
+            finally:
+                mem_conn.close()
+        except Exception:
+            # Non-fatal if `memory.sqlite` is empty or incompatible; active threads still reconstruct from `messages`
+            pass
+
+    # Phase B: Import existing `logs/runs/*.json` snapshots into `runs` + `trace_events`
+    if legacy_runs_dir.is_dir():
+        with _get_conn() as conn:
+            existing_run_ids = {r["run_id"] for r in conn.execute("SELECT run_id FROM runs").fetchall()}
+            conv_ids = {r["id"] for r in conn.execute("SELECT id FROM conversations").fetchall()}
+
+            json_files = sorted(legacy_runs_dir.glob("*.json"))
+            for jf in json_files:
+                try:
+                    data = json.loads(jf.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                run_id = str(data.get("run_id") or jf.stem)
+                if not run_id or run_id in existing_run_ids:
+                    continue
+
+                meta = data.get("metadata") or {}
+                tok = meta.get("token_usage") or {}
+                trace_events = data.get("trace_events") or []
+
+                in_tok = int(tok.get("input_tokens", 0) or 0)
+                out_tok = int(tok.get("output_tokens", 0) or 0)
+                cached_tok = int(tok.get("cached_tokens", 0) or 0)
+                reasoning_tok = int(tok.get("reasoning_tokens", 0) or 0)
+
+                if in_tok == 0 and out_tok == 0 and trace_events:
+                    for evt in trace_events:
+                        ed = evt.get("data") if isinstance(evt.get("data"), dict) else {}
+                        if evt.get("type") == "info":
+                            in_tok += int(ed.get("input_tokens", 0) or 0)
+                            out_tok += int(ed.get("output_tokens", 0) or 0)
+                            cached_tok += int(ed.get("cached_tokens", 0) or 0)
+                            reasoning_tok += int(ed.get("reasoning_tokens", 0) or 0)
+
+                model_tier, model_name = _resolve_model_from_legacy_doc(data, meta)
+                cost_usd = data.get("cost_usd")
+                if cost_usd is None:
+                    cost_usd = tok.get("cost_usd")
+                if cost_usd is None and (in_tok or out_tok):
+                    cost_usd = calculate_token_cost(
+                        input_tokens=in_tok,
+                        output_tokens=out_tok,
+                        cached_tokens=cached_tok,
+                        model_name=model_name,
+                        tier=model_tier,
+                    )
+                savings_usd = tok.get("cache_savings_usd")
+                if savings_usd is None and (in_tok or cached_tok):
+                    savings_usd = calculate_cache_savings(
+                        input_tokens=in_tok,
+                        cached_tokens=cached_tok,
+                        model_name=model_name,
+                        tier=model_tier,
+                    )
+
+                subagents_list = data.get("subagents")
+                if subagents_list is None:
+                    sub_count = sum(
+                        1
+                        for e in trace_events
+                        if e.get("type") == "agent_start"
+                        and str(e.get("agent", "")).lower().startswith("subagent")
+                    )
+                else:
+                    sub_count = len(subagents_list)
+
+                thread_id = str(data.get("thread_id") or "unspecified")
+                conv_id = thread_id if thread_id in conv_ids else None
+                status = "error" if meta.get("error") else "done"
+                source = str(meta.get("source") or ("telegram" if str(data.get("agent_name", "")).lower() == "telegram" else "chat"))
+
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO runs (
+                        run_id, timestamp, ended_at, status, source, thread_id, conversation_id,
+                        agent_name, domain, confidence, reasoning, input_query, output_response,
+                        model_tier, model_name, input_tokens, output_tokens, cached_tokens,
+                        reasoning_tokens, cost_usd, cache_savings_usd, latency_seconds,
+                        dpfh_injected_files_json, tool_calls_json, subagents_count,
+                        trace_events_count, metadata_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+                        data.get("timestamp"),
+                        status,
+                        source,
+                        thread_id,
+                        conv_id,
+                        data.get("agent_name") or "nexus",
+                        data.get("domain"),
+                        data.get("confidence"),
+                        data.get("reasoning"),
+                        scrub_secrets(data.get("input_query") or ""),
+                        scrub_secrets(data.get("output_response") or ""),
+                        model_tier,
+                        model_name,
+                        in_tok,
+                        out_tok,
+                        cached_tok,
+                        reasoning_tok,
+                        cost_usd,
+                        savings_usd,
+                        data.get("latency_seconds"),
+                        json.dumps(data.get("dpfh_injected_files") or [], ensure_ascii=False),
+                        json.dumps(scrub_structure(data.get("tool_calls") or []), ensure_ascii=False, default=str),
+                        sub_count,
+                        len(trace_events),
+                        json.dumps(scrub_structure(meta), ensure_ascii=False, default=str),
+                    ),
+                )
+                if trace_events:
+                    scrubbed_evts = scrub_structure(trace_events)
+                    conn.executemany(
+                        "INSERT INTO trace_events (run_id, seq, event_json) VALUES (?, ?, ?)",
+                        [
+                            (run_id, idx, json.dumps(e, ensure_ascii=False, default=str))
+                            for idx, e in enumerate(scrubbed_evts, start=1)
+                        ],
+                    )
+                existing_run_ids.add(run_id)
+                migrated_runs += 1
+
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_migrations (name, applied_at, details) VALUES (?, ?, ?)",
+                (
+                    migration_name,
+                    datetime.now(timezone.utc).isoformat(),
+                    json.dumps({"migrated_threads": migrated_threads, "migrated_runs": migrated_runs}),
+                ),
+            )
+            conn.commit()
+    else:
+        with _get_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_migrations (name, applied_at, details) VALUES (?, ?, ?)",
+                (
+                    migration_name,
+                    datetime.now(timezone.utc).isoformat(),
+                    json.dumps({"migrated_threads": migrated_threads, "migrated_runs": 0}),
+                ),
+            )
+            conn.commit()
+
+    return {"migrated_threads": migrated_threads, "migrated_runs": migrated_runs}
+
+
+# ── Conversation & Message CRUD ──────────────────────────────────────────────
 
 def create_conversation(
     title: str = "New Chat",
@@ -339,19 +1616,62 @@ def get_conversations() -> list[dict]:
         rows = conn.execute("SELECT * FROM conversations ORDER BY last_updated DESC").fetchall()
         return [dict(r) for r in rows]
 
+
 def get_conversation(conversation_id: str) -> dict | None:
     with _get_conn() as conn:
         row = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
         return dict(row) if row else None
 
+
 def delete_conversation(conversation_id: str):
     with _get_conn() as conn:
+        # Gather candidate blob hashes and upload files owned by this conversation's runs & messages before cascade delete
+        run_ids = [
+            r["run_id"]
+            for r in conn.execute(
+                "SELECT run_id FROM runs WHERE conversation_id = ? OR thread_id = ?",
+                (conversation_id, conversation_id),
+            ).fetchall()
+        ]
+        msg_ids = [
+            r["id"]
+            for r in conn.execute(
+                "SELECT id FROM messages WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchall()
+        ]
+
+        candidate_hashes: set[str] = set()
+        candidate_uploads: set[str] = set()
+        if run_ids:
+            ph = ",".join("?" for _ in run_ids)
+            for row in conn.execute(
+                f"SELECT blob_hash FROM run_blob_refs WHERE run_id IN ({ph})",
+                tuple(run_ids),
+            ).fetchall():
+                candidate_hashes.add(row["blob_hash"])
+
+        owner_keys = [f"run:{rid}" for rid in run_ids] + [f"msg:{mid}" for mid in msg_ids]
+        if owner_keys:
+            ph = ",".join("?" for _ in owner_keys)
+            for row in conn.execute(
+                f"SELECT upload_filename FROM upload_refs WHERE owner_key IN ({ph})",
+                tuple(owner_keys),
+            ).fetchall():
+                candidate_uploads.add(row["upload_filename"])
+            conn.execute(f"DELETE FROM upload_refs WHERE owner_key IN ({ph})", tuple(owner_keys))
+
         # Promote any child branches to root level so deleting a parent never orphans child threads
         conn.execute(
             "UPDATE conversations SET parent_conversation_id = NULL WHERE parent_conversation_id = ?",
             (conversation_id,),
         )
-        # Purge diagnostic execution traces and cached external captures linked to this conversation
+        # Purge canonical thread messages, runs (cascades trace_events + run_blob_refs), legacy traces, and captures
+        conn.execute("DELETE FROM thread_messages WHERE thread_id = ?", (conversation_id,))
+        conn.execute(
+            "DELETE FROM runs WHERE conversation_id = ? OR thread_id = ?",
+            (conversation_id, conversation_id),
+        )
         conn.execute(
             "DELETE FROM message_traces WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)",
             (conversation_id,),
@@ -359,11 +1679,19 @@ def delete_conversation(conversation_id: str):
         conn.execute("DELETE FROM conversation_captures WHERE conversation_id = ?", (conversation_id,))
         conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
         conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+
+        gc_unreferenced_telemetry(
+            conn=conn,
+            candidate_hashes=candidate_hashes,
+            candidate_uploads=candidate_uploads,
+            delete_uploads=True,
+        )
         conn.commit()
     # Purge any cached instruction-hydration ledger entries for this thread and its `:subagent-*` children.
     from nexus.core.instruction_guard import clear_seen_instructions
 
     clear_seen_instructions(conversation_id)
+
 
 # `*` enforces keyword-only optional guards so legacy positional callers `update_conversation_title(id, title)` remain compatible
 def update_conversation_title(
@@ -403,6 +1731,7 @@ def update_conversation_title(
         conn.commit()
         return cursor.rowcount > 0
 
+
 # `images: list[str] | None` accepts an optional array of image file URLs/paths (e.g. `/api/agents/uploads/<uuid>.png`)
 def log_message(
     role: str,
@@ -416,38 +1745,70 @@ def log_message(
     model_tier: str | None = None,
     model_name: str | None = None,
     cost_usd: float | None = None,
+    run_id: str | None = None,
 ) -> int | None:
     if not conversation_id:
         return None
-    
+
     with _get_conn() as conn:
         now = datetime.now(timezone.utc).isoformat()
-        # Serialize list of image URLs/paths to a JSON string for lightweight column storage
-        images_json = json.dumps(images) if images else None
-        has_trace = 1 if (trace and len(trace) > 0) else 0
+        # Ensure parent `conversations` row exists so PRAGMA foreign_keys = ON never rejects standalone callers
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO conversations (id, title, created_at, last_updated, title_source)
+            VALUES (?, 'New Chat', ?, ?, 'placeholder')
+            """,
+            (conversation_id, now, now),
+        )
 
-        # Primary messages table row is kept strictly lean: trace column remains NULL,
-        # preventing large JSON blobs from triggering SQLite overflow page chaining during chat queries.
-        cursor = conn.execute("""
+        images_json = json.dumps(images) if images else None
+        has_run_trace = False
+        if run_id:
+            has_run_trace = bool(
+                conn.execute("SELECT 1 FROM trace_events WHERE run_id = ? LIMIT 1", (run_id,)).fetchone()
+            )
+        has_trace = 1 if (has_run_trace or (trace and len(trace) > 0)) else 0
+
+        # Primary messages table row stays lean: trace column remains NULL and `run_id` points to live `trace_events`
+        cursor = conn.execute(
+            """
             INSERT INTO messages (
                 conversation_id, role, content, agent, domain, confidence,
-                trace, timestamp, images, model_tier, model_name, cost_usd, has_trace
+                trace, timestamp, images, model_tier, model_name, cost_usd, has_trace, run_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
-        """, (
-            conversation_id, role, content, agent, domain, confidence,
-            now, images_json, model_tier, model_name, cost_usd, has_trace
-        ))
-        
-        msg_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
+            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                conversation_id,
+                role,
+                content,
+                agent,
+                domain,
+                confidence,
+                now,
+                images_json,
+                model_tier,
+                model_name,
+                cost_usd,
+                has_trace,
+                run_id,
+            ),
+        )
 
-        # Isolate heavy diagnostic execution traces into dedicated message_traces table
-        if trace and msg_id is not None:
-            trace_json = json.dumps(trace)
-            conn.execute("""
+        msg_id = int(cursor.lastrowid) if cursor.lastrowid is not None else None
+        if msg_id is not None and images:
+            _register_upload_refs_conn(conn, f"msg:{msg_id}", images)
+
+        # Write `message_traces` only when no live `run_id` trace_events exist (preserves unit tests & legacy callers without double storage)
+        if not has_run_trace and trace and msg_id is not None:
+            trace_json = json.dumps(scrub_structure(trace))
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO message_traces (message_id, trace)
                 VALUES (?, ?)
-            """, (msg_id, trace_json))
+                """,
+                (msg_id, trace_json),
+            )
 
         # Only overwrite remembered model metadata when this message actually carries model attribution;
         # synthetic entries (`branch_context`, `branch_merge`) and error logs pass None and must preserve prior state
@@ -460,6 +1821,21 @@ def log_message(
             conn.execute("UPDATE conversations SET last_updated = ? WHERE id = ?", (now, conversation_id))
         conn.commit()
         return msg_id
+
+
+def _load_trace_events_for_run_conn(conn: sqlite3.Connection, run_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT event_json FROM trace_events WHERE run_id = ? ORDER BY seq ASC",
+        (run_id,),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        try:
+            out.append(json.loads(r["event_json"]))
+        except Exception:
+            continue
+    return out
+
 
 def get_chat_history(
     conversation_id: str,
@@ -482,7 +1858,7 @@ def get_chat_history(
         if include_trace:
             query = """
                 SELECT m.id, m.role, m.content, m.agent, m.domain, m.confidence,
-                       m.timestamp, m.images, m.model_tier, m.model_name, m.cost_usd, m.has_trace,
+                       m.timestamp, m.images, m.model_tier, m.model_name, m.cost_usd, m.has_trace, m.run_id,
                        t.trace AS trace_payload
                 FROM messages m
                 LEFT JOIN message_traces t ON t.message_id = m.id
@@ -492,7 +1868,7 @@ def get_chat_history(
         else:
             query = """
                 SELECT id, role, content, agent, domain, confidence,
-                       timestamp, images, model_tier, model_name, cost_usd, has_trace
+                       timestamp, images, model_tier, model_name, cost_usd, has_trace, run_id
                 FROM messages 
                 WHERE conversation_id = ? 
                 ORDER BY id ASC
@@ -503,16 +1879,18 @@ def get_chat_history(
             query += " LIMIT ?"
 
         rows = conn.execute(query, params).fetchall()
-        
+
         history = []
         for r in rows:
-            # Safely extract and deserialize optional images JSON array
             raw_images = r["images"] if "images" in r.keys() else None
             parsed_images = json.loads(raw_images) if raw_images else []
 
             if include_trace:
-                raw_trace = r["trace_payload"] if "trace_payload" in r.keys() else None
-                trace_events = json.loads(raw_trace) if raw_trace else []
+                run_id = r["run_id"] if "run_id" in r.keys() else None
+                trace_events = _load_trace_events_for_run_conn(conn, run_id) if run_id else []
+                if not trace_events:
+                    raw_trace = r["trace_payload"] if "trace_payload" in r.keys() else None
+                    trace_events = json.loads(raw_trace) if raw_trace else []
             else:
                 trace_events = []
 
@@ -532,6 +1910,7 @@ def get_chat_history(
                 "model_name": r["model_name"] if "model_name" in r.keys() else None,
                 "cost_usd": r["cost_usd"] if "cost_usd" in r.keys() else None,
                 "has_trace": has_trace,
+                "run_id": r["run_id"] if "run_id" in r.keys() else None,
             })
         return history
 
@@ -539,15 +1918,18 @@ def get_chat_history(
 def get_message_trace(message_id: int) -> list[dict]:
     """
     Retrieves the full, untruncated trace events array for a specific message ID on demand.
-    Checks `message_traces` table first, with fallback to legacy `messages.trace`.
-
-    Parameters:
-      message_id: The SQLite primary key of the target assistant message.
-
-    Returns:
-      Deserialized list of trace event dictionaries, or an empty list if none exist.
+    Checks normalized `trace_events` (via `messages.run_id`) first, then `message_traces`, then legacy `messages.trace`.
     """
     with _get_conn() as conn:
+        msg_row = conn.execute(
+            "SELECT run_id, trace FROM messages WHERE id = ?",
+            (message_id,),
+        ).fetchone()
+        if msg_row and msg_row["run_id"]:
+            events = _load_trace_events_for_run_conn(conn, msg_row["run_id"])
+            if events:
+                return events
+
         row = conn.execute(
             "SELECT trace FROM message_traces WHERE message_id = ?",
             (message_id,),
@@ -557,15 +1939,10 @@ def get_message_trace(message_id: int) -> list[dict]:
                 return json.loads(row["trace"])
             except Exception:
                 return []
-        
-        # Fallback check on legacy messages column if not yet migrated
-        legacy_row = conn.execute(
-            "SELECT trace FROM messages WHERE id = ?",
-            (message_id,),
-        ).fetchone()
-        if legacy_row and legacy_row["trace"]:
+
+        if msg_row and msg_row["trace"]:
             try:
-                return json.loads(legacy_row["trace"])
+                return json.loads(msg_row["trace"])
             except Exception:
                 return []
         return []
@@ -573,51 +1950,46 @@ def get_message_trace(message_id: int) -> list[dict]:
 
 def revert_last_turn(conversation_id: str) -> dict | None:
     """
-    Reverts the latest turn in a conversation by deleting its messages from SQLite `chats.db`.
-    
-    Handles two operational states:
-      1. Mid-turn Abort (Stop & Revert): Only the user prompt was persisted when execution was stopped;
-         deletes the solitary user message and restores its text and attached images.
-      2. Completed Turn Rollback: Both user prompt and assistant response were persisted;
-         deletes both messages in reverse chronological order and restores the user's prompt text.
-         
-    Parameters:
-      conversation_id: The UUID of the conversation thread.
-      
-    Returns:
-      Dictionary with restored user prompt, image URLs, and deleted message count:
-      `{"restored_query": str, "images": list[str], "deleted_count": int}`
-      or None if the conversation thread contains no messages.
+    Reverts the latest turn in a conversation by deleting its messages, run telemetry, and canonical
+    `thread_messages` turn rows from SQLite `chats.db` (while keeping `restored_images` on disk for composer recovery).
     """
     if not conversation_id:
         return None
 
     with _get_conn() as conn:
-        # Fetch all messages for this conversation ordered chronologically
-        rows = conn.execute("""
-            SELECT id, role, content, images
+        rows = conn.execute(
+            """
+            SELECT id, role, content, images, run_id, timestamp
             FROM messages
             WHERE conversation_id = ?
             ORDER BY id ASC
-        """, (conversation_id,)).fetchall()
+            """,
+            (conversation_id,),
+        ).fetchall()
 
         if not rows:
             return None
 
         last_row = rows[-1]
         ids_to_delete: list[int] = []
+        run_ids_to_delete: set[str] = set()
         restored_query = ""
         restored_images: list[str] = []
+        user_turn_ts: str | None = None
 
         if last_row["role"] == "assistant":
             ids_to_delete.append(last_row["id"])
-            # Search backwards for the corresponding user message that prompted this assistant reply
+            if last_row["run_id"]:
+                run_ids_to_delete.add(last_row["run_id"])
             for r in reversed(rows[:-1]):
                 if r["role"] == "user":
                     ids_to_delete.append(r["id"])
                     restored_query = r["content"] or ""
                     raw_images = r["images"] if "images" in r.keys() else None
                     restored_images = json.loads(raw_images) if raw_images else []
+                    user_turn_ts = r["timestamp"]
+                    if r["run_id"]:
+                        run_ids_to_delete.add(r["run_id"])
                     break
         elif last_row["role"] == "user":
             # Mid-turn abort: only the user prompt exists at the tail of the message log
@@ -625,13 +1997,67 @@ def revert_last_turn(conversation_id: str) -> dict | None:
             restored_query = last_row["content"] or ""
             raw_images = last_row["images"] if "images" in last_row.keys() else None
             restored_images = json.loads(raw_images) if raw_images else []
+            user_turn_ts = last_row["timestamp"]
+            if last_row["run_id"]:
+                run_ids_to_delete.add(last_row["run_id"])
+
+        # Also capture any in-flight `running` run or run started at/after the reverted user prompt
+        for rr in conn.execute(
+            """
+            SELECT run_id, status, timestamp FROM runs
+            WHERE (conversation_id = ? OR thread_id = ?)
+              AND (status = 'running' OR (? IS NOT NULL AND timestamp >= ?))
+            """,
+            (conversation_id, conversation_id, user_turn_ts, user_turn_ts),
+        ).fetchall():
+            run_ids_to_delete.add(rr["run_id"])
 
         if ids_to_delete:
+            candidate_hashes: set[str] = set()
+            if run_ids_to_delete:
+                rph = ",".join("?" for _ in run_ids_to_delete)
+                for row in conn.execute(
+                    f"SELECT blob_hash FROM run_blob_refs WHERE run_id IN ({rph})",
+                    tuple(run_ids_to_delete),
+                ).fetchall():
+                    candidate_hashes.add(row["blob_hash"])
+                # Clear `thread_messages` for reverted turn IDs before deleting the runs
+                conn.execute(
+                    f"DELETE FROM thread_messages WHERE thread_id = ? AND turn_id IN ({rph})",
+                    (conversation_id, *run_ids_to_delete),
+                )
+            else:
+                # Fallback when reverting a legacy/untagged turn: drop from the last human turn boundary onward
+                last_human = conn.execute(
+                    "SELECT id FROM thread_messages WHERE thread_id = ? AND msg_type = 'human' ORDER BY id DESC LIMIT 1",
+                    (conversation_id,),
+                ).fetchone()
+                if last_human:
+                    conn.execute(
+                        "DELETE FROM thread_messages WHERE thread_id = ? AND id >= ?",
+                        (conversation_id, last_human["id"]),
+                    )
+
+            owner_keys = [f"msg:{mid}" for mid in ids_to_delete] + [f"run:{rid}" for rid in run_ids_to_delete]
+            oph = ",".join("?" for _ in owner_keys)
+            conn.execute(f"DELETE FROM upload_refs WHERE owner_key IN ({oph})", tuple(owner_keys))
+
             placeholders = ",".join("?" for _ in ids_to_delete)
-            # Purge corresponding diagnostic traces from message_traces table
             conn.execute(f"DELETE FROM message_traces WHERE message_id IN ({placeholders})", ids_to_delete)
             conn.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", ids_to_delete)
-            # Recompute remembered model from the newest remaining message carrying model metadata (or NULL if empty)
+
+            if run_ids_to_delete:
+                rph = ",".join("?" for _ in run_ids_to_delete)
+                conn.execute(f"DELETE FROM runs WHERE run_id IN ({rph})", tuple(run_ids_to_delete))
+
+            # Reclaim zero-ref trace blobs immediately while preserving `restored_images` on disk!
+            if candidate_hashes:
+                gc_unreferenced_telemetry(
+                    conn=conn,
+                    candidate_hashes=candidate_hashes,
+                    delete_uploads=False,
+                )
+
             latest_model_row = conn.execute(
                 """
                 SELECT model_tier, model_name
@@ -645,7 +2071,6 @@ def revert_last_turn(conversation_id: str) -> dict | None:
             ).fetchone()
             next_tier = latest_model_row["model_tier"] if latest_model_row else None
             next_name = latest_model_row["model_name"] if latest_model_row else None
-            # Update last_updated timestamp and restored model metadata on parent conversation row
             now = datetime.now(timezone.utc).isoformat()
             conn.execute(
                 "UPDATE conversations SET last_updated = ?, last_model_tier = ?, last_model_name = ? WHERE id = ?",
@@ -660,4 +2085,3 @@ def revert_last_turn(conversation_id: str) -> dict | None:
             }
 
         return None
-

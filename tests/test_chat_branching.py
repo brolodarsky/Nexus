@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 
 from nexus.api.main import app
-from nexus.agent.graph import CORE_TOOLS, TOOLS, nexus_graph, rollback_checkpoints_for_thread
+from nexus.agent.graph import CORE_TOOLS, TOOLS
 from nexus.core.chat_branching import spawn_seeded_conversation
 from nexus.core.hitl_queue import reset_hitl_execution_context, set_hitl_execution_context
 from nexus.shared_tools.shared import spawn_conversation
@@ -28,6 +28,7 @@ from nexus.core.chats_db import (
     delete_conversation,
     get_chat_history,
     get_conversation,
+    load_thread_lc_messages,
     log_message,
 )
 
@@ -83,7 +84,6 @@ def seeded_parent_conv():
         }
     finally:
         for cid in created_ids:
-            rollback_checkpoints_for_thread(cid)
             delete_conversation(cid)
 
 
@@ -319,9 +319,8 @@ def test_spawn_seeded_conversation_nested_under_parent(seeded_parent_conv):
     assert "Context Brief" in history[0]["content"]
     assert "18f4a9c" in history[0]["content"]
 
-    # Verify LangGraph SqliteSaver checkpoint was hydrated with HumanMessage anchor + AIMessage brief
-    lg_state = nexus_graph.get_state({"configurable": {"thread_id": child_id, "conversation_id": child_id}})
-    seeded_msgs = lg_state.values.get("messages", [])
+    # Verify canonical `thread_messages` was hydrated with HumanMessage anchor + AIMessage brief
+    seeded_msgs = load_thread_lc_messages(child_id)
     assert len(seeded_msgs) == 2
     assert isinstance(seeded_msgs[0], HumanMessage)
     assert isinstance(seeded_msgs[1], AIMessage)
@@ -352,8 +351,7 @@ def test_spawn_seeded_conversation_standalone_root(seeded_parent_conv):
     assert conv["branch_mode"] is None
     assert conv["title_source"] == "manual"
 
-    lg_state = nexus_graph.get_state({"configurable": {"thread_id": root_id, "conversation_id": root_id}})
-    seeded_msgs = lg_state.values.get("messages", [])
+    seeded_msgs = load_thread_lc_messages(root_id)
     assert len(seeded_msgs) == 2
     assert isinstance(seeded_msgs[0], HumanMessage)
     assert isinstance(seeded_msgs[1], AIMessage)
@@ -497,8 +495,7 @@ def test_spawn_conversation_target_section_and_broken_path_lint_pass(
     assert "Section Instructions.md" in brief_content
     assert "[SYSTEM WARNING:" in brief_content
 
-    lg_state = nexus_graph.get_state({"configurable": {"thread_id": bad_child_id, "conversation_id": bad_child_id}})
-    seeded_msgs = lg_state.values.get("messages", [])
+    seeded_msgs = load_thread_lc_messages(bad_child_id)
     assert len(seeded_msgs) == 2
     assert isinstance(seeded_msgs[0], HumanMessage)
     assert (
@@ -626,5 +623,4 @@ def test_branch_and_merge_preserve_remembered_model(client):
         assert parent_after["last_model_name"] == "gemini-4-hydrogen"
     finally:
         for cid in created_ids:
-            rollback_checkpoints_for_thread(cid)
             delete_conversation(cid)

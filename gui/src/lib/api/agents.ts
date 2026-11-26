@@ -255,9 +255,95 @@ export async function getAgentRuns(limit = 50, agent?: string): Promise<RunSumma
   return apiFetch<RunSummary[]>(`/api/agents/runs?${params.toString()}`);
 }
 
-// Fetches a single complete, untruncated run snapshot by run_id or filename
+// Fetches a single complete, untruncated run snapshot by run_id
 export async function getAgentRun(runId: string): Promise<RunSnapshot> {
   return apiFetch<RunSnapshot>(`/api/agents/runs/${encodeURIComponent(runId)}`);
+}
+
+// ── Content-Addressed Trace Blobs (`trace_blobs`) ──────────────────────────
+
+// Interface describing one folded entry inside an `agent_start` or `llm_call` `context_manifest` array
+export interface ContextManifestEntry {
+  role: string;                // Section discriminator ("system", "protocol", "tools", "prehydrated", "history", "prompt")
+  label: string;               // Human-readable label shown on the folded row
+  hash: string;                // SHA-256 hex digest pointing to SQLite `trace_blobs.hash`
+  kind: string;                // Backend blob kind ("system_prompt", "tool_schemas", "prehydrated_context", etc.)
+  chars: number;               // Exact UTF-8 character count of the scrubbed blob
+  approx_tokens: number;       // Deterministic ceiling(chars / 4) token estimate
+  tool_names?: string[];       // Optional bound tool names list on `tools` entries
+  context_files?: string[];    // Optional hydrated filenames on `prehydrated` entries
+}
+
+// Interface describing aggregate `context_summary` telemetry attached to `agent_start` / `llm_call`
+export interface ContextSummary {
+  total_chars: number;         // Sum of `chars` across all entries in `context_manifest`
+  approx_tokens: number;       // Estimated total tokens (`ceil(total_chars / 4)`)
+  section_count: number;       // Number of manifest blocks
+  prior_messages_count: number;// Number of prior conversation/loop messages included
+  tool_count: number;          // Number of bound tool schemas included
+}
+
+// Interface describing the JSON response from GET /api/agents/trace-blobs/{blob_hash}
+export interface TraceBlobItem {
+  hash: string;
+  kind: string;
+  content: string;
+  char_count: number;
+  approx_tokens: number;
+  created_at: string;
+}
+
+// Process-local browser cache + in-flight request deduplication so sibling subagents share fetched `trace_blobs`
+const traceBlobCache = new Map<string, string>();
+const traceBlobInflight = new Map<string, Promise<string>>();
+
+// Fetches one deduplicated context blob by SHA-256 hash, caching the content in browser memory
+export async function getTraceBlobContent(hash: string): Promise<string> {
+  const cached = traceBlobCache.get(hash);
+  if (cached !== undefined) return cached;
+
+  const inflight = traceBlobInflight.get(hash);
+  if (inflight) return inflight;
+
+  const req = apiFetch<TraceBlobItem>(`/api/agents/trace-blobs/${encodeURIComponent(hash)}`)
+    .then((res) => {
+      traceBlobCache.set(hash, res.content);
+      return res.content;
+    })
+    .finally(() => {
+      traceBlobInflight.delete(hash);
+    });
+
+  traceBlobInflight.set(hash, req);
+  return req;
+}
+
+// Batch-fetches any uncached context blobs for full-context reconstruction in one HTTP round-trip
+export async function getTraceBlobsBatch(hashes: string[]): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
+  const missing: string[] = [];
+
+  for (const h of hashes) {
+    if (!h) continue;
+    const cached = traceBlobCache.get(h);
+    if (cached !== undefined) {
+      result[h] = cached;
+    } else if (!missing.includes(h)) {
+      missing.push(h);
+    }
+  }
+
+  if (missing.length > 0) {
+    const res = await apiFetch<{ blobs: Record<string, TraceBlobItem> }>("/api/agents/trace-blobs/batch", {
+      method: "POST",
+      body: JSON.stringify({ hashes: missing }),
+    });
+    for (const [h, item] of Object.entries(res.blobs || {})) {
+      traceBlobCache.set(h, item.content);
+      result[h] = item.content;
+    }
+  }
+  return result;
 }
 
 // Interface describing the JSON metadata returned by POST /api/agents/upload

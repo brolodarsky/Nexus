@@ -867,6 +867,7 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
     turn_cost_formatted = round(turn_cost_usd, 4) if turn_cost_usd else None
 
     # Persist assistant message + trace to `chats.db`
+    effective_run_id = result.get("run_id")
     log_message(
         role="assistant",
         content=response_text,
@@ -878,9 +879,10 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
         model_tier=used_tier,
         model_name=used_model,
         cost_usd=turn_cost_formatted,
+        run_id=effective_run_id,
     )
 
-    # Persist run log snapshot to `logs/runs/`
+    # Finalize unified SQLite run record
     log_run(
         agent_name="nexus",
         query=effective_query,
@@ -893,6 +895,8 @@ def process_telegram_message(message: dict[str, Any], token: Optional[str] = Non
         trace_events=trace_events,
         latency_seconds=elapsed_sec,
         metadata={"source": "telegram", "model_tier": used_tier, "model_name": used_model},
+        run_id=effective_run_id,
+        source="telegram",
     )
 
     # Auto-title new mobile conversation (or recover any prior placeholder mobile thread) using fast low-tier model

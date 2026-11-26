@@ -5,12 +5,14 @@ Automatically boots the Telegram Mobile Bridge long-polling worker during server
 """
 # asynccontextmanager: Decorator transforming an async generator (`yield`) into an async context manager
 # used by FastAPI's `lifespan` hook to run startup initialization before `yield` and shutdown cleanup after `yield`.
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nexus.api.routers import agents, browser, chat_branches, hitl, tools, vault
+from nexus.core.chats_db import migrate_legacy_telemetry_if_needed
 from nexus.shared_tools.telegram_bridge import (
     get_telegram_bridge_status,
     start_telegram_poller,
@@ -21,7 +23,8 @@ from nexus.shared_tools.telegram_bridge import (
 # `app: FastAPI` is the application instance passed by Starlette/Uvicorn during server startup and shutdown.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage background engine workers (e.g. Telegram Mobile Bridge long-poller) across the FastAPI lifecycle."""
+    """Manage background engine workers and one-time legacy telemetry migration across the FastAPI lifecycle."""
+    await asyncio.to_thread(migrate_legacy_telemetry_if_needed)
     await start_telegram_poller()
     try:
         yield

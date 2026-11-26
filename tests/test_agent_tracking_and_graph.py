@@ -123,11 +123,8 @@ def test_concurrent_thread_subagent_counter_and_provider_isolation():
     assert id_a3 == "subagent-1"
 
 
-def test_log_run_persists_subagents_and_token_telemetry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Verify log_run structures subagent breakdowns and token counts into logs/runs/ snapshots."""
-    test_runs_dir = tmp_path / "runs"
-    monkeypatch.setattr("nexus.core.run_logger.RUNS_DIR", test_runs_dir)
-
+def test_log_run_persists_subagents_and_token_telemetry():
+    """Verify log_run structures subagent breakdowns and token counts into SQLite runs."""
     long_subagent_prompt = "Inspect all 5 career files and draft a 5000 word proposal: " + ("X" * 2000)
     mock_events = [
         {
@@ -187,7 +184,7 @@ def test_log_run_persists_subagents_and_token_telemetry(tmp_path: Path, monkeypa
         },
     ]
 
-    file_path = log_run(
+    run_id = log_run(
         agent_name="nexus",
         query="Research career files",
         response="Here is the finalized synthesis",
@@ -196,9 +193,9 @@ def test_log_run_persists_subagents_and_token_telemetry(tmp_path: Path, monkeypa
         latency_seconds=4.5,
     )
 
-    assert file_path.is_file()
-    with open(file_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    assert isinstance(run_id, str)
+    data = get_run(run_id)
+    assert data is not None
 
     assert data["subagents_count"] == 1
     assert len(data["subagents"]) == 1
@@ -212,8 +209,8 @@ def test_log_run_persists_subagents_and_token_telemetry(tmp_path: Path, monkeypa
 
     # Test list_runs
     summaries = list_runs(limit=10)
-    assert len(summaries) == 1
-    summary = summaries[0]
+    assert len(summaries) >= 1
+    summary = next(s for s in summaries if s["run_id"] == run_id)
     assert summary["subagents_count"] == 1
     assert summary["input_query"] == "Research career files"
 
@@ -729,14 +726,13 @@ def test_subagent_uncached_token_budget_ignores_cached_tokens(monkeypatch: pytes
 
 
 def test_subagent_soft_landing_warning_preserves_prefix_and_logs_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """Verify soft warning appends once to tail ToolMessage only (KV-safe) and run_logger preserves telemetry."""
     from unittest.mock import MagicMock
     from langchain_core.messages import AIMessage, ToolMessage
     from nexus.agent import graph as graph_mod
 
-    monkeypatch.setattr("nexus.core.run_logger.RUNS_DIR", tmp_path)
     monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 5)
     monkeypatch.setattr(graph_mod.settings, "subagent_max_uncached_input_tokens", 450_000)
 
@@ -810,7 +806,7 @@ def test_subagent_soft_landing_warning_preserves_prefix_and_logs_cleanly(
     assert soft_evts[0]["data"]["turn"] == 3
 
     # Regression check: run_logger.log_run() aggregates subagents[], cost_usd, and token_usage cleanly
-    run_path = log_run(
+    run_id = log_run(
         agent_name="nexus",
         query="Soft landing audit test",
         response=res,
@@ -818,7 +814,8 @@ def test_subagent_soft_landing_warning_preserves_prefix_and_logs_cleanly(
         trace_events=emitted,
         metadata={"model_tier": "strong", "model_name": "gemini-4-argon"},
     )
-    saved = json.loads(run_path.read_text(encoding="utf-8"))
+    saved = get_run(run_id)
+    assert saved is not None
     assert saved["subagents_count"] == 1
     assert saved["subagents"][0]["input_tokens"] == (600 + 700 + 800 + 900)
     assert saved["subagents"][0]["cached_tokens"] == (400 + 400 + 400 + 800)
@@ -826,10 +823,8 @@ def test_subagent_soft_landing_warning_preserves_prefix_and_logs_cleanly(
     assert saved["cost_usd"] > 0.0
 
 
-def test_agent_tracer_and_log_run_preserve_llm_thinking(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_tracer_and_log_run_preserve_llm_thinking() -> None:
     """Verify AgentTracer.llm_thinking emits lossless thinking events and log_run preserves them + reasoning_tokens."""
-    monkeypatch.setattr("nexus.core.run_logger.RUNS_DIR", tmp_path)
-
     emitted: list[dict] = []
     unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-think-audit")
     tok = set_trace_thread_id("conv-think-audit")
@@ -867,7 +862,7 @@ def test_agent_tracer_and_log_run_preserve_llm_thinking(tmp_path: Path, monkeypa
     assert root_think_evt["data"]["thinking"] == long_thought
     assert root_think_evt["message"] == long_thought
 
-    run_path = log_run(
+    run_id = log_run(
         agent_name="nexus",
         query="Audit reasoning logs",
         response="All set.",
@@ -875,7 +870,8 @@ def test_agent_tracer_and_log_run_preserve_llm_thinking(tmp_path: Path, monkeypa
         trace_events=emitted,
         metadata={"model_tier": "strong", "model_name": "gemini-4-argon"},
     )
-    saved = json.loads(run_path.read_text(encoding="utf-8"))
+    saved = get_run(run_id)
+    assert saved is not None
     assert any(e["type"] == "llm_thinking" and e["data"]["thinking"] == long_thought for e in saved["trace_events"])
     assert len(saved["subagents"]) == 1
     assert any(

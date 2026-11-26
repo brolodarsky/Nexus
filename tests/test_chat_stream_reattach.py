@@ -67,7 +67,7 @@ def test_active_run_backlog_and_live_reattach(client: TestClient, temp_conv: str
     first_steps_emitted = threading.Event()
     allow_completion = threading.Event()
 
-    def simulated_agent(query: str, thread_id: str, model_tier=None, images=None):
+    def simulated_agent(query: str, thread_id: str, model_tier=None, images=None, **_kwargs):
         tracer = AgentTracer("NexusAgent", color="cyan", agent_id="nexus", thread_id=thread_id)
         tracer.agent_start(f"Query: {query}", metadata={"model_tier": model_tier or "strong"})
         tracer.tool_call("vault_reader", args={"query": "flush"})
@@ -266,7 +266,7 @@ def test_stream_failure_persists_assistant_error_and_emits_terminal_error(client
     """Verify unhandled agent exceptions emit SSE 'error' AND persist an assistant error message + trace in chats.db."""
     monkeypatch.setattr("nexus.core.run_logger.RUNS_DIR", tmp_path / "runs")
 
-    def failing_agent(query: str, thread_id: str, model_tier=None, images=None):
+    def failing_agent(query: str, thread_id: str, model_tier=None, images=None, **_kwargs):
         tracer = AgentTracer("NexusAgent", color="cyan", agent_id="nexus", thread_id=thread_id)
         tracer.agent_start(f"Query: {query}")
         tracer.tool_call("fetch_emails", args={"query": "label:Jobs"})
