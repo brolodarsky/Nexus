@@ -1,8 +1,8 @@
 """
 audit_agent_health.py — Deterministic Subagent Health, Cache Integrity & Budget Telemetry Auditor.
 
-Scans persisted run snapshots in `logs/runs/*.json` to evaluate subagent efficiency without
-requiring any LLM judge calls:
+Queries persisted execution runs in SQLite `chats.db` (`runs` + `trace_events`) to evaluate subagent
+efficiency without requiring any LLM judge calls:
   1. Soft-warning and hard-cap breaker trigger rates (both structured `event_kind` & legacy logs).
   2. Prompt-cache integrity on normal turns vs. budget-capped synthesis turns + normalized cost share.
   3. Runaway signals (duplicate tool calls, error bursts, 429s, timeouts) vs. truncation signals
@@ -32,9 +32,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+import nexus.core.chats_db as chats_db
 from nexus.core.cost import calculate_token_cost
-
-DEFAULT_RUNS_DIR = PROJECT_ROOT / "logs" / "runs"
 
 # Regex patterns used for classifying behavioral intent and truncation signals deterministically
 _WRITE_INTENT_RE = re.compile(
@@ -47,7 +46,6 @@ _INCOMPLETE_KW_RE = re.compile(
     r"still need|pending|did not finish|only completed|partially|stopped before|was unable)",
     re.IGNORECASE,
 )
-_FILENAME_TS_RE = re.compile(r"^(\d{8}T\d{6})Z_")
 
 
 # `raw_ts: str` is an ISO date (`YYYY-MM-DD`) or datetime (`YYYY-MM-DDTHH:MM[:SS][Z]`).
@@ -61,22 +59,6 @@ def _parse_cutoff_dt(raw_ts: str) -> datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
-
-
-# `filename: str` is a snapshot filename like `20261125T205253Z_nexus_dcd60d1c.json`, `doc` is its parsed JSON dict.
-# `-> Optional[datetime]` returns the UTC timestamp from the filename prefix or JSON `timestamp` field.
-def _extract_snapshot_dt(filename: str, doc: Dict[str, Any]) -> Optional[datetime]:
-    """Resolve the UTC timestamp of a run snapshot from its filename prefix or ISO `timestamp` field."""
-    m = _FILENAME_TS_RE.match(filename)
-    if m:
-        return datetime.strptime(m.group(1), "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
-    ts_str = doc.get("timestamp")
-    if isinstance(ts_str, str) and ts_str.strip():
-        try:
-            return _parse_cutoff_dt(ts_str)
-        except ValueError:
-            return None
-    return None
 
 
 # `values: List[float | int]` is a list of numeric observations for one metric.
@@ -447,82 +429,87 @@ def _summarize_cohort(records: List[Dict[str, Any]]) -> Dict[str, Any]:
 def _audit_sqlite_runs(
     since_dt: Optional[datetime],
     compare_dt: Optional[datetime],
+    db_path: Optional[Path] = None,
 ) -> tuple[int, int, List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Query indexed `runs` and `trace_events` from `chats.db` without parsing loose JSON files."""
-    from nexus.core.chats_db import _get_conn
+    """Query indexed `runs` and `trace_events` from SQLite `chats.db` without parsing loose JSON files."""
+    prev_db = chats_db.DB_PATH
+    if db_path is not None:
+        chats_db.DB_PATH = db_path
+    try:
+        runs_scanned = 0
+        runs_with_subagents = 0
+        all_records: List[Dict[str, Any]] = []
+        pre_records: List[Dict[str, Any]] = []
+        post_records: List[Dict[str, Any]] = []
 
-    runs_scanned = 0
-    runs_with_subagents = 0
-    all_records: List[Dict[str, Any]] = []
-    pre_records: List[Dict[str, Any]] = []
-    post_records: List[Dict[str, Any]] = []
-
-    with _get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT run_id, timestamp, agent_name, metadata_json, subagents_count
-            FROM runs
-            ORDER BY timestamp ASC
-            """
-        ).fetchall()
-
-        for row in rows:
-            ts_str = row["timestamp"]
-            run_dt = _parse_cutoff_dt(ts_str) if isinstance(ts_str, str) and ts_str.strip() else None
-            if since_dt is not None and run_dt is not None and run_dt < since_dt:
-                continue
-
-            runs_scanned += 1
-            run_id = row["run_id"]
-            sub_cnt = int(row["subagents_count"] or 0)
-            if sub_cnt == 0:
-                has_sub_evt = conn.execute(
-                    "SELECT 1 FROM trace_events WHERE run_id = ? AND event_json LIKE '%subagent-%' LIMIT 1",
-                    (run_id,),
-                ).fetchone()
-                if not has_sub_evt:
-                    continue
-
-            evt_rows = conn.execute(
-                "SELECT event_json FROM trace_events WHERE run_id = ? ORDER BY seq ASC",
-                (run_id,),
+        with chats_db._get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT run_id, timestamp, agent_name, metadata_json, subagents_count
+                FROM runs
+                ORDER BY timestamp ASC
+                """
             ).fetchall()
-            trace_events = []
-            for er in evt_rows:
-                try:
-                    trace_events.append(json.loads(er["event_json"]))
-                except Exception:
+
+            for row in rows:
+                ts_str = row["timestamp"]
+                run_dt = _parse_cutoff_dt(ts_str) if isinstance(ts_str, str) and ts_str.strip() else None
+                if since_dt is not None and run_dt is not None and run_dt < since_dt:
                     continue
 
-            meta = json.loads(row["metadata_json"]) if row["metadata_json"] else {}
-            doc = {
-                "run_id": run_id,
-                "timestamp": ts_str,
-                "metadata": meta,
-                "trace_events": trace_events,
-            }
-            recs = _extract_subagent_records(f"{run_id}.sqlite", run_dt, doc)
-            if not recs:
-                continue
+                runs_scanned += 1
+                run_id = row["run_id"]
+                sub_cnt = int(row["subagents_count"] or 0)
+                if sub_cnt == 0:
+                    has_sub_evt = conn.execute(
+                        "SELECT 1 FROM trace_events WHERE run_id = ? AND event_json LIKE '%subagent-%' LIMIT 1",
+                        (run_id,),
+                    ).fetchone()
+                    if not has_sub_evt:
+                        continue
 
-            runs_with_subagents += 1
-            all_records.extend(recs)
-            if compare_dt is not None and run_dt is not None:
-                if run_dt >= compare_dt:
-                    post_records.extend(recs)
-                else:
-                    pre_records.extend(recs)
+                evt_rows = conn.execute(
+                    "SELECT event_json FROM trace_events WHERE run_id = ? ORDER BY seq ASC",
+                    (run_id,),
+                ).fetchall()
+                trace_events = []
+                for er in evt_rows:
+                    try:
+                        trace_events.append(json.loads(er["event_json"]))
+                    except Exception:
+                        continue
 
-    return runs_scanned, runs_with_subagents, all_records, pre_records, post_records
+                meta = json.loads(row["metadata_json"]) if row["metadata_json"] else {}
+                doc = {
+                    "run_id": run_id,
+                    "timestamp": ts_str,
+                    "metadata": meta,
+                    "trace_events": trace_events,
+                }
+                recs = _extract_subagent_records(f"{run_id}.sqlite", run_dt, doc)
+                if not recs:
+                    continue
+
+                runs_with_subagents += 1
+                all_records.extend(recs)
+                if compare_dt is not None and run_dt is not None:
+                    if run_dt >= compare_dt:
+                        post_records.extend(recs)
+                    else:
+                        pre_records.extend(recs)
+
+        return runs_scanned, runs_with_subagents, all_records, pre_records, post_records
+    finally:
+        chats_db.DB_PATH = prev_db
 
 
 def audit_health(
-    runs_dir: Optional[Path] = None,
     days: Optional[int] = None,
     since: Optional[str] = None,
     compare_since: Optional[str] = None,
+    db_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Scan SQLite `runs` (default) or an explicit `runs_dir` of `.json` snapshots for subagent health metrics."""
+    """Query SQLite `runs` + `trace_events` in `chats.db` (or `--db-path`) for subagent health metrics."""
     since_dt: Optional[datetime] = None
     if since:
         since_dt = _parse_cutoff_dt(since)
@@ -531,64 +518,16 @@ def audit_health(
 
     compare_dt: Optional[datetime] = _parse_cutoff_dt(compare_since) if compare_since else None
 
-    runs_scanned = 0
-    runs_with_subagents = 0
-    all_records: List[Dict[str, Any]] = []
-    pre_records: List[Dict[str, Any]] = []
-    post_records: List[Dict[str, Any]] = []
-    source_label = "sqlite:chats.db"
+    target_db = db_path if db_path is not None else chats_db.DB_PATH
+    if db_path is not None and not target_db.is_file():
+        return {"error": f"SQLite database not found: {target_db}", "runs_scanned": 0}
 
-    if runs_dir is None:
-        runs_scanned, runs_with_subagents, all_records, pre_records, post_records = _audit_sqlite_runs(
-            since_dt, compare_dt
-        )
-        # Fallback to legacy folder only if SQLite `runs` is empty and `logs/runs/` exists
-        if runs_scanned == 0 and DEFAULT_RUNS_DIR.is_dir():
-            runs_dir = DEFAULT_RUNS_DIR
-
-    if runs_dir is not None:
-        if not runs_dir.is_dir():
-            return {"error": f"Runs directory not found: {runs_dir}", "runs_scanned": 0}
-        source_label = str(runs_dir)
-        json_files = sorted(runs_dir.glob("*.json"))
-        for fpath in json_files:
-            file_dt = _extract_snapshot_dt(fpath.name, {})
-            if since_dt is not None and file_dt is not None and file_dt < since_dt:
-                continue
-
-            try:
-                raw = fpath.read_text(encoding="utf-8")
-            except Exception:
-                continue
-
-            if "subagent-" not in raw:
-                runs_scanned += 1
-                continue
-
-            try:
-                doc = json.loads(raw)
-            except Exception:
-                continue
-
-            run_dt = file_dt or _extract_snapshot_dt(fpath.name, doc)
-            if since_dt is not None and run_dt is not None and run_dt < since_dt:
-                continue
-
-            runs_scanned += 1
-            recs = _extract_subagent_records(fpath.name, run_dt, doc)
-            if not recs:
-                continue
-
-            runs_with_subagents += 1
-            all_records.extend(recs)
-            if compare_dt is not None and run_dt is not None:
-                if run_dt >= compare_dt:
-                    post_records.extend(recs)
-                else:
-                    pre_records.extend(recs)
+    runs_scanned, runs_with_subagents, all_records, pre_records, post_records = _audit_sqlite_runs(
+        since_dt, compare_dt, db_path=db_path
+    )
 
     result: Dict[str, Any] = {
-        "source": source_label,
+        "source": f"sqlite:{target_db}",
         "runs_scanned": runs_scanned,
         "runs_with_subagents": runs_with_subagents,
         "since": since_dt.isoformat() if since_dt else None,
@@ -685,14 +624,14 @@ def main() -> None:
         help="Split subagents into PRE vs POST cohorts at this UTC ISO timestamp (e.g. 2026-11-19T01:15).",
     )
     parser.add_argument("--json", action="store_true", dest="as_json", help="Output structured JSON instead of tables.")
-    parser.add_argument("--runs-dir", type=Path, default=None, help="Optional legacy directory of .json run files (defaults to SQLite chats.db).")
+    parser.add_argument("--db-path", type=Path, default=None, help="Optional SQLite DB path (defaults to logs/chats.db).")
     args = parser.parse_args()
 
     report = audit_health(
-        runs_dir=args.runs_dir,
         days=args.days,
         since=args.since,
         compare_since=args.compare_since,
+        db_path=args.db_path,
     )
 
     if args.as_json:

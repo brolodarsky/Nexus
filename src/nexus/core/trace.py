@@ -41,9 +41,6 @@ RESET  = "\033[0m"  # Resets text formatting back to default terminal style
 DIM    = "\033[2m"  # Reduces text brightness (useful for secondary details/results)
 BOLD   = "\033[1m"  # Increases font weight for agent tags and tool names
 
-# Keep RESULT_TRUNCATE_LEN exported for backward-compatibility imports, though trace emission is now 100% lossless
-RESULT_TRUNCATE_LEN = 100000 
-
 
 # ── Thread-Scoped Trace Execution Context ─────────────────────────────────────
 
@@ -411,13 +408,3 @@ class AgentTracer:
         """Traces general operational status information (e.g. token usage, cache hits, retries)."""
         self._print("ℹ️", message)
         self._emit("info", message, data)
-
-
-# ── String Utility ───────────────────────────────────────────────────────────
-
-def _truncate(text: str, max_len: int = RESULT_TRUNCATE_LEN) -> str:
-    """
-    Legacy helper retained for import compatibility.
-    Returns the full text untouched so no trace steps or tool outputs are cut off.
-    """
-    return text.strip() if isinstance(text, str) else str(text)

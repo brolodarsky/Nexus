@@ -3,8 +3,7 @@ run_logger.py — SQLite-Backed Run Snapshot Logger & Live Telemetry Subscriber.
 
 Persists complete agent execution telemetry (`runs`, `trace_events`, `run_blob_refs`) into
 `logs/chats.db` without writing duplicate loose `.json` files on every turn.
-Also provides CLI maintenance commands for one-time legacy migration, reference-counted GC,
-on-demand JSON snapshot export, and optional user-confirmed legacy file cleanup.
+Also provides CLI maintenance commands for reference-counted GC and on-demand JSON snapshot export.
 """
 from __future__ import annotations
 
@@ -17,7 +16,6 @@ from typing import Any, Optional
 import uuid
 
 from nexus.core.chats_db import (
-    PROJECT_ROOT,
     append_trace_event_record,
     finalize_run_record,
     gc_unreferenced_telemetry,
@@ -25,13 +23,9 @@ from nexus.core.chats_db import (
     get_run_record,
     get_trace_blobs_batch,
     list_run_records,
-    migrate_legacy_telemetry_if_needed,
 )
 from nexus.core.cost import calculate_cache_savings, calculate_token_cost
 from nexus.core.trace import trace_bus
-
-# Legacy runs directory retained strictly for `--migrate-legacy` and `--purge-legacy-files`
-RUNS_DIR = PROJECT_ROOT / "logs" / "runs"
 
 
 # ── Live Incremental SQLite Subscriber ───────────────────────────────────────
@@ -214,7 +208,6 @@ def log_run(
     domain: Optional[str] = None,
     confidence: Optional[float] = None,
     reasoning: Optional[str] = None,
-    dpfh_injected_files: Optional[list[str]] = None,
     tool_calls: Optional[list[dict[str, Any]]] = None,
     trace_events: Optional[list[dict[str, Any]]] = None,
     latency_seconds: Optional[float] = None,
@@ -282,7 +275,6 @@ def log_run(
         cost_usd=total_run_cost,
         cache_savings_usd=total_cache_savings,
         latency_seconds=latency_seconds,
-        dpfh_injected_files=dpfh_injected_files or [],
         tool_calls=tool_calls or [],
         subagents_count=len(subagents_list),
         trace_events=events_list,
@@ -371,48 +363,17 @@ def export_run_snapshot(run_id: str, hydrate_blobs: bool = False) -> Optional[di
 
 # ── Maintenance CLI ──────────────────────────────────────────────────────────
 
-def _purge_legacy_files(dry_run: bool = False) -> dict[str, Any]:
-    """Delete legacy `logs/runs/*.json` and `src/nexus/agent/memory.sqlite*` files after migration."""
-    removed_json = 0
-    removed_mem = 0
-    if RUNS_DIR.is_dir():
-        for jf in RUNS_DIR.glob("*.json"):
-            if dry_run:
-                removed_json += 1
-            else:
-                jf.unlink()
-                removed_json += 1
-
-    mem_base = PROJECT_ROOT / "src" / "nexus" / "agent" / "memory.sqlite"
-    for suffix in ("", "-wal", "-shm"):
-        p = Path(f"{mem_base}{suffix}")
-        if p.is_file():
-            if dry_run:
-                removed_mem += 1
-            else:
-                p.unlink()
-                removed_mem += 1
-    return {"removed_json_files": removed_json, "removed_memory_sqlite_files": removed_mem}
-
-
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(description="Nexus unified SQLite run logger & telemetry maintenance CLI.")
-    parser.add_argument("--migrate-legacy", action="store_true", help="Import active memory.sqlite threads and logs/runs/*.json into chats.db.")
     parser.add_argument("--gc", action="store_true", help="Sweep unreferenced trace_blobs and orphaned upload files.")
-    parser.add_argument("--dry-run", action="store_true", help="Preview GC or purge counts without deleting.")
+    parser.add_argument("--dry-run", action="store_true", help="Preview GC counts without deleting.")
     parser.add_argument("--export", type=str, default=None, help="Export a run_id to JSON.")
     parser.add_argument("-o", "--output", type=Path, default=None, help="Output file path for --export (defaults to stdout).")
     parser.add_argument("--hydrate-blobs", action="store_true", help="Inline trace_blobs content when exporting a run.")
-    parser.add_argument("--purge-legacy-files", action="store_true", help="Delete legacy logs/runs/*.json and memory.sqlite* files.")
-    parser.add_argument("--yes", action="store_true", help="Confirm destructive --purge-legacy-files operation.")
     args = parser.parse_args()
-
-    if args.migrate_legacy:
-        res = migrate_legacy_telemetry_if_needed(force=True)
-        print(json.dumps({"migration": res}, indent=2))
 
     if args.gc:
         res = gc_unreferenced_telemetry(dry_run=args.dry_run)
@@ -429,13 +390,6 @@ def main() -> None:
             print(f"✅ Exported run '{args.export}' to {args.output}")
         else:
             print(rendered)
-
-    if args.purge_legacy_files:
-        if not args.yes and not args.dry_run:
-            print("❌ Refusing to purge legacy files without --yes (pass --dry-run to preview).", file=sys.stderr)
-            sys.exit(2)
-        res = _purge_legacy_files(dry_run=args.dry_run)
-        print(json.dumps({"purge": res, "dry_run": args.dry_run}, indent=2))
 
 
 if __name__ == "__main__":

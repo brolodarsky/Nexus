@@ -139,7 +139,6 @@ export interface RunSnapshot {
   output_response: string;
   cost_usd?: number | null;
   latency_seconds: number | null;
-  dpfh_injected_files: string[];
   tool_calls: Array<{
     id?: string;
     name: string;

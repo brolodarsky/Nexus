@@ -54,7 +54,7 @@ Nexus/
 │   ├── core/                    # Shared engine configuration
 │   │   ├── chat_branching.py    # Universal Conversation Branching, Subroutine Merge & Agent Seeded Conversation Engine
 │   │   ├── chat_titles.py       # Thread-safe conversation auto-titling engine (coalescing + SQLite CAS)
-│   │   ├── chats_db.py          # Unified UI chat, DAG lineage & decoupled telemetry persistence (chats.db & message_traces)
+│   │   ├── chats_db.py          # Unified UI chat, DAG lineage, canonical thread state & SHA-256 telemetry (chats.db)
 │   │   ├── constants.py         # Global constants
 │   │   ├── engine_constitution.py # Loader for Vault/Master Instructions.md (inject_root_instructions())
 │   │   ├── google_auth.py       # Reusable OAuth2 manager
@@ -149,8 +149,8 @@ This repository distinguishes between capabilities and constraints that define h
 
 | Script | Purpose | Usage |
 |---|---|---|
-| `audit_agent_health.py` | Deterministically audits subagent breaker rates, normal vs. synthesis KV-cache integrity, truncation/rework signals, and token percentiles from SQLite `chats.db` (or optional legacy `--runs-dir`). | `python scripts/audit_agent_health.py [--days N] [--since YYYY-MM-DD] [--compare-since UTC_TS] [--runs-dir PATH] [--json]` |
-| `audit_run_costs.py` | Queries SQLite `runs` (or optional `--runs-dir`), calculates token costs & prompt-caching savings ($ USD), and backfills missing cost fields. | `python scripts/audit_run_costs.py [--backfill] [--top 10] [--runs-dir PATH]` |
+| `audit_agent_health.py` | Deterministically audits subagent breaker rates, normal vs. synthesis KV-cache integrity, truncation/rework signals, and token percentiles from SQLite `chats.db` (`--db-path` override supported). | `python scripts/audit_agent_health.py [--days N] [--since YYYY-MM-DD] [--compare-since UTC_TS] [--db-path PATH] [--json]` |
+| `audit_run_costs.py` | Queries SQLite `runs`, calculates token costs & prompt-caching savings ($ USD), and backfills missing cost fields. | `python scripts/audit_run_costs.py [--backfill] [--top 10] [--db-path PATH]` |
 | `release.py` | Compiles `.changeset/*.md` fragments into the changelog and bumps version. | `python scripts/release.py` |
 | `sync_vault.py` | Automatically commits and pushes the nested Vault repository (The Nested Heart). | `python scripts/sync_vault.py` |
 | `src/nexus/evals/runner.py` | Benchmarks `NexusAgent` against the Golden Dataset. | `python -m nexus.evals.runner` |
@@ -171,7 +171,7 @@ This repository distinguishes between capabilities and constraints that define h
 | `src/nexus/core/secret_scrubber.py` | Pre-hash API key / Bearer token scrubber (`scrub_secrets`, `scrub_structure`) and deterministic `approx_token_count` (`ceil(chars / 4)`) estimator. | N/A (library module) |
 | `src/nexus/core/chat_titles.py` | Thread-safe auto-titling service (`_inflight_titles` coalescing, non-blocking async/executor execution, atomic SQLite CAS, branch/mobile prefix preservation). | N/A (library module) |
 | `src/nexus/core/trace.py` | Lossless event bus (`TraceEventBus`) and dual console/SSE telemetry tracer (`AgentTracer`) with `run_id`, `agent_id`, `parent_id`, and `~tok` summary telemetry. | N/A (library module) |
-| `src/nexus/core/run_logger.py` | Live `trace_bus` SQLite subscriber and SQL-backed run ledger (`log_run`, `list_runs`, `get_run`, `export_run_snapshot`) with CLI flags for legacy migration, GC, export, and optional legacy cleanup. | `python -m nexus.core.run_logger [--migrate-legacy \| --gc \| --export ID \| --purge-legacy-files --yes]` |
+| `src/nexus/core/run_logger.py` | Live `trace_bus` SQLite subscriber and SQL-backed run ledger (`log_run`, `list_runs`, `get_run`, `export_run_snapshot`) with CLI flags for GC and JSON export. | `python -m nexus.core.run_logger [--gc [--dry-run] \| --export ID [--hydrate-blobs]]` |
 | `src/nexus/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve with stale-base guard (`?force=true` override), reject, 3-way rebase (`/{id}/rebase`), rollback (`/{id}/rollback`), and recent revisions (`/revisions/recent`). | Via GUI or API |
 | `src/nexus/api/routers/tools.py` | Operational tools endpoints: resume/cover letter portfolio scanning, markdown editing, headless Chromium/Word rendering, and asset streaming. | Via GUI (`/tools`) or API |
 | `resume_engine/` | PDF and DOCX document compiler with page geometry budget metrics. Accessible via the Control Panel Tools page (`/tools`) or headless CLI. | GUI `/tools` or `node src/nexus/shared_tools/resume_engine/render.js` |

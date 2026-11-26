@@ -262,9 +262,8 @@ def test_safe_json_dumps_sanitizes_non_finite_floats_and_paths():
     assert parsed["event"]["nested"][0]["path"] == str(Path("Vault/note.md"))
 
 
-def test_stream_failure_persists_assistant_error_and_emits_terminal_error(client: TestClient, temp_conv: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_stream_failure_persists_assistant_error_and_emits_terminal_error(client: TestClient, temp_conv: str):
     """Verify unhandled agent exceptions emit SSE 'error' AND persist an assistant error message + trace in chats.db."""
-    monkeypatch.setattr("nexus.core.run_logger.RUNS_DIR", tmp_path / "runs")
 
     def failing_agent(query: str, thread_id: str, model_tier=None, images=None, **_kwargs):
         tracer = AgentTracer("NexusAgent", color="cyan", agent_id="nexus", thread_id=thread_id)

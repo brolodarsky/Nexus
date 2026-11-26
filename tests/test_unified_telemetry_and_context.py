@@ -162,10 +162,10 @@ def test_subagent_agent_start_captures_prehydrated_context_and_llm_call_manifest
     assert llm_evt["data"]["context_summary"]["approx_tokens"] > 0
 
 
-def test_head_agent_run_persists_live_trace_thread_messages_and_deduplicates_message_traces(
+def test_head_agent_run_persists_live_trace_and_thread_messages(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify run_nexus_agent_with_trace streams live steps to SQLite, preserves thinking signatures, and avoids message_traces dupes."""
+    """Verify run_nexus_agent_with_trace streams live steps to SQLite, preserves thinking signatures, and drops legacy message_traces."""
     from nexus.agent import api as api_mod
     from nexus.agent import runtime as runtime_mod
 
@@ -209,7 +209,7 @@ def test_head_agent_run_persists_live_trace_thread_messages_and_deduplicates_mes
     )
     assert msg_id is not None
 
-    # `get_message_trace` resolves via `trace_events` (and `message_traces` was skipped!)
+    # `get_message_trace` resolves directly via normalized `trace_events` (and `message_traces` is retired)
     trace = get_message_trace(msg_id)
     assert any(e["type"] == "agent_start" for e in trace)
     assert any(e["type"] == "llm_call" for e in trace)
@@ -217,8 +217,11 @@ def test_head_agent_run_persists_live_trace_thread_messages_and_deduplicates_mes
     assert any(m["role"] == "system" for m in start_evt["data"]["context_manifest"])
 
     with _get_conn() as conn:
-        mt_count = conn.execute("SELECT COUNT(*) FROM message_traces WHERE message_id = ?", (msg_id,)).fetchone()[0]
-        assert mt_count == 0
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_traces'"
+        ).fetchone() is None
+        linked = conn.execute("SELECT run_id FROM messages WHERE id = ?", (msg_id,)).fetchone()
+        assert linked is not None and linked["run_id"] == run_id
 
     # Turn 2: canonical `thread_messages` loads both HumanMessage & signature-bearing AIMessage losslessly
     loaded = load_thread_lc_messages(conv_id)

@@ -49,7 +49,7 @@ def temp_conv():
 
 
 def test_messages_table_schema_and_columns():
-    """Verify that messages table includes model_tier, model_name, cost_usd, and has_trace columns."""
+    """Verify messages columns and unified runs/trace_events schema replace legacy message_traces."""
     init_db()
     with _get_conn() as conn:
         cols = [col[1] for col in conn.execute("PRAGMA table_info(messages)").fetchall()]
@@ -57,14 +57,18 @@ def test_messages_table_schema_and_columns():
         assert "model_name" in cols
         assert "cost_usd" in cols
         assert "has_trace" in cols
+        assert "run_id" in cols
 
-        trace_cols = [col[1] for col in conn.execute("PRAGMA table_info(message_traces)").fetchall()]
-        assert "message_id" in trace_cols
-        assert "trace" in trace_cols
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_traces'"
+        ).fetchone() is None
+        trace_cols = [col[1] for col in conn.execute("PRAGMA table_info(trace_events)").fetchall()]
+        assert "run_id" in trace_cols
+        assert "event_json" in trace_cols
 
 
-def test_log_message_decouples_trace_into_message_traces(temp_conv):
-    """Verify log_message stores trace in message_traces and keeps messages.trace NULL."""
+def test_log_message_decouples_trace_into_trace_events(temp_conv):
+    """Verify log_message keeps messages.trace NULL and normalizes inline traces into runs + trace_events."""
     mock_trace = [
         {"id": "step1", "type": "agent_start", "message": "Starting turn"},
         {"id": "step2", "type": "info", "data": {"cost_usd": 0.0042, "input_tokens": 100, "output_tokens": 50}},
@@ -86,18 +90,21 @@ def test_log_message_decouples_trace_into_message_traces(temp_conv):
     assert msg_id is not None
 
     with _get_conn() as conn:
-        # Verify primary messages row has trace = NULL to prevent B-tree overflow
+        # Verify primary messages row has trace = NULL and links via run_id to normalized trace_events
         msg_row = conn.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
         assert msg_row["trace"] is None
         assert msg_row["has_trace"] == 1
+        assert msg_row["run_id"] is not None
         assert msg_row["model_tier"] == "flash"
         assert msg_row["model_name"] == "gemini-2.5-flash"
         assert abs(msg_row["cost_usd"] - 0.0042) < 1e-6
 
-        # Verify dedicated message_traces row has the complete trace array
-        trace_row = conn.execute("SELECT * FROM message_traces WHERE message_id = ?", (msg_id,)).fetchone()
-        assert trace_row is not None
-        assert "read_file" in trace_row["trace"]
+        evt_rows = conn.execute(
+            "SELECT event_json FROM trace_events WHERE run_id = ? ORDER BY seq ASC",
+            (msg_row["run_id"],),
+        ).fetchall()
+        assert len(evt_rows) == 3
+        assert any("read_file" in r["event_json"] for r in evt_rows)
 
 
 def test_get_chat_history_is_lean_by_default(temp_conv):
@@ -169,8 +176,8 @@ def test_message_trace_endpoint(temp_conv):
     assert data["trace"][0]["id"] == "stepX"
 
 
-def test_delete_conversation_cleans_message_traces(temp_conv):
-    """Verify delete_conversation purges both messages and message_traces rows."""
+def test_delete_conversation_cleans_run_traces(temp_conv):
+    """Verify delete_conversation purges messages, auto-created runs, and normalized trace_events rows."""
     msg_id = log_message(
         role="assistant",
         content="Response to delete",
@@ -179,17 +186,20 @@ def test_delete_conversation_cleans_message_traces(temp_conv):
     )
 
     with _get_conn() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM message_traces WHERE message_id = ?", (msg_id,)).fetchone()[0] == 1
+        run_id = conn.execute("SELECT run_id FROM messages WHERE id = ?", (msg_id,)).fetchone()["run_id"]
+        assert run_id is not None
+        assert conn.execute("SELECT COUNT(*) FROM trace_events WHERE run_id = ?", (run_id,)).fetchone()[0] == 1
 
     delete_conversation(temp_conv)
 
     with _get_conn() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM message_traces WHERE message_id = ?", (msg_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM trace_events WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM runs WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM messages WHERE id = ?", (msg_id,)).fetchone()[0] == 0
 
 
-def test_revert_last_turn_cleans_message_traces(temp_conv):
-    """Verify revert_last_turn purges message_traces along with deleted messages."""
+def test_revert_last_turn_cleans_run_traces(temp_conv):
+    """Verify revert_last_turn purges normalized runs and trace_events along with deleted messages."""
     log_message(role="user", content="User prompt to revert", conversation_id=temp_conv)
     msg_id = log_message(
         role="assistant",
@@ -199,14 +209,17 @@ def test_revert_last_turn_cleans_message_traces(temp_conv):
     )
 
     with _get_conn() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM message_traces WHERE message_id = ?", (msg_id,)).fetchone()[0] == 1
+        run_id = conn.execute("SELECT run_id FROM messages WHERE id = ?", (msg_id,)).fetchone()["run_id"]
+        assert run_id is not None
+        assert conn.execute("SELECT COUNT(*) FROM trace_events WHERE run_id = ?", (run_id,)).fetchone()[0] == 1
 
     revert_result = revert_last_turn(temp_conv)
     assert revert_result is not None
     assert revert_result["deleted_count"] == 2
 
     with _get_conn() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM message_traces WHERE message_id = ?", (msg_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM trace_events WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM runs WHERE run_id = ?", (run_id,)).fetchone()[0] == 0
 
 
 def test_agent_tracer_bounded_string_summaries():

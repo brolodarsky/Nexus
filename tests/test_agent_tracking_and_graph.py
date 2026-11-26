@@ -19,7 +19,7 @@ from nexus.agent.runtime import (
     reset_subagent_counter,
     set_active_turn_provider,
 )
-from nexus.core.run_logger import log_run, list_runs, get_run, RUNS_DIR
+from nexus.core.run_logger import log_run, list_runs, get_run
 
 
 def test_agent_tracer_lossless_emission():

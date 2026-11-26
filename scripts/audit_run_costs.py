@@ -1,9 +1,9 @@
 """
 audit_run_costs.py — Observability script for auditing and backfilling LLM run costs.
 
-Queries persisted execution runs from SQLite `chats.db` (`runs` + `trace_events`)—or an explicit
-legacy `--runs-dir` of `.json` files—computes token costs and context-caching savings based on
-provider pricing tables, displays formatted aggregate summaries, and optionally backfills `cost_usd`.
+Queries persisted execution runs from SQLite `chats.db` (`runs` + `trace_events`),
+computes token costs and context-caching savings based on provider pricing tables,
+displays formatted aggregate summaries, and optionally backfills `cost_usd`.
 
 Usage:
     .venv\\Scripts\\python.exe scripts\\audit_run_costs.py
@@ -23,10 +23,8 @@ from typing import Any, Dict, List, Optional
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from nexus.core.chats_db import _get_conn
+import nexus.core.chats_db as chats_db
 from nexus.core.cost import calculate_cache_savings, calculate_token_cost
-
-RUNS_DIR = PROJECT_ROOT / "logs" / "runs"
 
 
 def _infer_model_from_fields(
@@ -57,10 +55,10 @@ def _infer_model_from_fields(
 def audit_runs(
     backfill: bool = False,
     top_n: int = 5,
-    runs_dir: Optional[Path] = None,
+    db_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
-    Audit LLM run costs and prompt-cache savings from SQLite `chats.db` (default) or an explicit JSON folder.
+    Audit LLM run costs and prompt-cache savings from SQLite `chats.db` (or explicit `--db-path`).
     """
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -77,8 +75,15 @@ def audit_runs(
     tokens_by_model: Dict[str, int] = defaultdict(int)
     runs_record: List[Dict[str, Any]] = []
 
-    if runs_dir is None:
-        with _get_conn() as conn:
+    prev_db = chats_db.DB_PATH
+    if db_path is not None:
+        if not db_path.is_file():
+            print(f"❌ SQLite database not found: {db_path}")
+            return {}
+        chats_db.DB_PATH = db_path
+
+    try:
+        with chats_db._get_conn() as conn:
             rows = conn.execute(
                 """
                 SELECT run_id, timestamp, reasoning, input_query, model_tier, model_name,
@@ -220,63 +225,8 @@ def audit_runs(
 
             if backfill and backfilled_count > 0:
                 conn.commit()
-
-        if total_runs == 0 and RUNS_DIR.is_dir():
-            runs_dir = RUNS_DIR
-
-    if runs_dir is not None:
-        if not runs_dir.is_dir():
-            print(f"❌ Runs directory not found: {runs_dir}")
-            return {}
-        run_files = sorted(runs_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for file_path in run_files:
-            try:
-                data = json.loads(file_path.read_text(encoding="utf-8"))
-            except Exception as e:
-                print(f"⚠️ Error reading {file_path.name}: {e}")
-                continue
-            total_runs += 1
-            meta = data.get("metadata") or {}
-            tok = meta.get("token_usage") or {}
-            model_name, model_tier = _infer_model_from_fields(
-                meta.get("model_name"),
-                meta.get("model_tier"),
-                data.get("reasoning"),
-            )
-            in_tok = int(tok.get("input_tokens", 0) or 0)
-            out_tok = int(tok.get("output_tokens", 0) or 0)
-            cached_tok = int(tok.get("cached_tokens", 0) or 0)
-            cost_usd = calculate_token_cost(
-                input_tokens=in_tok,
-                output_tokens=out_tok,
-                cached_tokens=cached_tok,
-                model_name=model_name,
-                tier=model_tier,
-            )
-            savings_usd = calculate_cache_savings(
-                input_tokens=in_tok,
-                cached_tokens=cached_tok,
-                model_name=model_name,
-                tier=model_tier,
-            )
-            total_in_tokens += in_tok
-            total_out_tokens += out_tok
-            total_cached_tokens += cached_tok
-            total_cost_usd += cost_usd
-            total_savings_usd += savings_usd
-            cost_by_model[model_name] += cost_usd
-            tokens_by_model[model_name] += in_tok + out_tok
-            runs_record.append({
-                "run_id": data.get("run_id", file_path.stem),
-                "filename": file_path.name,
-                "timestamp": data.get("timestamp", ""),
-                "model": model_name,
-                "cost_usd": cost_usd,
-                "input_tokens": in_tok,
-                "output_tokens": out_tok,
-                "cached_tokens": cached_tok,
-                "query": (data.get("input_query") or "")[:80].replace("\n", " "),
-            })
+    finally:
+        chats_db.DB_PATH = prev_db
 
     total_tokens = total_in_tokens + total_out_tokens
     cache_pct = (total_cached_tokens / total_in_tokens * 100) if total_in_tokens > 0 else 0.0
@@ -326,10 +276,10 @@ def main():
     parser = argparse.ArgumentParser(description="Audit and backfill LLM execution costs in Nexus.")
     parser.add_argument("--backfill", action="store_true", help="Write computed cost_usd back to SQLite runs.")
     parser.add_argument("--top", type=int, default=5, help="Number of highest-cost runs to display (default: 5).")
-    parser.add_argument("--runs-dir", type=Path, default=None, help="Optional legacy directory of .json run files.")
+    parser.add_argument("--db-path", type=Path, default=None, help="Optional SQLite DB path (defaults to logs/chats.db).")
     args = parser.parse_args()
 
-    audit_runs(backfill=args.backfill, top_n=args.top, runs_dir=args.runs_dir)
+    audit_runs(backfill=args.backfill, top_n=args.top, db_path=args.db_path)
 
 
 if __name__ == "__main__":
