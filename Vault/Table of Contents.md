@@ -75,7 +75,6 @@ _Systemic foundations for mental clarity, resilience, long-term vision, and dail
 
 ## 2.2. Medical
 - **[[Health Summary]]**: Master dashboard for symptoms, workups, doctors visits, lab work, biomarkers, medical history and longitudinal tracking.
-- **[[Psychiatric Intake Summary]]**
 - **[[Therapy Intake Summary]]**
 - **[[Insurance Card]]**
 	- [[Doc - Medical Insurance 2027 Summary of Benefits and Coverage (SBC)]]: 2027 Oscar Health Summary of Benefits and Coverage
