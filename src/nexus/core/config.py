@@ -53,10 +53,14 @@ class EngineSettings(BaseSettings):
     nexus_tool_timeout: int = 120
     nexus_subagent_timeout: int = 900
     # Subagent ReAct loop circuit breakers (`spawn_subagent` in `src/nexus/agent/graph.py`):
-    # - subagent_max_turns: Maximum tool-calling iterations before forcing a final tool-free synthesis turn.
-    # - subagent_max_input_tokens: Cumulative input-token ceiling per subagent run to prevent TPM exhaustion and fallback spikes.
-    subagent_max_turns: int = 12
-    subagent_max_input_tokens: int = 400_000
+    # Both fields live on `EngineSettings` (`pydantic_settings.BaseSettings`) and can be overridden in `.env`
+    # via `SUBAGENT_MAX_TURNS` and `SUBAGENT_MAX_UNCACHED_INPUT_TOKENS`.
+    # - subagent_max_turns: Maximum tool-calling iterations before forcing a final synthesis turn (soft notice at max_turns - 2).
+    # - subagent_max_uncached_input_tokens: Cumulative *uncached* input-token ceiling (`input_tokens - cached_tokens`) per
+    #   subagent run so KV-cached turns and `context_files` pre-hydration are not penalized while context bloat and broken-cache
+    #   spirals remain bounded (soft notice at 80%).
+    subagent_max_turns: int = 25
+    subagent_max_uncached_input_tokens: int = 450_000
     tavily_api_key: Optional[str] = None
     
     # Gmail: auth lives in .secrets/token_gmail*.json (see shared_tools/gmail_engine.py); supports multiple accounts.

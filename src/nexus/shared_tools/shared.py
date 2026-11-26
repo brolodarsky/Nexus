@@ -449,23 +449,28 @@ def read_file(
 
 @tool
 def search_vault(
-    keyword: str,
+    keyword: Optional[str] = None,
     path: Optional[str] = None,
     tags: Optional[List[str]] = None,
+    keywords: Optional[List[str]] = None,
 ) -> str:
-    """Search notes in the Vault for a keyword string. Returns matching file paths with context snippets.
+    """Search notes in the Vault for one or more keywords in a single pass. Returns matching file paths with snippets.
 
-    Prefer passing `path` to scope the search to a target section when known.
+    When checking multiple related terms (e.g. `["meetup", "hackathon", "Luma", "conference"]`), pass them
+    together in `keywords=[...]` instead of firing separate `search_vault` calls. Prefer passing `path`
+    to scope the search to a target section when known.
 
     Args:
-        keyword: Case-insensitive search term.
+        keyword: Optional single case-insensitive search term.
         path: Optional relative folder path from Vault root to scope the search
               (e.g. "3. Operations/3.1. Career Strategy & Revenue").
         tags: Optional list of YAML frontmatter tags to filter by (e.g. ["career", "medical"]).
+        keywords: Optional list of case-insensitive search terms checked together in one pass (OR semantics,
+                  ranked by number of matched terms).
     """
     from nexus.shared_tools.vault_reader import search_within
 
-    return search_within(keyword=keyword, root_path=path, tags=tags)
+    return search_within(keyword=keyword, root_path=path, tags=tags, keywords=keywords)
 
 
 @tool
@@ -1021,8 +1026,118 @@ def delete_file(
 _BODY_CHAR_LIMIT = 4000
 
 
-# Maximum full MIME bodies hydrated automatically during broad sweep queries (when `include_body` is None)
+# Maximum full MIME bodies hydrated automatically when `include_body=True` is passed in sweep mode
 _FETCH_EMAILS_AUTO_BODY_CAP = 20
+
+
+# Signature breakdown for _hydrate_email_message_entry:
+# - msg_id: Gmail message ID to fetch full MIME content for.
+# - candidate_accounts: ordered account aliases/emails to attempt (`[msg_acc]` from summary, or all active accounts).
+# - summary: optional lightweight metadata dict from `list_messages()` used for graceful error fallback.
+# - service_cache: per-call cache mapping `account -> Gmail Resource` to avoid rebuilding Discovery clients.
+# - gmail_engine_mod: imported `nexus.shared_tools.gmail_engine` module reference.
+# - Returns: structured dict with full body (up to `_BODY_CHAR_LIMIT`), non-text metadata, and `cache://email/<id>` key.
+def _hydrate_email_message_entry(
+    msg_id: str,
+    candidate_accounts: List[str],
+    summary: Optional[Dict[str, Any]],
+    service_cache: dict[str, object],
+    gmail_engine_mod: Any,
+) -> Dict[str, Any]:
+    """Fetch, cache verbatim (`cache://email/<id>`), and format one full email entry with graceful fallback."""
+    last_exc: Optional[Exception] = None
+    msg: Optional[Dict[str, Any]] = None
+    resolved_acc = candidate_accounts[0] if candidate_accounts else "default"
+
+    for acc in candidate_accounts:
+        try:
+            if acc not in service_cache:
+                service_cache[acc] = gmail_engine_mod.get_gmail_service(account=acc)
+            msg = gmail_engine_mod.get_message(msg_id, account=acc, service=service_cache[acc])
+            resolved_acc = acc
+            break
+        except Exception as exc:
+            last_exc = exc
+
+    if msg is None:
+        base_summary = summary or {}
+        fallback_entry: Dict[str, Any] = {
+            "id": msg_id,
+            "account": base_summary.get("account") or resolved_acc,
+            "thread_id": base_summary.get("thread_id", ""),
+            "subject": base_summary.get("subject", ""),
+            "sender": base_summary.get("sender", ""),
+            "date": base_summary.get("date", ""),
+            "labels": base_summary.get("labels", []),
+            "snippet": base_summary.get("snippet", ""),
+            "body_error": f"Failed to hydrate full body: {last_exc}",
+        }
+        return fallback_entry
+
+    full_body = str(msg.get("body") or "")
+    attachments = msg.get("attachments") or []
+    inline_media = msg.get("inline_media") or []
+    non_text_notice = str(msg.get("non_text_notice") or "").strip()
+    effective_acc = msg.get("account", resolved_acc)
+
+    cache_key: Optional[str] = None
+    try:
+        from nexus.core.conversation_cache import get_active_conversation_id, put_capture
+
+        convo_id = get_active_conversation_id()
+        attachment_lines = ""
+        if attachments:
+            att_summary = ", ".join(
+                f"{a['filename']} ({a['mime_type']}, {a['size']})"
+                if isinstance(a, dict)
+                else str(a)
+                for a in attachments
+            )
+            attachment_lines += f"- **Attachments:** {att_summary}\n"
+        if non_text_notice:
+            attachment_lines += f"- **Non-Text Notice:** {non_text_notice}\n"
+
+        email_doc = (
+            f"# {msg.get('subject') or '(No Subject)'}\n"
+            f"- **From:** {msg.get('sender') or ''}\n"
+            f"- **Date:** {msg.get('date') or ''}\n"
+            f"- **Account:** {effective_acc}\n"
+            f"- **Message ID:** {msg['id']}\n"
+            f"- **Thread ID:** {msg.get('thread_id') or ''}\n"
+            f"{attachment_lines}\n"
+            f"{full_body}"
+        )
+        cache_key = put_capture(
+            conversation_id=convo_id,
+            source_type="email",
+            title=str(msg.get("subject") or f"Email {msg['id']}"),
+            content=email_doc,
+            source_url=None,
+            cache_key=f"cache://email/{msg['id']}",
+        )
+    except Exception:
+        cache_key = None
+
+    email_entry: Dict[str, Any] = {
+        "id": msg["id"],
+        "account": effective_acc,
+        "thread_id": msg.get("thread_id", ""),
+        "subject": msg.get("subject", ""),
+        "sender": msg.get("sender", ""),
+        "date": msg.get("date", ""),
+        "labels": msg.get("labels", (summary or {}).get("labels", [])),
+        "body": full_body[:_BODY_CHAR_LIMIT],
+    }
+    # Only include non-text metadata keys when present so plain-text emails stay lean
+    if attachments:
+        email_entry["attachments"] = attachments
+    if inline_media:
+        email_entry["inline_media"] = inline_media
+    if non_text_notice:
+        email_entry["non_text_notice"] = non_text_notice
+    if cache_key:
+        email_entry["cache_key"] = cache_key
+    return email_entry
 
 
 # Signature breakdown for fetch_emails:
@@ -1030,59 +1145,103 @@ _FETCH_EMAILS_AUTO_BODY_CAP = 20
 # - include_archived: bool = False sweeps `in:inbox` (all inbox emails regardless of labels) by default; True includes archived mail.
 # - query: str = "" optional Gmail search filter (leave empty for a general inbox sweep).
 # - account: str = "all" targets all configured Gmail accounts or a single concrete alias/email.
-# - include_body: Optional[bool] overrides automatic full-body hydration (default None hydrates up to 20 matches).
+# - include_body: bool = False returns lightweight metadata + snippet by default (two-phase scan-then-hydrate); True hydrates up to 20 bodies immediately.
+# - message_ids: Optional[List[str]] = None batch-hydrates full bodies (plus cache://email/<id> & non-text notices) for exact selected Gmail IDs.
 @tool
 def fetch_emails(
     count: int = 10,
     include_archived: bool = False,
     query: str = "",
     account: str = "all",
-    include_body: Optional[bool] = None,
+    include_body: bool = False,
+    message_ids: Optional[List[str]] = None,
 ) -> str:
-    """Sweep or search emails from Gmail across accounts without label filtering.
+    """Two-phase Gmail search and selective body hydration across connected accounts.
 
-    Read-only operation. By default (`query=""`, `include_archived=False`), sweeps everything in
-    `in:inbox` regardless of labels across all connected accounts. Pass `include_archived=True` to
-    include archived (non-inbox) mail, or provide an optional `query` for targeted searches.
+    Read-only operation. Use the two-step scan-then-select workflow to avoid pulling long
+    newsletters or irrelevant threads into context:
+      1. **Scan (default `include_body=False`):** Sweeps `in:inbox` (or all mail with `include_archived=True`)
+         and returns lightweight metadata (`id`, `account`, `thread_id`, `subject`, `sender`, `date`, `labels`, `snippet`).
+         Combine related search terms with Gmail `OR` syntax in a single query when scanning.
+      2. **Select (`message_ids=[...]`):** Pass the exact `id` list of ONLY the relevant emails to batch-hydrate
+         full Markdown bodies (up to 4,000 chars inline, full untruncated capture in `cache://email/<id>`,
+         plus `attachments`, `inline_media`, and `non_text_notice`).
 
-    For broad sweeps (`count > 20` with `include_body=None`), full message bodies are hydrated only
-    for the newest 20 matches and remaining matches return lightweight metadata (`subject`, `sender`,
-    `date`, `labels`, `snippet`) to prevent Gmail API quota exhaustion (`HttpError 403 rateLimitExceeded`).
-    Each hydrated email is automatically stored in full (untruncated) in the per-conversation cache
-    under `cache://email/<id>` (returned in the `cache_key` field) for subagent hydration or `{{cache:email/<id>}}` splicing.
     When sweeping or triaging inbox mail, read and follow `[[Protocol - Email Triage]]` (or pass
     `context_files=["Protocol - Email Triage.md"]` to `spawn_subagent`).
 
     Args:
-        count: Number of emails to collect (default: 10).
+        count: Number of emails to collect during search/sweep (default: 10).
         include_archived: When False (default), sweeps `in:inbox` (excludes archived mail). Set True
                           to include archived mail as well.
-        query: Optional Gmail search syntax (e.g. 'from:recruiter newer_than:7d', 'subject:interview').
-               Leave empty ("") to sweep recent emails without filtering.
-        account: Account alias ('all' for all configured accounts, 'default', or custom name).
-        include_body: Optional override: `True` hydrates every message body, `False` returns metadata+snippet
-                      only, `None` (default) hydrates full bodies up to 20 matches.
+        query: Optional Gmail search syntax (e.g. 'from:recruiter newer_than:7d', 'luma OR meetup OR hackathon').
+               Leave empty ("") to sweep recent inbox emails without filtering.
+        account: Account alias ('all' for all configured accounts, 'default', or specific email/alias).
+        include_body: When False (default), returns lightweight metadata + snippet only. Set True to
+                      hydrate full bodies for up to 20 search matches immediately.
+        message_ids: Optional list of Gmail message `id` strings from a prior scan to batch-hydrate
+                     full bodies and `cache://email/<id>` captures directly (skips search).
     """
     from nexus.shared_tools import gmail_engine
 
     try:
+        # Cache one Discovery Resource per account across the loop so we don't rebuild clients N times
+        service_cache: dict[str, object] = {}
+
+        # Mode 1: Selective batch hydration by exact Gmail message IDs
+        if message_ids:
+            deduped_ids: List[str] = []
+            seen_ids: set[str] = set()
+            for raw_id in message_ids:
+                cleaned_id = str(raw_id or "").strip()
+                if cleaned_id and cleaned_id not in seen_ids:
+                    seen_ids.add(cleaned_id)
+                    deduped_ids.append(cleaned_id)
+
+            if account.lower() == "all":
+                candidate_accounts = [
+                    acc for acc in gmail_engine.list_available_accounts()
+                    if acc.lower() != "all"
+                ] or ["default"]
+            else:
+                candidate_accounts = [account]
+
+            hydrated = [
+                _hydrate_email_message_entry(
+                    msg_id=mid,
+                    candidate_accounts=candidate_accounts,
+                    summary=None,
+                    service_cache=service_cache,
+                    gmail_engine_mod=gmail_engine,
+                )
+                for mid in deduped_ids
+            ]
+            return json.dumps(hydrated, ensure_ascii=False)
+
+        # Mode 2: Search / sweep (`list_messages` metadata+snippets first; optional immediate body hydration)
         summaries = gmail_engine.list_messages(
             query=query,
             max_results=count,
             account=account,
             include_archived=include_archived,
         )
-        # Cache one Discovery Resource per account across the loop so we don't rebuild clients N times
-        service_cache: dict[str, object] = {}
         emails = []
         for idx, s in enumerate(summaries):
             msg_acc = s.get("account") or (account if account.lower() != "all" else "default")
-            should_fetch_body = (
-                include_body
-                if include_body is not None
-                else idx < _FETCH_EMAILS_AUTO_BODY_CAP
-            )
-            if not should_fetch_body:
+            if not include_body:
+                emails.append({
+                    "id": s.get("id"),
+                    "account": msg_acc,
+                    "thread_id": s.get("thread_id"),
+                    "subject": s.get("subject"),
+                    "sender": s.get("sender"),
+                    "date": s.get("date"),
+                    "labels": s.get("labels", []),
+                    "snippet": s.get("snippet", ""),
+                })
+                continue
+
+            if idx >= _FETCH_EMAILS_AUTO_BODY_CAP:
                 emails.append({
                     "id": s.get("id"),
                     "account": msg_acc,
@@ -1093,69 +1252,21 @@ def fetch_emails(
                     "labels": s.get("labels", []),
                     "snippet": s.get("snippet", ""),
                     "body_omitted_reason": (
-                        "include_body=False"
-                        if include_body is False
-                        else f"Summary only in sweep mode (beyond first {_FETCH_EMAILS_AUTO_BODY_CAP} full bodies); call fetch_emails(query='id:{s.get('id')}', count=1, account='{msg_acc}') for full body."
+                        f"Summary only beyond first {_FETCH_EMAILS_AUTO_BODY_CAP} full bodies; "
+                        f"call fetch_emails(message_ids=['{s.get('id')}'], account='{msg_acc}') for full body."
                     ),
                 })
                 continue
 
-            try:
-                if msg_acc not in service_cache:
-                    service_cache[msg_acc] = gmail_engine.get_gmail_service(account=msg_acc)
-                msg = gmail_engine.get_message(s["id"], account=msg_acc, service=service_cache[msg_acc])
-                full_body = str(msg.get("body") or "")
-                cache_key: Optional[str] = None
-                try:
-                    from nexus.core.conversation_cache import get_active_conversation_id, put_capture
-
-                    convo_id = get_active_conversation_id()
-                    email_doc = (
-                        f"# {msg.get('subject') or '(No Subject)'}\n"
-                        f"- **From:** {msg.get('sender') or ''}\n"
-                        f"- **Date:** {msg.get('date') or ''}\n"
-                        f"- **Account:** {msg.get('account', msg_acc)}\n"
-                        f"- **Message ID:** {msg['id']}\n"
-                        f"- **Thread ID:** {msg.get('thread_id') or ''}\n\n"
-                        f"{full_body}"
-                    )
-                    cache_key = put_capture(
-                        conversation_id=convo_id,
-                        source_type="email",
-                        title=str(msg.get("subject") or f"Email {msg['id']}"),
-                        content=email_doc,
-                        source_url=None,
-                        cache_key=f"cache://email/{msg['id']}",
-                    )
-                except Exception:
-                    cache_key = None
-
-                email_entry = {
-                    "id": msg["id"],
-                    "account": msg.get("account", msg_acc),
-                    "thread_id": msg["thread_id"],
-                    "subject": msg["subject"],
-                    "sender": msg["sender"],
-                    "date": msg["date"],
-                    "labels": msg.get("labels", s.get("labels", [])),
-                    "body": full_body[:_BODY_CHAR_LIMIT],
-                }
-                if cache_key:
-                    email_entry["cache_key"] = cache_key
-                emails.append(email_entry)
-            except Exception as msg_exc:
-                # Degrade gracefully per email instead of discarding the entire batch on one quota/MIME failure
-                emails.append({
-                    "id": s.get("id"),
-                    "account": msg_acc,
-                    "thread_id": s.get("thread_id"),
-                    "subject": s.get("subject"),
-                    "sender": s.get("sender"),
-                    "date": s.get("date"),
-                    "labels": s.get("labels", []),
-                    "snippet": s.get("snippet", ""),
-                    "body_error": f"Failed to hydrate full body: {msg_exc}",
-                })
+            emails.append(
+                _hydrate_email_message_entry(
+                    msg_id=s["id"],
+                    candidate_accounts=[msg_acc],
+                    summary=s,
+                    service_cache=service_cache,
+                    gmail_engine_mod=gmail_engine,
+                )
+            )
         return json.dumps(emails, ensure_ascii=False)
     except Exception as exc:
         return json.dumps([{"error": f"fetch_emails failed: {exc}"}])

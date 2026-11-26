@@ -18,7 +18,8 @@ Usage:
     python -m nexus.shared_tools.gmail_engine --search "from:greenhouse.io newer_than:14d" [--account <ALIAS|all>] [--include-archived]
     python -m nexus.shared_tools.gmail_engine --read <MESSAGE_ID> [--account <ALIAS>] [-o Vault/0. Inbox/email.md]
     python -m nexus.shared_tools.gmail_engine --thread <THREAD_ID> [--account <ALIAS>]
-    python -m nexus.shared_tools.gmail_engine --draft "to@x.com" "Subject" "Body" [--reply-to <MESSAGE_ID>] [--account <ALIAS>]
+    python -m nexus.shared_tools.gmail_engine --list-send-as [--account <ALIAS|all>]
+    python -m nexus.shared_tools.gmail_engine --draft "to@x.com" "Subject" "Body" [--reply-to <MESSAGE_ID>] [--account <ALIAS|all>] [--send-as <EMAIL>]
 """
 
 import argparse
@@ -32,8 +33,10 @@ import re
 import sys
 from datetime import datetime
 from email.message import EmailMessage
+from email.utils import formataddr, parseaddr
 from html.parser import HTMLParser
 from typing import Any, Optional
+from urllib.parse import unquote
 
 import google_auth_httplib2
 import httplib2
@@ -254,22 +257,95 @@ def authenticate_account(account: Optional[str] = None) -> tuple[str, str]:
     return detected_email, token_file
 
 
+# ── Non-Text & HTML Formatting Helpers ───────────────────────────────────────
+
+# Common 1x1 spacer/beacon filenames used in marketing emails when alt text is omitted
+_TRACKING_PIXEL_NAMES: frozenset[str] = frozenset({
+    "spacer.gif",
+    "pixel.gif",
+    "1x1.gif",
+    "1x1.png",
+    "blank.gif",
+    "clear.gif",
+    "transparent.gif",
+})
+
+
+def _format_byte_size(num_bytes: int) -> str:
+    """Format a raw byte count into a compact human-readable string (e.g. '512 B', '14.2 KB', '2.3 MB')."""
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    if num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.1f} KB"
+    return f"{num_bytes / (1024 * 1024):.1f} MB"
+
+
+def _sanitize_md_label(text: str) -> str:
+    """Decode HTML entities, collapse whitespace, and neutralize Markdown brackets so labels stay valid inside `[...]`."""
+    if not text:
+        return ""
+    cleaned = re.sub(r"\s+", " ", html.unescape(text)).strip()
+    return cleaned.replace("[", "(").replace("]", ")")
+
+
+# Signature breakdown:
+# - attr_dict: dict[str, str] lowercase HTML attribute map for an `<img>` element.
+# - Returns bool: True when dimensions, CSS hiding rules, or spacer filenames identify a tracking beacon.
+def _is_tracking_pixel(attr_dict: dict[str, str]) -> bool:
+    """Return True if an `<img>` tag is a tiny (<=2px) or CSS-hidden tracking pixel rather than real content."""
+    def _parse_px(raw_val: str) -> Optional[float]:
+        val = (raw_val or "").strip().lower()
+        if not val or val.endswith("%"):
+            return None
+        match = re.match(r"^(\d+(?:\.\d+)?)\s*(?:px)?$", val)
+        return float(match.group(1)) if match else None
+
+    # 1. Explicit HTML width/height <= 2px (ignore missing or percentage values so normal fluid images stay intact)
+    for dim_attr in ("width", "height"):
+        px = _parse_px(attr_dict.get(dim_attr, ""))
+        if px is not None and px <= 2:
+            return True
+
+    # 2. Inline CSS hiding or <= 2px box dimensions (e.g. `style="display:none; width:1px;"`)
+    style = (attr_dict.get("style") or "").lower()
+    if style:
+        if re.search(r"display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0+)?\s*(?:;|$)", style):
+            return True
+        for css_dim in ("width", "height"):
+            css_match = re.search(rf"(?:^|;)\s*{css_dim}\s*:\s*(\d+(?:\.\d+)?)\s*px", style)
+            if css_match and float(css_match.group(1)) <= 2:
+                return True
+
+    # 3. Empty alt text combined with a known spacer/tracking-pixel filename
+    alt = (attr_dict.get("alt") or "").strip()
+    if not alt:
+        src = (attr_dict.get("src") or attr_dict.get("data-src") or "").strip().lower()
+        basename = src.split("?", 1)[0].split("#", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+        if basename in _TRACKING_PIXEL_NAMES:
+            return True
+
+    return False
+
+
 # ── HTML → Markdown Stream Parser ─────────────────────────────────────────────
 class HTMLToMarkdownParser(HTMLParser):
     """
     Robust stream parser converting raw email HTML into clean GitHub-flavored Markdown.
     
     Key mechanisms:
-    1. Container Suppression: Skips non-visual blocks (<style>, <script>, <head>, <svg>, <noscript>).
+    1. Container Suppression: Skips non-visual blocks (<style>, <script>, <head>, <svg>, <noscript>),
+       while emitting concise markers for accessible `<svg role="img" aria-label="...">` graphics.
     2. Link Preservation: Converts <a href="...">text</a> into [text](url) format.
     3. Structural Layout: Maps block tags (<p>, <div>, <tr>, <h1>-<h6>, <hr>, <li>) to markdown spacing.
     4. Inline Styles: Applies bold/italic formatting to text without producing empty asterisks (****).
-    5. Entity Decoding: Unescapes HTML entities (&amp;, &nbsp;, &#39;) and normalizes inter-tag whitespace.
+    5. Non-Text Media Notices: Emits compact placeholders for meaningful `<img>`, `<video>`, `<audio>`,
+       `<iframe>`, `<object>`, and `<embed>` elements while ignoring 1x1 tracking pixels.
+    6. Entity Decoding: Unescapes HTML entities (&amp;, &nbsp;, &#39;) and normalizes inter-tag whitespace.
     """
     # Non-void container tags whose inner text/children should be completely discarded
     IGNORE_CONTAINER_TAGS = {"style", "script", "head", "svg", "noscript", "template"}
 
-    def __init__(self):
+    def __init__(self, cid_map: Optional[dict[str, dict[str, Any]]] = None):
         super().__init__()
         self.output: list[str] = []              # Accumulator for markdown tokens
         self._ignore_stack: list[str] = []       # Tracks active ignored container tags
@@ -277,14 +353,30 @@ class HTMLToMarkdownParser(HTMLParser):
         self._link_text_acc: list[str] = []      # Buffer for text inside an <a> tag
         self._bold_depth: int = 0                # Nesting level for <b> and <strong> tags
         self._italic_depth: int = 0              # Nesting level for <i> and <em> tags
+        # Lookup table mapping lowercase Content-ID -> inline MIME metadata dict from _inspect_non_text_parts()
+        self._cid_map: dict[str, dict[str, Any]] = cid_map or {}
+        self.images: list[dict[str, str]] = []
+        self.tracking_pixels_skipped: int = 0
+        self.embedded_media: list[dict[str, str]] = []
+        self.referenced_cids: set[str] = set()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]):
         tag_lower = tag.lower()
         # Convert list of (name, value) tuples into a case-insensitive lookup dict
         attr_dict = {k.lower(): (v or "") for k, v in attrs}
 
-        # 1. Ignore script/style/head container elements
+        # 1. Ignore script/style/head/svg container elements, surfacing accessible `<svg>` labels first
         if tag_lower in self.IGNORE_CONTAINER_TAGS:
+            if tag_lower == "svg" and not self._ignore_stack:
+                svg_role = attr_dict.get("role", "").strip().lower()
+                svg_label = _sanitize_md_label(attr_dict.get("aria-label") or attr_dict.get("title") or "")
+                if svg_label or svg_role == "img":
+                    marker = f"[SVG Graphic: {svg_label}]" if svg_label else "[SVG Graphic]"
+                    self.embedded_media.append({"kind": "svg", "label": svg_label})
+                    if self._current_href is not None:
+                        self._link_text_acc.append(svg_label or marker)
+                    else:
+                        self.output.append(f" {marker} ")
             self._ignore_stack.append(tag_lower)
             return
 
@@ -309,6 +401,55 @@ class HTMLToMarkdownParser(HTMLParser):
             self._bold_depth += 1
         elif tag_lower in ["i", "em"]:
             self._italic_depth += 1
+        elif tag_lower == "img":
+            if _is_tracking_pixel(attr_dict):
+                self.tracking_pixels_skipped += 1
+                return
+            src = (attr_dict.get("src") or attr_dict.get("data-src") or "").strip()
+            alt = _sanitize_md_label(attr_dict.get("alt") or attr_dict.get("title") or "")
+            src_lower = src.lower()
+
+            if src_lower.startswith("cid:"):
+                # Resolve `cid:<id>` against inline MIME parts so agents see filename, MIME type, and size
+                cid_key = unquote(src[4:]).strip().strip("<>").lower()
+                self.referenced_cids.add(cid_key)
+                meta = self._cid_map.get(cid_key)
+                if meta:
+                    fname = _sanitize_md_label(str(meta.get("filename") or "(unnamed)"))
+                    detail = f"{fname} ({meta['mime_type']}, {meta['size']})"
+                    if alt and alt.lower() != fname.lower():
+                        marker = f"[Inline Image: {alt} — {detail}]"
+                    else:
+                        marker = f"[Inline Image: {detail}]"
+                else:
+                    marker = f"[Inline Image: {alt}]" if alt else "[Inline Image]"
+                self.images.append({
+                    "kind": "cid",
+                    "cid": cid_key,
+                    "alt": alt,
+                    "filename": str(meta.get("filename", "")) if meta else "",
+                })
+            elif src_lower.startswith("data:image/"):
+                marker = f"[Inline Embedded Image: {alt}]" if alt else "[Inline Embedded Image]"
+                self.images.append({"kind": "data_uri", "alt": alt})
+            else:
+                marker = f"[Image: {alt}]" if alt else "[Image]"
+                self.images.append({"kind": "external", "alt": alt, "src": src})
+
+            # Inside `<a href="..."><img></a>`, preserve label/marker so CTA links keep readable anchor text
+            if self._current_href is not None:
+                self._link_text_acc.append(alt or marker)
+            else:
+                self.output.append(f" {marker} ")
+        elif tag_lower in ("video", "audio", "iframe", "object", "embed"):
+            src = (attr_dict.get("src") or attr_dict.get("data") or "").strip()
+            title = _sanitize_md_label(attr_dict.get("title") or attr_dict.get("aria-label") or "")
+            self.embedded_media.append({"kind": tag_lower, "label": title, "src": src})
+            marker = f"[Embedded {tag_lower.title()}: {title}]" if title else f"[Embedded {tag_lower.title()}]"
+            if self._current_href is not None:
+                self._link_text_acc.append(title or marker)
+            else:
+                self.output.append(f" {marker} ")
         elif tag_lower == "a":
             href = attr_dict.get("href", "").strip()
             # Ignore empty hrefs, internal hash anchors, and javascript: links
@@ -394,11 +535,27 @@ class HTMLToMarkdownParser(HTMLParser):
         return "\n".join(cleaned_lines).strip()
 
 
+def _html_to_markdown_with_meta(
+    html_content: str,
+    cid_map: Optional[dict[str, dict[str, Any]]] = None,
+) -> tuple[str, dict[str, Any]]:
+    """Convert raw HTML body into clean markdown alongside extracted image/media metadata."""
+    parser = HTMLToMarkdownParser(cid_map=cid_map)
+    parser.feed(html_content)
+    parser.close()
+    meta = {
+        "images": parser.images,
+        "embedded_media": parser.embedded_media,
+        "tracking_pixels_skipped": parser.tracking_pixels_skipped,
+        "referenced_cids": parser.referenced_cids,
+    }
+    return parser.get_markdown(), meta
+
+
 def _html_to_markdown(html_content: str) -> str:
     """Helper converting raw HTML body into clean markdown."""
-    parser = HTMLToMarkdownParser()
-    parser.feed(html_content)
-    return parser.get_markdown()
+    md, _ = _html_to_markdown_with_meta(html_content)
+    return md
 
 
 # ── MIME Helpers (shared by raw-message parsing) ──────────────────────────────
@@ -415,28 +572,42 @@ def _decode_header(raw_header: str) -> str:
     return " ".join(decoded)
 
 
-def _extract_body(msg: email_lib.message.Message) -> str:
+# Signature breakdown:
+# - msg: email.message.Message parsed RFC 822 message tree.
+# - cid_map: Optional mapping of lowercase Content-ID -> inline MIME metadata dict for `cid:` resolution.
+# - Returns tuple[str, dict[str, Any]]: (markdown_body, aggregated_html_media_metadata).
+def _extract_body_and_media(
+    msg: email_lib.message.Message,
+    cid_map: Optional[dict[str, dict[str, Any]]] = None,
+) -> tuple[str, dict[str, Any]]:
     """
-    Extracts and converts email content to markdown.
+    Extract email content as markdown plus aggregated HTML visual/media telemetry.
     Prioritizes rich HTML markdown conversion, falling back to clean plain text.
-    Handles multipart/alternative and multipart/related MIME trees safely.
     """
     plain_parts: list[str] = []
     html_parts: list[str] = []
+    empty_media: dict[str, Any] = {
+        "external_images": [],
+        "data_uri_images": [],
+        "cid_images": [],
+        "embedded_media": [],
+        "tracking_pixels_skipped": 0,
+        "referenced_cids": set(),
+    }
 
     if msg.is_multipart():
         # .walk() is a generator: depth-first traversal of every nested MIME part
         for part in msg.walk():
-            ct = part.get_content_type()
-            cd = str(part.get("Content-Disposition", ""))
-            if "attachment" in cd:
+            ct = (part.get_content_type() or "").lower()
+            cd = str(part.get("Content-Disposition", "")).lower()
+            if "attachment" in cd or part.get_filename():
                 continue
-            
+
             charset = part.get_content_charset() or "utf-8"
             payload = part.get_payload(decode=True)  # decode=True undoes base64/quoted-printable transfer encoding
             if payload is None:
                 continue
-            
+
             text = payload.decode(charset, errors="replace")
             # Only append if non-empty to prevent empty plain-text from masking HTML parts
             if ct == "text/plain" and text.strip():
@@ -444,36 +615,169 @@ def _extract_body(msg: email_lib.message.Message) -> str:
             elif ct == "text/html" and text.strip():
                 html_parts.append(text.strip())
     else:
-        charset = msg.get_content_charset() or "utf-8"
-        payload = msg.get_payload(decode=True)
-        text = payload.decode(charset, errors="replace") if payload else ""
-        if msg.get_content_type() == "text/html" and text.strip():
-            html_parts.append(text.strip())
-        elif text.strip():
-            plain_parts.append(text.strip())
+        ct = (msg.get_content_type() or "").lower()
+        cd = str(msg.get("Content-Disposition", "")).lower()
+        # Only decode single-part bodies when they are genuinely inline text/plain or text/html (never raw binary bytes)
+        if "attachment" not in cd and not msg.get_filename() and ct in ("text/plain", "text/html"):
+            charset = msg.get_content_charset() or "utf-8"
+            payload = msg.get_payload(decode=True)
+            text = payload.decode(charset, errors="replace") if payload else ""
+            if ct == "text/html" and text.strip():
+                html_parts.append(text.strip())
+            elif ct == "text/plain" and text.strip():
+                plain_parts.append(text.strip())
 
     # 1. Prefer rich HTML converted to link-preserving Markdown
     if html_parts:
-        converted = [_html_to_markdown(h) for h in html_parts if h]
+        converted: list[str] = []
+        for h in html_parts:
+            md, meta = _html_to_markdown_with_meta(h, cid_map=cid_map)
+            if md:
+                converted.append(md)
+            for img in meta["images"]:
+                if img["kind"] == "external":
+                    empty_media["external_images"].append(img)
+                elif img["kind"] == "data_uri":
+                    empty_media["data_uri_images"].append(img)
+                elif img["kind"] == "cid":
+                    empty_media["cid_images"].append(img)
+            empty_media["embedded_media"].extend(meta["embedded_media"])
+            empty_media["tracking_pixels_skipped"] += meta["tracking_pixels_skipped"]
+            empty_media["referenced_cids"].update(meta["referenced_cids"])
+
         combined = "\n\n---\n\n".join([c for c in converted if c])
         if combined.strip():
-            return combined
+            return combined, empty_media
 
     # 2. Fall back to plain text parts
     if plain_parts:
-        return "\n\n".join(plain_parts).strip()
+        return "\n\n".join(plain_parts).strip(), empty_media
 
-    return "(No readable body found)"
+    return "(No readable body found)", empty_media
 
 
-def _list_attachments(msg: email_lib.message.Message) -> list[str]:
-    """Return filenames of attachment parts (metadata only; bytes are not downloaded to the agent)."""
-    names: list[str] = []
+def _extract_body(msg: email_lib.message.Message) -> str:
+    """
+    Extracts and converts email content to markdown.
+    Prioritizes rich HTML markdown conversion, falling back to clean plain text.
+    Handles multipart/alternative and multipart/related MIME trees safely.
+    """
+    body, _ = _extract_body_and_media(msg)
+    return body
+
+
+# Signature breakdown:
+# - msg: email.message.Message parsed RFC 822 MIME tree.
+# - Returns dict with `attachments` (list[dict]), `inline_media` (list[dict]), and `cid_map` (dict[str, dict]).
+def _inspect_non_text_parts(msg: email_lib.message.Message) -> dict[str, Any]:
+    """
+    Walk the MIME tree and inventory every attachment, inline media part, and unnamed non-text part
+    (e.g. PDFs, images, audio, calendar invites `text/calendar`, forwarded `message/rfc822`).
+    """
+    attachments: list[dict[str, Any]] = []
+    inline_media: list[dict[str, Any]] = []
+    cid_map: dict[str, dict[str, Any]] = {}
+
     for part in msg.walk():
-        filename = part.get_filename()
-        if filename:
-            names.append(_decode_header(filename))
-    return names
+        ct = (part.get_content_type() or "").lower()
+        if ct.startswith("multipart/"):
+            continue
+
+        # Parse disposition safely across malformed headers
+        cd = (part.get_content_disposition() or "").lower()
+        if not cd and "attachment" in str(part.get("Content-Disposition", "")).lower():
+            cd = "attachment"
+
+        raw_filename = part.get_filename()
+        filename = _decode_header(raw_filename).strip() if raw_filename else ""
+        content_id = (part.get("Content-ID") or "").strip().strip("<>")
+
+        # Skip normal email body text/HTML parts unless explicitly attached or named as a file
+        if ct in ("text/plain", "text/html") and cd != "attachment" and not filename:
+            continue
+
+        # Compute decoded payload byte size; message/rfc822 containers return None from get_payload(decode=True)
+        payload = part.get_payload(decode=True)
+        if isinstance(payload, (bytes, bytearray)):
+            size_bytes = len(payload)
+        else:
+            try:
+                size_bytes = len(part.as_bytes())
+            except Exception:
+                size_bytes = 0
+
+        entry: dict[str, Any] = {
+            "filename": filename or "(unnamed)",
+            "mime_type": ct,
+            "size_bytes": size_bytes,
+            "size": _format_byte_size(size_bytes),
+            "disposition": cd or ("attachment" if filename else "part"),
+        }
+        if content_id:
+            entry["content_id"] = content_id
+
+        # Always index Content-ID references so HTML cid: tags resolve even if a mailer omitted/altered disposition
+        if content_id:
+            cid_map[content_id.lower()] = entry
+
+        # Inline media (explicit inline, non-attachment, or Content-ID-linked media) goes to `inline_media`
+        if ct.startswith(("image/", "audio/", "video/")) and (cd != "attachment" or bool(content_id)):
+            inline_media.append(entry)
+        else:
+            attachments.append(entry)
+
+    return {"attachments": attachments, "inline_media": inline_media, "cid_map": cid_map}
+
+
+def _build_non_text_notice(
+    attachments: list[dict[str, Any]],
+    inline_media: list[dict[str, Any]],
+    html_media: dict[str, Any],
+) -> str:
+    """
+    Build a concise, high-signal notice whenever an email contains attachments, inline/external images,
+    calendar invites, forwarded messages, or embedded HTML media; returns '' for pure text emails.
+    """
+    ext_imgs = html_media.get("external_images", [])
+    data_imgs = html_media.get("data_uri_images", [])
+    emb_media = html_media.get("embedded_media", [])
+
+    if not attachments and not inline_media and not ext_imgs and not data_imgs and not emb_media:
+        return ""
+
+    clauses: list[str] = []
+
+    if attachments:
+        # Highlight special non-plain-text MIME payloads (calendar invites, forwarded RFC822 messages)
+        labels = []
+        for att in attachments:
+            tag = ""
+            if att["mime_type"] == "text/calendar":
+                tag = "calendar invite: "
+            elif att["mime_type"] == "message/rfc822":
+                tag = "forwarded email: "
+            labels.append(f"{tag}{att['filename']} ({att['mime_type']}, {att['size']})")
+        clauses.append(f"{len(attachments)} attachment(s): {', '.join(labels)}")
+
+    if inline_media:
+        media_labels = [f"{m['filename']} ({m['mime_type']}, {m['size']})" for m in inline_media]
+        clauses.append(f"{len(inline_media)} inline media part(s): {', '.join(media_labels)}")
+
+    html_img_count = len(ext_imgs) + len(data_imgs)
+    if html_img_count:
+        with_alt = sum(1 for img in (ext_imgs + data_imgs) if img.get("alt"))
+        alt_note = f" ({with_alt} with alt text)" if with_alt else " (no alt text)"
+        clauses.append(f"{html_img_count} HTML image(s){alt_note}")
+
+    if emb_media:
+        kinds = ", ".join(sorted({m["kind"] for m in emb_media}))
+        clauses.append(f"{len(emb_media)} embedded HTML media ({kinds})")
+
+    return (
+        "Email contains non-plain-text content — "
+        + "; ".join(clauses)
+        + ". Binary/visual contents are not extracted or visually inspected by this tool."
+    )
 
 
 def _header_map(payload: dict[str, Any]) -> dict[str, str]:
@@ -604,9 +908,26 @@ def list_messages(
         if not combined and errors and len(errors) == len(available):
             raise RuntimeError(f"Gmail list_messages failed across all accounts: {'; '.join(errors)}")
 
-        # Sort combined results descending by ISO date string (newest first)
-        combined.sort(key=lambda m: m.get("date", ""), reverse=True)
-        return combined[:max_results]
+        # Deduplicate messages across accounts by Gmail `id` so aliased tokens never emit duplicate
+        # entries or consume `max_results` budget twice; prefer concrete email addresses over aliases.
+        deduped_by_id: dict[str, dict[str, Any]] = {}
+        ordered_msgs: list[dict[str, Any]] = []
+        for msg in combined:
+            msg_id = msg.get("id")
+            if not msg_id:
+                ordered_msgs.append(msg)
+                continue
+            existing = deduped_by_id.get(msg_id)
+            if existing is None:
+                deduped_by_id[msg_id] = msg
+                ordered_msgs.append(msg)
+            elif "@" not in str(existing.get("account", "")) and "@" in str(msg.get("account", "")):
+                # Upgrade placeholder alias (e.g. 'default') in place when a later entry has a verified email
+                existing["account"] = msg["account"]
+
+        # Sort deduplicated results descending by ISO date string (newest first)
+        ordered_msgs.sort(key=lambda m: m.get("date", ""), reverse=True)
+        return ordered_msgs[:max_results]
 
     service = service or get_gmail_service(account=account)
     token_file = get_token_filename(account)
@@ -689,6 +1010,17 @@ def get_message(
     raw = service.users().messages().get(userId=USER_ID, id=message_id, format="raw").execute()
     msg = email_lib.message_from_bytes(base64.urlsafe_b64decode(raw["raw"]))
 
+    # Inventory non-text MIME parts first so cid: images in HTML resolve against filename/type/size metadata
+    mime_parts = _inspect_non_text_parts(msg)
+    body, html_media = _extract_body_and_media(msg, cid_map=mime_parts["cid_map"])
+    non_text_notice = _build_non_text_notice(
+        attachments=mime_parts["attachments"],
+        inline_media=mime_parts["inline_media"],
+        html_media=html_media,
+    )
+    if body == "(No readable body found)" and non_text_notice:
+        body = "(No plain-text body; email contains non-text content — see non_text_notice / attachments)"
+
     return {
         "id": raw.get("id"),
         "account": display_acc,
@@ -700,8 +1032,11 @@ def get_message(
         "subject": _decode_header(msg.get("Subject", "(No Subject)")),
         "message_id_header": msg.get("Message-ID", ""),  # RFC 5322 ID; needed for reply threading
         "labels": raw.get("labelIds", []),
-        "attachments": _list_attachments(msg),
-        "body": _extract_body(msg),
+        "attachments": mime_parts["attachments"],
+        "inline_media": mime_parts["inline_media"],
+        "has_non_text_content": bool(non_text_notice),
+        "non_text_notice": non_text_notice,
+        "body": body,
     }
 
 
@@ -766,6 +1101,53 @@ def list_labels(
     service = service or get_gmail_service(account=account)
     labels = service.users().labels().list(userId=USER_ID).execute().get("labels", [])
     return [{"id": l["id"], "name": l["name"], "type": l.get("type", "")} for l in labels]
+
+
+# Signature breakdown:
+# - account: str = "default" targets a concrete account alias/email or "all" to aggregate across accounts.
+# - service: Optional[Resource] reuses an existing authenticated Gmail Discovery client when provided.
+# - Returns list[dict[str, Any]]: verified and pending Gmail "Send mail as" aliases per mailbox.
+def list_send_as_aliases(
+    account: str = "default",
+    service: Optional[Resource] = None,
+) -> list[dict[str, Any]]:
+    """Return configured Gmail 'Send mail as' aliases for one account or across all accounts."""
+    if account.lower() == "all" and service is None:
+        available = [acc for acc in list_available_accounts() if not _is_reserved_account_alias(acc)] or ["default"]
+        combined_aliases: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for acc in available:
+            try:
+                combined_aliases.extend(list_send_as_aliases(account=acc))
+            except RecursionError:
+                raise
+            except Exception as exc:
+                errors.append(f"{acc}: {exc}")
+                print(f"[Nexus] Warning: failed to list send-as aliases for account '{acc}': {exc}", file=sys.stderr)
+        if not combined_aliases and errors and len(errors) == len(available):
+            raise RuntimeError(f"Gmail list_send_as_aliases failed across all accounts: {'; '.join(errors)}")
+        return combined_aliases
+
+    service = service or get_gmail_service(account=account)
+    token_file = get_token_filename(account)
+    display_acc = resolve_account_display_name(account, token_file)
+    raw_aliases = service.users().settings().sendAs().list(userId=USER_ID).execute().get("sendAs", [])
+    aliases: list[dict[str, Any]] = []
+    for item in raw_aliases:
+        is_primary = bool(item.get("isPrimary", False))
+        # Gmail leaves verificationStatus unset on the primary mailbox address itself
+        verification = item.get("verificationStatus") or ("accepted" if is_primary else "")
+        aliases.append({
+            "account": display_acc,
+            "send_as_email": item.get("sendAsEmail", ""),
+            "display_name": item.get("displayName", ""),
+            "reply_to_address": item.get("replyToAddress", ""),
+            "is_default": bool(item.get("isDefault", False)),
+            "is_primary": is_primary,
+            "treat_as_alias": bool(item.get("treatAsAlias", False)),
+            "verification_status": verification,
+        })
+    return aliases
 
 
 # ── Write Operations (HITL: confirm with the user before calling) ─────────────
@@ -837,6 +1219,87 @@ def trash_message(
     return True
 
 
+def _is_verified_send_as(alias_entry: dict[str, Any]) -> bool:
+    """Return True if a Gmail Send-As entry is primary or has accepted verification."""
+    return bool(
+        alias_entry.get("is_primary")
+        or str(alias_entry.get("verification_status", "")).strip().lower() == "accepted"
+    )
+
+
+def _format_send_as_from_header(
+    caller_display_name: str,
+    alias_entry: dict[str, Any],
+) -> str:
+    """Format an RFC 5322 From header from caller override or Gmail's configured Send-As displayName."""
+    send_as_email = str(alias_entry.get("send_as_email", "")).strip()
+    chosen_name = (caller_display_name or alias_entry.get("display_name") or "").strip()
+    return formataddr((chosen_name, send_as_email)) if chosen_name else send_as_email
+
+
+# Signature breakdown:
+# - send_as: str email or `"Display Name <email>"` requested as the draft's `From:` identity.
+# - account: str target mailbox alias or `"all"` to search every configured mailbox for the alias.
+# - service: Optional[Resource] existing authenticated Gmail client (when already bound to a concrete account).
+# - Returns tuple[str, str, Resource]: (resolved_account, formatted_from_header, authenticated_service).
+def _resolve_send_as_header(
+    send_as: str,
+    account: str,
+    service: Optional[Resource] = None,
+) -> tuple[str, str, Resource]:
+    """Validate `send_as` against verified Gmail Send-As aliases and return `(account, from_header, service)`."""
+    caller_name, target_email = parseaddr((send_as or "").strip())
+    target_email = target_email.strip().lower()
+    if "@" not in target_email:
+        raise ValueError(f"Invalid send_as address '{send_as}'. Expected an email like 'name@domain.com'.")
+
+    # When account='all' (and no pre-bound service was given), probe configured accounts to locate the owning mailbox
+    if account.lower() == "all" and service is None:
+        available = [acc for acc in list_available_accounts() if not _is_reserved_account_alias(acc)] or ["default"]
+        all_verified: list[str] = []
+        pending_account: Optional[str] = None
+        for acc in available:
+            svc = get_gmail_service(account=acc)
+            aliases = list_send_as_aliases(account=acc, service=svc)
+            for entry in aliases:
+                entry_email = str(entry.get("send_as_email", "")).strip()
+                if _is_verified_send_as(entry) and entry_email:
+                    all_verified.append(f"{entry_email} ({acc})")
+                if entry_email.lower() == target_email:
+                    if not _is_verified_send_as(entry):
+                        pending_account = f"{acc} (status={entry.get('verification_status') or 'unverified'})"
+                        continue
+                    return acc, _format_send_as_from_header(caller_name, entry), svc
+        if pending_account:
+            raise ValueError(
+                f"Send-As alias '{target_email}' exists on account '{pending_account}' but is not verified in Gmail."
+            )
+        verified_hint = ", ".join(all_verified) if all_verified else "(none found)"
+        raise ValueError(
+            f"Send-As alias '{target_email}' was not found on any configured Gmail account. "
+            f"Verified aliases: {verified_hint}"
+        )
+
+    service = service or get_gmail_service(account=account)
+    aliases = list_send_as_aliases(account=account, service=service)
+    verified_emails = [str(e.get("send_as_email", "")).strip() for e in aliases if _is_verified_send_as(e)]
+    for entry in aliases:
+        if str(entry.get("send_as_email", "")).strip().lower() == target_email:
+            if not _is_verified_send_as(entry):
+                raise ValueError(
+                    f"Send-As alias '{target_email}' on account '{account}' is not verified "
+                    f"(status='{entry.get('verification_status') or 'unverified'}')."
+                )
+            return account, _format_send_as_from_header(caller_name, entry), service
+
+    verified_hint = ", ".join(verified_emails) if verified_emails else "(none)"
+    raise ValueError(
+        f"Send-As alias '{target_email}' is not configured on account '{account}'. "
+        f"Verified aliases for '{account}': {verified_hint}. "
+        f"Run `--list-send-as --account all` to inspect all mailboxes."
+    )
+
+
 def create_draft(
     to: str,
     subject: str,
@@ -844,6 +1307,7 @@ def create_draft(
     reply_to_message_id: Optional[str] = None,
     account: str = "default",
     service: Optional[Resource] = None,
+    send_as: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Create a Gmail draft (never sends). The user reviews and hits Send in Gmail.
@@ -853,17 +1317,33 @@ def create_draft(
         subject: Subject line ('Re: ' is auto-prefixed for replies if missing).
         body: Plain-text body.
         reply_to_message_id: Optional Gmail message ID to reply to; threads the draft into that conversation.
-        account: Account email or alias from which to draft.
+        account: Account email or alias from which to draft (or 'all' when paired with `send_as`).
         service: Optional pre-built Resource client.
+        send_as: Optional verified Gmail 'Send mail as' email (or 'Display Name <email>') for the From header.
 
     Returns:
-        dict: account, draft_id, message_id, thread_id.
+        dict: account, draft_id, message_id, thread_id (plus send_as when specified).
     """
-    service = service or get_gmail_service(account=account)
+    formatted_from = ""
+    if send_as and send_as.strip():
+        account, formatted_from, service = _resolve_send_as_header(
+            send_as=send_as,
+            account=account,
+            service=service,
+        )
+    else:
+        if _is_reserved_account_alias(account) and service is None:
+            raise ValueError(
+                "create_draft() requires a concrete account or a `send_as` address (cannot draft to 'all' without `send_as`)."
+            )
+        service = service or get_gmail_service(account=account)
+
     token_file = get_token_filename(account)
     display_acc = resolve_account_display_name(account, token_file)
 
     mime = EmailMessage()  # Modern stdlib MIME builder (handles UTF-8 headers/body encoding for us)
+    if formatted_from:
+        mime["From"] = formatted_from
     mime["To"] = to
     mime.set_content(body)
 
@@ -885,18 +1365,30 @@ def create_draft(
         message_body["threadId"] = thread_id
 
     draft = service.users().drafts().create(userId=USER_ID, body={"message": message_body}).execute()
-    return {
+    result: dict[str, Any] = {
         "account": display_acc,
         "draft_id": draft.get("id"),
         "message_id": draft.get("message", {}).get("id"),
         "thread_id": draft.get("message", {}).get("threadId"),
     }
+    if formatted_from:
+        result["send_as"] = formatted_from
+    return result
 
 
 # ── Formatting ────────────────────────────────────────────────────────────────
+def _format_attachment_item(att: Any) -> str:
+    """Format a structured attachment dict (or legacy filename string) for Markdown rendering."""
+    if isinstance(att, dict):
+        return f"{att.get('filename', '(unnamed)')} ({att.get('mime_type', 'application/octet-stream')}, {att.get('size', '?')})"
+    return str(att)
+
+
 def message_to_markdown(msg: dict[str, Any]) -> str:
     """Render a get_message() dict as a Vault-ready markdown block."""
-    attachments = ", ".join(msg.get("attachments", [])) or "None"
+    raw_attachments = msg.get("attachments", [])
+    attachments = ", ".join(_format_attachment_item(a) for a in raw_attachments) or "None"
+    notice_line = f"**Non-Text Notice:** {msg['non_text_notice']}  \n" if msg.get("non_text_notice") else ""
     account_line = f"**Account:** {msg['account']}  \n" if msg.get("account") else ""
     cc_line = f"**Cc:** {msg['cc']}  \n" if msg.get("cc") else ""
     return (
@@ -907,10 +1399,27 @@ def message_to_markdown(msg: dict[str, Any]) -> str:
         f"{cc_line}"
         f"**Date:** {msg['date']}  \n"
         f"**Gmail ID:** {msg['id']} (thread {msg['thread_id']})  \n"
-        f"**Attachments:** {attachments}\n\n"
+        f"**Attachments:** {attachments}  \n"
+        f"{notice_line}\n"
         f"---\n\n"
         f"{msg['body']}"
     )
+
+
+def format_send_as_table(aliases: list[dict[str, Any]]) -> str:
+    """Fixed-width terminal table of Gmail 'Send mail as' aliases."""
+    if not aliases:
+        return "No Send-As aliases found."
+    header = f"{'Account':<30} {'Send-As Email':<32} {'Display Name':<24} {'Default':<8} Status"
+    lines = [header, "-" * 110]
+    for a in aliases:
+        acc = str(a.get("account", ""))[:30]
+        email_addr = str(a.get("send_as_email", ""))[:32]
+        disp = str(a.get("display_name", ""))[:24]
+        default_flag = "yes" if a.get("is_default") else ("primary" if a.get("is_primary") else "no")
+        status = str(a.get("verification_status", "") or "unknown")
+        lines.append(f"{acc:<30} {email_addr:<32} {disp:<24} {default_flag:<8} {status}")
+    return "\n".join(lines)
 
 
 def format_messages_table(messages: list[dict[str, Any]]) -> str:
@@ -948,7 +1457,8 @@ def main():
             "  python -m nexus.shared_tools.gmail_engine --list 10 --account all\n"
             "  python -m nexus.shared_tools.gmail_engine --search \"from:greenhouse.io\" --account user@gmail.com\n"
             "  python -m nexus.shared_tools.gmail_engine --read 18f2a9c3d4e5b6a7 --account user@gmail.com -o out.md\n"
-            "  python -m nexus.shared_tools.gmail_engine --draft \"a@b.com\" \"Hello\" \"Body\" --account user@gmail.com\n"
+            "  python -m nexus.shared_tools.gmail_engine --list-send-as --account all\n"
+            "  python -m nexus.shared_tools.gmail_engine --draft \"a@b.com\" \"Hello\" \"Body\" --account all --send-as alias@domain.com\n"
         ),
     )
     # Account targeting
@@ -962,6 +1472,11 @@ def main():
         "--accounts",
         action="store_true",
         help="List all configured/authenticated Gmail account emails in .secrets/"
+    )
+    parser.add_argument(
+        "--list-send-as",
+        action="store_true",
+        help="List configured Gmail 'Send mail as' aliases (supports --account <ALIAS|all> and --json)"
     )
     # Read
     parser.add_argument(
@@ -992,6 +1507,13 @@ def main():
     # Write (HITL)
     parser.add_argument("--draft", nargs=3, metavar=("TO", "SUBJECT", "BODY"), help="Create a draft (never sends)")
     parser.add_argument("--reply-to", metavar="MESSAGE_ID", help="Thread the --draft as a reply to this message")
+    parser.add_argument(
+        "--send-as",
+        "--from",
+        dest="send_as",
+        metavar="EMAIL",
+        help="Verified Gmail 'Send mail as' address (or 'Name <email>') for --draft From header (works with --account all)",
+    )
     parser.add_argument("--modify", metavar="MESSAGE_ID", help="Change labels on a message (use with --add/--remove)")
     parser.add_argument("--add", nargs="*", default=[], help="Label names to add (with --modify)")
     parser.add_argument("--remove", nargs="*", default=[], help="Label names to remove (with --modify)")
@@ -1024,6 +1546,11 @@ def main():
         target = args.account if args.account != "default" else (args.auth if args.auth != "DEFAULT" else None)
         email, token_file = authenticate_account(account=target)
         print(f"[Nexus] Gmail authentication successful for '{email}'. Token stored at .secrets/{token_file}")
+        return
+
+    if args.list_send_as:
+        aliases = list_send_as_aliases(account=args.account)
+        print(json.dumps(aliases, indent=2, ensure_ascii=False) if args.json else format_send_as_table(aliases))
         return
 
     if args.list is not None or args.search is not None:
@@ -1063,8 +1590,16 @@ def main():
 
     if args.draft:
         to, subject, body = args.draft
-        res = create_draft(to=to, subject=subject, body=body, reply_to_message_id=args.reply_to, account=args.account)
-        print(f"[Nexus] Draft created for account '{res.get('account', args.account)}' (draft {res['draft_id']}, thread {res['thread_id']}). Review and send in Gmail.")
+        res = create_draft(
+            to=to,
+            subject=subject,
+            body=body,
+            reply_to_message_id=args.reply_to,
+            account=args.account,
+            send_as=args.send_as,
+        )
+        from_suffix = f" as '{res['send_as']}'" if res.get("send_as") else ""
+        print(f"[Nexus] Draft created for account '{res.get('account', args.account)}'{from_suffix} (draft {res['draft_id']}, thread {res['thread_id']}). Review and send in Gmail.")
         return
 
     if args.modify:

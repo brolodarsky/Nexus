@@ -817,6 +817,39 @@ def _invoke_llm_with_resilience(
 
 # ── Dynamic Subagent Spawner (`spawn_subagent`) ──────────────────────────────
 
+# `ai_msg: AIMessage` is the subagent response containing `tool_calls` that tripped a budget cap.
+# `budget_reason: str` is the human-readable limit description (e.g. `"turn limit (25/25)"`).
+# `-> list[ToolMessage]` returns one synthetic `ToolMessage(status="error")` per pending `tool_call_id`.
+def _build_budget_refusal_tool_messages(ai_msg: AIMessage, budget_reason: str) -> list[ToolMessage]:
+    """Synthesize refusal `ToolMessage` stubs so bound `sub_llm` can synthesize while keeping its KV cache prefix intact.
+
+    Why we prefer this over `_build_tool_free_synthesis_messages()` on the primary cutoff pass:
+    1. Provider APIs (Gemini, Anthropic, OpenAI) require a `ToolMessage` for every `tool_call_id` emitted by `ai_msg`,
+       and key their KV prompt caches on byte-identical leading messages + `tools` definitions.
+    2. Leaving prior `sub_messages` and bound `CORE_TOOLS` untouched while appending synthetic error `ToolMessage`s keeps
+       ~85–90% of the prompt cached (instead of dropping to 0% cache on flattened plain-text synthesis).
+    """
+    tool_calls = getattr(ai_msg, "tool_calls", None) or []
+    refusal_msgs: list[ToolMessage] = []
+    notice = (
+        f"[SYSTEM: Subagent {budget_reason} reached — tool call skipped. "
+        "Do not call any more tools. Synthesize your final answer now from the context already gathered.]"
+    )
+    for idx, tc in enumerate(tool_calls):
+        tc_name = str(tc.get("name") or "unknown")
+        # Preserve exact provider call ID (fallback ensures valid pairing if an adapter omitted `id`)
+        tc_id = str(tc.get("id") or f"budget_cap_{idx}")
+        refusal_msgs.append(
+            ToolMessage(
+                content=notice,
+                name=tc_name,
+                tool_call_id=tc_id,
+                status="error",
+            )
+        )
+    return refusal_msgs
+
+
 # `messages: Sequence[BaseMessage]` is the subagent message list ending in an `AIMessage(tool_calls)` that exceeded budget.
 # `-> list[BaseMessage]` returns provider-safe plain-text messages ending with a tool-free synthesis directive.
 def _build_tool_free_synthesis_messages(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
@@ -1006,19 +1039,26 @@ def spawn_subagent(
             "### SUBAGENT EXECUTION PROTOCOL\n"
             "You are an ephemeral, isolated Subagent worker spawned by the Supervisor (NexusAgent).\n"
             "1. Read any relevant `Section Instructions.md` and Vault notes needed to execute your assigned task thoroughly.\n"
-            "2. Return a concise, high-signal, grounded synthesis of your findings in your final response "
+            "2. **Batch Tool Calls:** Emit all independent `search_vault`, `read_file`, `get_directory_structure`, and `fetch_emails` calls in parallel in the same turn rather than one lookup per turn. Use `search_vault(keywords=[...])` for multi-term Vault searches, and use `start_line`/`end_line` slices on large notes when full files are unnecessary.\n"
+            "3. **Two-Phase Email Sweeps:** Call `fetch_emails(...)` with default metadata + snippets first (combining related terms with `OR` in one query), then pass ONLY the relevant `message_ids=[...]` to hydrate full bodies—skip newsletters and irrelevant hits.\n"
+            "4. Return a concise, high-signal, grounded synthesis of your findings in your final response "
             "so the Supervisor can integrate your work directly."
         )
 
-        # Run ReAct loop until the subagent finishes tool calls or hits its turn/token budget cap
-        max_turns = max(1, int(getattr(settings, "subagent_max_turns", 12) or 12))
-        max_input_tokens = max(1, int(getattr(settings, "subagent_max_input_tokens", 400_000) or 400_000))
+        # Run ReAct loop until the subagent finishes tool calls or hits its turn / uncached-token budget cap
+        max_turns = max(1, int(getattr(settings, "subagent_max_turns", 25) or 25))
+        max_uncached_input_tokens = max(
+            1, int(getattr(settings, "subagent_max_uncached_input_tokens", 450_000) or 450_000)
+        )
         sub_messages: list[BaseMessage] = [
             _build_system_message(sub_sys_content, sub_resolved["provider"]),
             HumanMessage(content=effective_task_prompt),
         ]
         turn_idx = 0
         cumulative_input_tokens = 0
+        cumulative_uncached_input_tokens = 0
+        peak_context_tokens = 0
+        soft_warning_sent = False
 
         while True:
             # Cancellation guard: abort subagent immediately if the parent turn was stopped by user
@@ -1044,7 +1084,12 @@ def spawn_subagent(
                 max_retries=settings.ai_max_retries,
             )
             usage_stats = _log_token_usage(local_tracer, ai_msg, model_name=sub_model_name, tier=effective_tier)
-            cumulative_input_tokens += int(usage_stats.get("input_tokens", 0) or 0)
+            turn_in = int(usage_stats.get("input_tokens", 0) or 0)
+            turn_cached = int(usage_stats.get("cached_tokens", 0) or 0)
+            turn_uncached = max(0, turn_in - turn_cached)
+            cumulative_input_tokens += turn_in
+            cumulative_uncached_input_tokens += turn_uncached
+            peak_context_tokens = max(peak_context_tokens, turn_in)
             thinking_text = extract_message_thinking(ai_msg)
             if thinking_text:
                 local_tracer.llm_thinking(
@@ -1060,38 +1105,52 @@ def spawn_subagent(
                 local_tracer.agent_end(f"Completed in {elapsed_sub:.1f}s")
                 return final_text
 
-            # Turn & cumulative input-token circuit breaker: if the model still wants more tools at/past the budget,
-            # skip further tool calls and force a single tool-free synthesis turn via `sub_base_llm`.
+            # Turn & cumulative uncached input-token circuit breaker: if the model still wants tools at/past budget,
+            # reject pending tool calls with synthetic `ToolMessage` stubs and invoke bound `sub_llm` so the KV cache
+            # prefix stays intact (~85–90% hit rate), falling back to unbound `sub_base_llm` only if it insists on tools.
             # Note: We intentionally preserve full KV prompt-cache prefixes during turns 1..N (no sliding-window
             # ToolMessage mutation mid-loop) and rely on `context_files` + output caps to keep normal turns lean.
+            budget_kind: Optional[str] = None
             budget_reason: Optional[str] = None
             if turn_idx >= max_turns:
+                budget_kind = "turn_limit"
                 budget_reason = f"turn limit ({turn_idx}/{max_turns})"
-            elif cumulative_input_tokens >= max_input_tokens:
-                budget_reason = f"input token budget ({cumulative_input_tokens:,}/{max_input_tokens:,})"
+            elif cumulative_uncached_input_tokens >= max_uncached_input_tokens:
+                budget_kind = "uncached_token_budget"
+                budget_reason = (
+                    f"uncached input token budget ({cumulative_uncached_input_tokens:,}/{max_uncached_input_tokens:,})"
+                )
 
             if budget_reason:
                 local_tracer.info(
-                    f"⚠️ Subagent #{serial} reached {budget_reason}. Requesting final tool-free synthesis...",
+                    f"⚠️ Subagent #{serial} reached {budget_reason}. Requesting cache-preserving final synthesis...",
                     data={
+                        "event_kind": "subagent_budget_cap",
+                        "reason": budget_kind,
                         "turn": turn_idx,
                         "max_turns": max_turns,
                         "cumulative_input_tokens": cumulative_input_tokens,
-                        "max_input_tokens": max_input_tokens,
+                        "cumulative_uncached_input_tokens": cumulative_uncached_input_tokens,
+                        "max_uncached_input_tokens": max_uncached_input_tokens,
+                        "peak_context_tokens": peak_context_tokens,
+                        "cache_preserved_synthesis": True,
                     },
                 )
-                synthesis_messages = _build_tool_free_synthesis_messages(sub_messages)
+                sub_messages.extend(_build_budget_refusal_tool_messages(ai_msg, budget_reason))
+                cache_preserved = True
+                synth_turn = turn_idx + 1
                 local_tracer.llm_call(
                     metadata={
-                        "turn": turn_idx + 1,
+                        "turn": synth_turn,
                         "model_tier": effective_tier,
                         "model_name": sub_model_name,
                         "budget_synthesis": True,
+                        "cache_preserved_synthesis": True,
                     }
                 )
                 final_ai_msg = _invoke_llm_with_resilience(
-                    llm=sub_base_llm,
-                    messages=synthesis_messages,
+                    llm=sub_llm,
+                    messages=sub_messages,
                     tracer=local_tracer,
                     thread_ids=[parent_convo, parent_thread, sub_id],
                     model_name=sub_model_name,
@@ -1099,13 +1158,51 @@ def spawn_subagent(
                     max_retries=settings.ai_max_retries,
                 )
                 _log_token_usage(local_tracer, final_ai_msg, model_name=sub_model_name, tier=effective_tier)
+
+                # Stubborn-model safety net: if the model ignored refusal stubs and still emitted tool_calls,
+                # flatten history and invoke unbound `sub_base_llm` once to guarantee loop termination.
+                if getattr(final_ai_msg, "tool_calls", None):
+                    cache_preserved = False
+                    synth_turn = turn_idx + 2
+                    local_tracer.info(
+                        f"⚠️ Subagent #{serial} still emitted tool calls after cache-preserving cap; falling back to unbound synthesis...",
+                        data={
+                            "event_kind": "subagent_budget_cap_fallback",
+                            "reason": budget_kind,
+                            "turn": synth_turn,
+                            "cache_preserved_synthesis": False,
+                        },
+                    )
+                    sub_messages.append(final_ai_msg)
+                    synthesis_messages = _build_tool_free_synthesis_messages(sub_messages)
+                    local_tracer.llm_call(
+                        metadata={
+                            "turn": synth_turn,
+                            "model_tier": effective_tier,
+                            "model_name": sub_model_name,
+                            "budget_synthesis": True,
+                            "cache_preserved_synthesis": False,
+                        }
+                    )
+                    final_ai_msg = _invoke_llm_with_resilience(
+                        llm=sub_base_llm,
+                        messages=synthesis_messages,
+                        tracer=local_tracer,
+                        thread_ids=[parent_convo, parent_thread, sub_id],
+                        model_name=sub_model_name,
+                        tier=effective_tier,
+                        max_retries=settings.ai_max_retries,
+                    )
+                    _log_token_usage(local_tracer, final_ai_msg, model_name=sub_model_name, tier=effective_tier)
+
                 final_thinking = extract_message_thinking(final_ai_msg)
                 if final_thinking:
                     local_tracer.llm_thinking(
                         final_thinking,
                         metadata={
-                            "turn": turn_idx + 1,
+                            "turn": synth_turn,
                             "budget_reached": True,
+                            "cache_preserved_synthesis": cache_preserved,
                             "model_tier": effective_tier,
                             "model_name": sub_model_name,
                         },
@@ -1116,7 +1213,12 @@ def spawn_subagent(
                 elapsed_sub = round(time.time() - t0, 2)
                 local_tracer.llm_response(
                     final_text,
-                    metadata={"turn": turn_idx + 1, "budget_reached": True, "latency_seconds": elapsed_sub},
+                    metadata={
+                        "turn": synth_turn,
+                        "budget_reached": True,
+                        "cache_preserved_synthesis": cache_preserved,
+                        "latency_seconds": elapsed_sub,
+                    },
                 )
                 local_tracer.agent_end(f"Completed at budget cap in {elapsed_sub:.1f}s")
                 return final_text
@@ -1146,6 +1248,45 @@ def spawn_subagent(
                 else:
                     local_tracer.tool_result(t_name, t_content, call_id=t_call_id)
                 sub_messages.append(t_msg)
+
+            # Soft-landing warning: notify once at `max_turns - 2` or 80% uncached budget by appending ONLY to the
+            # brand-new tail `ToolMessage` so every preceding message in `sub_messages` stays byte-identical (KV-cached).
+            near_turn_cap = max_turns >= 3 and turn_idx >= max_turns - 2
+            near_token_cap = cumulative_uncached_input_tokens >= int(max_uncached_input_tokens * 0.80)
+            if (
+                not soft_warning_sent
+                and (near_turn_cap or near_token_cap)
+                and sub_messages
+                and isinstance(sub_messages[-1], ToolMessage)
+            ):
+                soft_warning_sent = True
+                tail_msg = sub_messages[-1]
+                existing_text = extract_message_text(tail_msg)
+                notice = (
+                    f"\n\n[SYSTEM NOTICE: Approaching subagent budget "
+                    f"(turn {turn_idx}/{max_turns}, uncached input "
+                    f"{cumulative_uncached_input_tokens:,}/{max_uncached_input_tokens:,}). "
+                    "Finish any critical pending writes now and return your concise final synthesis without further exploration.]"
+                )
+                sub_messages[-1] = ToolMessage(
+                    content=f"{existing_text}{notice}",
+                    name=getattr(tail_msg, "name", None),
+                    tool_call_id=getattr(tail_msg, "tool_call_id", None),
+                    status=getattr(tail_msg, "status", None) or "success",
+                )
+                local_tracer.info(
+                    f"⏳ Subagent #{serial} approaching budget (turn {turn_idx}/{max_turns}, "
+                    f"uncached {cumulative_uncached_input_tokens:,}/{max_uncached_input_tokens:,}); soft-landing notice injected.",
+                    data={
+                        "event_kind": "subagent_soft_warning",
+                        "turn": turn_idx,
+                        "max_turns": max_turns,
+                        "cumulative_input_tokens": cumulative_input_tokens,
+                        "cumulative_uncached_input_tokens": cumulative_uncached_input_tokens,
+                        "max_uncached_input_tokens": max_uncached_input_tokens,
+                        "peak_context_tokens": peak_context_tokens,
+                    },
+                )
     except InterruptedError:
         elapsed_sub = round(time.time() - t0, 2)
         local_tracer.agent_end(f"Stopped by user after {elapsed_sub:.1f}s")

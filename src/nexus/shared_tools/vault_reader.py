@@ -1147,28 +1147,63 @@ def verify_context_brief_paths(context_brief: str) -> List[str]:
     return missing
 
 
-def search_within(keyword: str, root_path: Optional[str] = None, tags: Optional[List[str]] = None) -> str:
-    """Searches notes in the vault for a keyword string."""
+# Signature breakdown for search_within:
+# - keyword: Optional[str] single search term (retained for backward compatibility with single-keyword callers).
+# - root_path: Optional[str] relative Vault folder path to scope the directory walk.
+# - tags: Optional[List[str]] YAML frontmatter tags; a note must share at least one tag to match.
+# - keywords: Optional[List[str]] list of search terms evaluated in a single Vault walk (OR semantics).
+# - Returns: formatted Markdown digest of matching files, matched terms (when >1), and surrounding snippets.
+def search_within(
+    keyword: Optional[str] = None,
+    root_path: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    keywords: Optional[List[str]] = None,
+) -> str:
+    """Searches notes in the vault for one or more keyword strings in a single pass."""
     search_root, err = _resolve_vault_dir(root_path)
     if err:
         return err
 
+    # Merge `keyword` and `keywords` into a case-insensitively deduplicated list preserving caller order
+    raw_terms: List[str] = []
+    if keyword is not None:
+        raw_terms.append(keyword)
+    if keywords:
+        raw_terms.extend(keywords)
+
+    terms: List[str] = []
+    seen_terms: Set[str] = set()
+    for raw_t in raw_terms:
+        cleaned = str(raw_t or "").strip()
+        if not cleaned:
+            continue
+        low = cleaned.lower()
+        if low not in seen_terms:
+            seen_terms.add(low)
+            terms.append(cleaned)
+
+    if not terms:
+        return "Error: Provide at least one non-empty keyword to search_vault."
+
     resolved_vault = VAULT_PATH.resolve()
-    results = []
-    keyword_lower = keyword.lower()
+    is_multi = len(terms) > 1
+    terms_lower = [t.lower() for t in terms]
     tags_lower = {t.lower() for t in tags} if tags else None
-    
+
+    # Each match stores (hit_count, rel_path_str, matched_terms_list, snippet_text)
+    matches: List[Tuple[int, str, List[str], str]] = []
+
     for root, dirs, files in os.walk(search_root):
         dirs[:] = [
             d for d in dirs
             if d not in IGNORE_DIRS
             and (Path(root) / d).resolve().is_relative_to(resolved_vault)
         ]
-        
+
         for file in files:
             if not file.endswith('.md'):
                 continue
-                
+
             filepath = (Path(root) / file).resolve()
             if not filepath.is_relative_to(resolved_vault):
                 continue
@@ -1183,29 +1218,57 @@ def search_within(keyword: str, root_path: Optional[str] = None, tags: Optional[
                     if not tags_lower.intersection(note_tags_lower):
                         continue
 
-                if keyword_lower in content.lower():
-                    idx = content.lower().find(keyword_lower)
-                    start = max(0, idx - 40)
-                    end = min(len(content), idx + len(keyword) + 40)
+                content_lower = content.lower()
+                matched_terms: List[str] = []
+                earliest_idx: Optional[int] = None
+                earliest_len = 0
+
+                for term, term_low in zip(terms, terms_lower):
+                    pos = content_lower.find(term_low)
+                    if pos != -1:
+                        matched_terms.append(term)
+                        if earliest_idx is None or pos < earliest_idx:
+                            earliest_idx = pos
+                            earliest_len = len(term)
+
+                if matched_terms and earliest_idx is not None:
+                    start = max(0, earliest_idx - 40)
+                    end = min(len(content), earliest_idx + earliest_len + 40)
                     snippet = content[start:end].replace('\n', ' ')
-                    
-                    rel_path = filepath.relative_to(resolved_vault)
-                    results.append(f"- {rel_path}: \"...{snippet}...\"")
+                    rel_path = str(filepath.relative_to(resolved_vault))
+                    matches.append((len(matched_terms), rel_path, matched_terms, snippet))
             except Exception:
                 pass
-                
-    if not results:
-        scope = f"in '{root_path}'" if root_path else "across the entire vault"
-        tag_info = f" (filtered by tags: {', '.join(tags)})" if tags else ""
-        return f"No results found for keyword: '{keyword}' {scope}{tag_info}."
-        
+
     scope = f"in '{root_path}'" if root_path else "across the entire vault"
-    output = f"Found '{keyword}' in {len(results)} files {scope}:\n"
-    for r in results[:20]:
-        output += f"{r}\n"
-    if len(results) > 20:
-        output += f"...and {len(results)-20} more files."
-        
+    tag_info = f" (filtered by tags: {', '.join(tags)})" if tags else ""
+
+    if not matches:
+        if is_multi:
+            quoted = ", ".join(f"'{t}'" for t in terms)
+            return f"No results found for keywords [{quoted}] {scope}{tag_info}."
+        return f"No results found for keyword: '{terms[0]}' {scope}{tag_info}."
+
+    if not is_multi:
+        # Preserve exact single-keyword output format for backward compatibility
+        output = f"Found '{terms[0]}' in {len(matches)} files {scope}:\n"
+        for _, rel_path, _, snippet in matches[:20]:
+            output += f"- {rel_path}: \"...{snippet}...\"\n"
+        if len(matches) > 20:
+            output += f"...and {len(matches) - 20} more files."
+        return output
+
+    # Multi-keyword results: rank files matching more distinct terms first, then alphabetically by path
+    matches.sort(key=lambda item: (-item[0], item[1]))
+    quoted = ", ".join(f"'{t}'" for t in terms)
+    max_display = 25
+    output = f"Found matches for [{quoted}] in {len(matches)} files {scope}:\n"
+    for _, rel_path, matched_terms, snippet in matches[:max_display]:
+        matched_str = ", ".join(matched_terms)
+        output += f"- {rel_path} [matched: {matched_str}]: \"...{snippet}...\"\n"
+    if len(matches) > max_display:
+        output += f"...and {len(matches) - max_display} more files."
+
     return output
 
 
@@ -1391,7 +1454,8 @@ def get_recent_modifications(
     return "\n".join(lines)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """CLI entrypoint for `python -m nexus.shared_tools.vault_reader`."""
     # Force UTF-8 stdout on Windows consoles so box-drawing characters and em-dashes do not raise UnicodeEncodeError.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1459,10 +1523,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--search",
-        type=str,
+        nargs="+",
         default=None,
         metavar="KEYWORD",
-        help="Search notes for a keyword string (optionally scoped by --path).",
+        help="Search notes for one or more keyword strings (optionally scoped by --path).",
     )
 
     args = parser.parse_args()
@@ -1470,7 +1534,10 @@ if __name__ == "__main__":
     if args.read:
         print(read_note_content(args.read, domain_path=args.path))
     elif args.search:
-        print(search_within(args.search, root_path=args.path))
+        if len(args.search) == 1:
+            print(search_within(args.search[0], root_path=args.path))
+        else:
+            print(search_within(keywords=args.search, root_path=args.path))
     elif args.tree:
         print(get_directory_tree(path=args.path, show_files=args.files or (args.path is not None), max_depth=args.depth))
     else:
@@ -1484,3 +1551,7 @@ if __name__ == "__main__":
                 markdown_only=args.md_only,
             )
         )
+
+
+if __name__ == "__main__":
+    main()

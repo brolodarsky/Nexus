@@ -474,7 +474,13 @@ def test_fetch_emails_caches_full_untruncated_body_and_splices_cleanly(
 
     tok = set_hitl_execution_context(conversation_id="conv-email", thread_id="conv-email")
     try:
-        payload = json.loads(shared_module.fetch_emails.invoke({"count": 1}))
+        # Default scan mode returns metadata+snippet only without calling get_message
+        scan_payload = json.loads(shared_module.fetch_emails.invoke({"count": 1}))
+        assert len(scan_payload) == 1
+        assert "body" not in scan_payload[0]
+
+        # Explicit include_body=True (or message_ids=[...]) hydrates + caches full untruncated body
+        payload = json.loads(shared_module.fetch_emails.invoke({"count": 1, "include_body": True}))
         assert len(payload) == 1
         assert len(payload[0]["body"]) == shared_module._BODY_CHAR_LIMIT
         assert payload[0]["cache_key"] == "cache://email/msg_long_99"

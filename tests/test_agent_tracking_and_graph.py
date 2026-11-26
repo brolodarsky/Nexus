@@ -505,19 +505,19 @@ def test_spawn_subagent_context_files_fail_fast_on_hallucinated_and_unsafe_paths
     assert "agent_end" in event_types
 
 
-def test_subagent_turn_cap_triggers_tool_free_synthesis(monkeypatch: pytest.MonkeyPatch):
-    """Verify spawn_subagent enforces subagent_max_turns and forces one unbound synthesis turn without executing excess tools."""
+def test_subagent_turn_cap_uses_cache_preserving_synthesis_first(monkeypatch: pytest.MonkeyPatch):
+    """Verify subagent_max_turns defaults to 25 and hard cap prefers cache-preserving bound synthesis before fallback."""
     from unittest.mock import MagicMock
-    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from langchain_core.messages import AIMessage, ToolMessage
     from nexus.agent import graph as graph_mod
     from nexus.core.config import EngineSettings
 
     default_settings = EngineSettings()
-    assert default_settings.subagent_max_turns == 12
-    assert default_settings.subagent_max_input_tokens == 400_000
+    assert default_settings.subagent_max_turns == 25
+    assert default_settings.subagent_max_uncached_input_tokens == 450_000
 
     monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 2)
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_input_tokens", 400_000)
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_uncached_input_tokens", 450_000)
 
     mock_base_llm = MagicMock()
     mock_bound_llm = MagicMock()
@@ -545,21 +545,28 @@ def test_subagent_turn_cap_triggers_tool_free_synthesis(monkeypatch: pytest.Monk
 
     def _fake_invoke_llm(*, llm, messages, **_kwargs):
         llm_invocations.append((llm, list(messages)))
-        if llm is mock_bound_llm:
-            call_num = sum(1 for invoked_llm, _ in llm_invocations if invoked_llm is mock_bound_llm)
+        call_num = len(llm_invocations)
+        if call_num <= 2:
             return AIMessage(
                 content=f"Inspecting step {call_num}",
                 tool_calls=[{"name": "read_file", "args": {"file_path": "Note.md"}, "id": f"tc_{call_num}"}],
                 usage_metadata={"input_tokens": 150, "output_tokens": 25, "total_tokens": 175},
             )
-        assert llm is mock_base_llm
+        # Turn 3 receives synthetic refusal ToolMessage(status="error") on bound `mock_bound_llm` to preserve KV cache
         return AIMessage(
             content="Budget-capped synthesis: Note.md lines 1-50 inspected.",
-            usage_metadata={"input_tokens": 200, "output_tokens": 30, "total_tokens": 230},
+            usage_metadata={
+                "input_tokens": 220,
+                "output_tokens": 30,
+                "total_tokens": 250,
+                "input_token_details": {"cache_read": 180},
+            },
         )
 
     monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
 
+    emitted: list[dict] = []
+    unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-turn-cap")
     ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-turn-cap", thread_id="conv-turn-cap")
     trace_token = set_trace_thread_id("conv-turn-cap")
     try:
@@ -567,27 +574,91 @@ def test_subagent_turn_cap_triggers_tool_free_synthesis(monkeypatch: pytest.Monk
     finally:
         reset_trace_thread_id(trace_token)
         graph_mod.reset_hitl_execution_context(ctx_token)
+        unsub()
 
     assert res == "Budget-capped synthesis: Note.md lines 1-50 inspected."
-    # Turn 1 ran tool execution; Turn 2 hit max_turns=2 before running tool execution; Turn 3 ran unbound synthesis
+    # Turn 1 ran tool execution; Turn 2 hit max_turns=2 -> injected refusal ToolMessage -> Turn 3 ran on bound LLM
     assert len(tool_exec_calls) == 1
-    assert [inv[0] for inv in llm_invocations] == [mock_bound_llm, mock_bound_llm, mock_base_llm]
+    assert [inv[0] for inv in llm_invocations] == [mock_bound_llm, mock_bound_llm, mock_bound_llm]
 
-    synthesis_msgs = llm_invocations[-1][1]
-    assert all(not getattr(m, "tool_calls", None) for m in synthesis_msgs)
-    assert all(not isinstance(m, ToolMessage) for m in synthesis_msgs)
-    assert isinstance(synthesis_msgs[-1], HumanMessage)
-    assert "Subagent turn/token budget reached" in synthesis_msgs[-1].content
+    synth_messages = llm_invocations[-1][1]
+    assert isinstance(synth_messages[-1], ToolMessage)
+    assert synth_messages[-1].status == "error"
+    assert synth_messages[-1].tool_call_id == "tc_2"
+    assert "turn limit (2/2) reached" in synth_messages[-1].content
+
+    cap_evt = next(
+        e for e in emitted
+        if e["type"] == "info" and (e.get("data") or {}).get("event_kind") == "subagent_budget_cap"
+    )
+    assert cap_evt["data"]["reason"] == "turn_limit"
+    assert cap_evt["data"]["cache_preserved_synthesis"] is True
 
 
-def test_subagent_input_token_budget_triggers_tool_free_synthesis(monkeypatch: pytest.MonkeyPatch):
-    """Verify spawn_subagent halts tool loops once cumulative input_tokens reaches subagent_max_input_tokens."""
+def test_subagent_stubborn_tool_calls_trigger_unbound_fallback(monkeypatch: pytest.MonkeyPatch):
+    """Verify spawn_subagent falls back to unbound sub_base_llm only if bound synthesis still emits tool_calls."""
+    from unittest.mock import MagicMock
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from nexus.agent import graph as graph_mod
+
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 1)
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_uncached_input_tokens", 450_000)
+
+    mock_base_llm = MagicMock()
+    mock_bound_llm = MagicMock()
+    mock_base_llm.bind_tools.return_value = mock_bound_llm
+    monkeypatch.setattr(graph_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
+
+    invocations = []
+
+    def _fake_invoke_llm(*, llm, messages, **_kwargs):
+        invocations.append((llm, list(messages)))
+        if llm is mock_bound_llm:
+            return AIMessage(
+                content="Still trying to call tools",
+                tool_calls=[{"name": "read_file", "args": {"file_path": "Note.md"}, "id": f"tc_{len(invocations)}"}],
+                usage_metadata={"input_tokens": 200, "output_tokens": 20, "total_tokens": 220},
+            )
+        assert llm is mock_base_llm
+        return AIMessage(
+            content="Fallback unbound synthesis completed.",
+            usage_metadata={"input_tokens": 250, "output_tokens": 25, "total_tokens": 275},
+        )
+
+    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
+
+    emitted: list[dict] = []
+    unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-stubborn-cap")
+    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-stubborn-cap", thread_id="conv-stubborn-cap")
+    trace_token = set_trace_thread_id("conv-stubborn-cap")
+    try:
+        res = graph_mod.spawn_subagent.invoke({"task_prompt": "Stubborn loop.", "model_tier": "low"})
+    finally:
+        reset_trace_thread_id(trace_token)
+        graph_mod.reset_hitl_execution_context(ctx_token)
+        unsub()
+
+    assert res == "Fallback unbound synthesis completed."
+    assert [inv[0] for inv in invocations] == [mock_bound_llm, mock_bound_llm, mock_base_llm]
+    fallback_msgs = invocations[-1][1]
+    assert all(not getattr(m, "tool_calls", None) for m in fallback_msgs)
+    assert all(not isinstance(m, ToolMessage) for m in fallback_msgs)
+    assert isinstance(fallback_msgs[-1], HumanMessage)
+    assert "Subagent turn/token budget reached" in fallback_msgs[-1].content
+    assert any(
+        e["type"] == "info" and (e.get("data") or {}).get("event_kind") == "subagent_budget_cap_fallback"
+        for e in emitted
+    )
+
+
+def test_subagent_uncached_token_budget_ignores_cached_tokens(monkeypatch: pytest.MonkeyPatch):
+    """Verify cumulative uncached tokens (input - cached) govern the budget cap without penalizing KV-cache hits."""
     from unittest.mock import MagicMock
     from langchain_core.messages import AIMessage, ToolMessage
     from nexus.agent import graph as graph_mod
 
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 12)
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_input_tokens", 1_000)
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 25)
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_uncached_input_tokens", 1_000)
 
     mock_base_llm = MagicMock()
     mock_bound_llm = MagicMock()
@@ -608,23 +679,33 @@ def test_subagent_input_token_budget_triggers_tool_free_synthesis(monkeypatch: p
 
     monkeypatch.setattr(graph_mod, "_invoke_tool_node_resilient", _fake_tool_node)
 
+    # Turn 1: 600 uncached (cum=600 < 1000) -> continues
+    # Turn 2: 900 total, 800 cached -> 100 uncached (cum_unc=700 < 1000 even though cum_total=1500!) -> continues
+    # Turn 3: 1200 total, 800 cached -> 400 uncached (cum_unc=1100 >= 1000) -> triggers cache-preserving synthesis on Turn 4
+    turn_usages = [
+        {"input_tokens": 600, "output_tokens": 20, "total_tokens": 620, "input_token_details": {"cache_read": 0}},
+        {"input_tokens": 900, "output_tokens": 20, "total_tokens": 920, "input_token_details": {"cache_read": 800}},
+        {"input_tokens": 1200, "output_tokens": 20, "total_tokens": 1220, "input_token_details": {"cache_read": 800}},
+        {"input_tokens": 1250, "output_tokens": 25, "total_tokens": 1275, "input_token_details": {"cache_read": 1150}},
+    ]
     invoked_llms = []
 
     def _fake_invoke_llm(*, llm, messages, **_kwargs):
+        idx = len(invoked_llms)
         invoked_llms.append(llm)
-        if llm is mock_bound_llm:
+        usage = turn_usages[idx]
+        if idx < 3:
             return AIMessage(
-                content="Need another file",
-                tool_calls=[{"name": "read_file", "args": {"file_path": "Big.md"}, "id": f"tc_{len(invoked_llms)}"}],
-                usage_metadata={"input_tokens": 600, "output_tokens": 20, "total_tokens": 620},
+                content=f"Step {idx + 1}",
+                tool_calls=[{"name": "read_file", "args": {"file_path": "Big.md"}, "id": f"tc_{idx + 1}"}],
+                usage_metadata=usage,
             )
-        return AIMessage(
-            content="Token-capped synthesis completed.",
-            usage_metadata={"input_tokens": 500, "output_tokens": 25, "total_tokens": 525},
-        )
+        return AIMessage(content="Uncached-token-capped synthesis completed.", usage_metadata=usage)
 
     monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
 
+    emitted: list[dict] = []
+    unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-tok-cap")
     ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-tok-cap", thread_id="conv-tok-cap")
     trace_token = set_trace_thread_id("conv-tok-cap")
     try:
@@ -632,11 +713,117 @@ def test_subagent_input_token_budget_triggers_tool_free_synthesis(monkeypatch: p
     finally:
         reset_trace_thread_id(trace_token)
         graph_mod.reset_hitl_execution_context(ctx_token)
+        unsub()
 
-    assert res == "Token-capped synthesis completed."
-    # Turn 1 = 600 tokens (< 1000) -> tool ran; Turn 2 = 1200 tokens (>= 1000) -> jumped straight to sub_base_llm
-    assert tool_exec_count == 1
-    assert invoked_llms == [mock_bound_llm, mock_bound_llm, mock_base_llm]
+    assert res == "Uncached-token-capped synthesis completed."
+    assert tool_exec_count == 2
+    assert invoked_llms == [mock_bound_llm, mock_bound_llm, mock_bound_llm, mock_bound_llm]
+    cap_evt = next(
+        e for e in emitted
+        if e["type"] == "info" and (e.get("data") or {}).get("event_kind") == "subagent_budget_cap"
+    )
+    assert cap_evt["data"]["reason"] == "uncached_token_budget"
+    assert cap_evt["data"]["cumulative_uncached_input_tokens"] == 1100
+    assert cap_evt["data"]["cumulative_input_tokens"] == 2700
+    assert cap_evt["data"]["peak_context_tokens"] == 1200
+
+
+def test_subagent_soft_landing_warning_preserves_prefix_and_logs_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Verify soft warning appends once to tail ToolMessage only (KV-safe) and run_logger preserves telemetry."""
+    from unittest.mock import MagicMock
+    from langchain_core.messages import AIMessage, ToolMessage
+    from nexus.agent import graph as graph_mod
+
+    monkeypatch.setattr("nexus.core.run_logger.RUNS_DIR", tmp_path)
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 5)
+    monkeypatch.setattr(graph_mod.settings, "subagent_max_uncached_input_tokens", 450_000)
+
+    mock_base_llm = MagicMock()
+    mock_bound_llm = MagicMock()
+    mock_base_llm.bind_tools.return_value = mock_bound_llm
+    monkeypatch.setattr(graph_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
+
+    def _fake_tool_node(_node, state_or_input, timeout_seconds=None):
+        last_tc = state_or_input["messages"][-1].tool_calls[0]
+        return {
+            "messages": [
+                ToolMessage(content="Tool payload", name=last_tc["name"], tool_call_id=last_tc["id"])
+            ]
+        }
+
+    monkeypatch.setattr(graph_mod, "_invoke_tool_node_resilient", _fake_tool_node)
+
+    recorded_histories = []
+
+    def _fake_invoke_llm(*, llm, messages, **_kwargs):
+        turn = len(recorded_histories) + 1
+        recorded_histories.append(list(messages))
+        if turn <= 3:
+            return AIMessage(
+                content=f"Turn {turn}",
+                tool_calls=[{"name": "read_file", "args": {"file_path": f"F{turn}.md"}, "id": f"tc_{turn}"}],
+                usage_metadata={
+                    "input_tokens": 500 + turn * 100,
+                    "output_tokens": 20,
+                    "total_tokens": 520 + turn * 100,
+                    "input_token_details": {"cache_read": 400},
+                },
+            )
+        return AIMessage(
+            content="Clean soft-landed synthesis.",
+            usage_metadata={
+                "input_tokens": 900,
+                "output_tokens": 30,
+                "total_tokens": 930,
+                "input_token_details": {"cache_read": 800},
+            },
+        )
+
+    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
+
+    emitted: list[dict] = []
+    unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-soft-warn")
+    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-soft-warn", thread_id="conv-soft-warn")
+    trace_token = set_trace_thread_id("conv-soft-warn")
+    try:
+        res = graph_mod.spawn_subagent.invoke({"task_prompt": "Draft edits cleanly.", "model_tier": "low"})
+    finally:
+        reset_trace_thread_id(trace_token)
+        graph_mod.reset_hitl_execution_context(ctx_token)
+        unsub()
+
+    assert res == "Clean soft-landed synthesis."
+    # Turn 3 triggers max_turns - 2 = 3 soft warning; Turn 4 sees it ONLY on the newly appended tail ToolMessage
+    turn4_msgs = recorded_histories[3]
+    assert "Approaching subagent budget (turn 3/5" in turn4_msgs[-1].content
+    # Earlier ToolMessages (Turns 1 and 2) were never mutated
+    assert "Approaching subagent budget" not in turn4_msgs[3].content
+    assert "Approaching subagent budget" not in turn4_msgs[5].content
+
+    soft_evts = [
+        e for e in emitted
+        if e["type"] == "info" and (e.get("data") or {}).get("event_kind") == "subagent_soft_warning"
+    ]
+    assert len(soft_evts) == 1
+    assert soft_evts[0]["data"]["turn"] == 3
+
+    # Regression check: run_logger.log_run() aggregates subagents[], cost_usd, and token_usage cleanly
+    run_path = log_run(
+        agent_name="nexus",
+        query="Soft landing audit test",
+        response=res,
+        thread_id="conv-soft-warn",
+        trace_events=emitted,
+        metadata={"model_tier": "strong", "model_name": "gemini-4-argon"},
+    )
+    saved = json.loads(run_path.read_text(encoding="utf-8"))
+    assert saved["subagents_count"] == 1
+    assert saved["subagents"][0]["input_tokens"] == (600 + 700 + 800 + 900)
+    assert saved["subagents"][0]["cached_tokens"] == (400 + 400 + 400 + 800)
+    assert saved["metadata"]["token_usage"]["input_tokens"] == (600 + 700 + 800 + 900)
+    assert saved["cost_usd"] > 0.0
 
 
 def test_agent_tracer_and_log_run_preserve_llm_thinking(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
