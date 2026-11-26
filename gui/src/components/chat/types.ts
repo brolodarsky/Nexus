@@ -37,13 +37,21 @@ export interface Message {
 // LocalStorage key for remembering the user's selected model tier across page reloads
 export const MODEL_STORAGE_KEY = "nexus_chat_model_tier";
 
-// Central migration table mapping retired Anthropic 4.5 IDs (in localStorage or legacy chats.db records) to 5.5 successors
+// Central migration table mapping retired/legacy model option IDs (in localStorage or legacy chats.db records) to current catalog IDs
 export const RETIRED_MODEL_REPLACEMENTS: Record<string, string> = {
   "claude-sonnet-4-5": "claude-sonnet-5-5",
   "claude-sonnet-4.5": "claude-sonnet-5-5",
   "claude-opus-4-5": "claude-opus-5-5",
   "claude-opus-4.5": "claude-opus-5-5",
+  "gemini-4-hydrogen": "medium",
 };
+
+// Local calendar cutoff for Gemini 4 Argon promotional pricing expiry (2026-12-01)
+const ARGON_PROMO_END_MS = new Date(2026, 11, 1).getTime();
+
+function isArgonStandardPricingActive(): boolean {
+  return Date.now() >= ARGON_PROMO_END_MS;
+}
 
 // LocalStorage key for preserving unsubmitted chat prompt drafts across Nexus tab navigation and reloads (legacy single-draft key)
 export const CHAT_DRAFT_STORAGE_KEY = "nexus_chat_input_draft";
@@ -146,16 +154,24 @@ export const FALLBACK_MODELS: ModelOption[] = [
     short_label: "Argon",
     description:
       "Deep multi-step reasoning, cross-document synthesis, and hard analytical problems.",
-    pricing: {
-      input_per_m: 2.0,
-      output_per_m: 10.0,
-      cached_per_m: 0.1,
-      summary: "$2 / $10",
-      note: "$4/$20 Dec 1",
-    },
+    pricing: isArgonStandardPricingActive()
+      ? {
+          input_per_m: 4.0,
+          output_per_m: 20.0,
+          cached_per_m: 0.2,
+          summary: "$4 / $20",
+          note: null,
+        }
+      : {
+          input_per_m: 2.0,
+          output_per_m: 10.0,
+          cached_per_m: 0.1,
+          summary: "$2 / $10",
+          note: "$4/$20 Dec 1",
+        },
   },
   {
-    id: "gemini-4-hydrogen",
+    id: "medium",
     tier: "medium",
     provider: "gemini",
     model_name: "gemini-4-hydrogen",
@@ -515,8 +531,11 @@ export function extractTurnCost(
     const isSonnet45 = lowerName.includes("sonnet-4") || lowerName.includes("sonnet 4");
     const isSonnet = lowerName.includes("sonnet");
     const isHaiku = lowerName.includes("haiku");
-    // Default active "low" tier to Gemini 3.8 Flash ($0.75/$0.075/$3.75) while preserving explicit Hydrogen pricing ($1.50/$0.075/$7.50)
-    const isHydrogen = lowerName.includes("hydrogen");
+    // Default active "low" tier to Gemini 3.8 Flash ($0.75/$0.075/$3.75), "medium" to Hydrogen ($1.50/$0.075/$7.50),
+    // and "strong" to Argon (promo $2/$0.10/$10 before Dec 1, 2026; standard $4/$0.20/$20 starting Dec 1).
+    const isHydrogen =
+      lowerName.includes("hydrogen") ||
+      (!lowerName && modelTier === "medium");
     const isFlash = lowerName.includes("flash") || (modelTier === "low" && !isHydrogen && !isSonnet && !isOpus && !isHaiku);
 
     // Claude Haiku 5.5 steps up 5x above 100k input tokens ($0.10/$0.01/$0.50 -> $0.50/$0.05/$2.50)
@@ -524,11 +543,14 @@ export function extractTurnCost(
     const haikuInRate = isHaikuLongContext ? 0.50 : 0.10;
     const haikuCachedRate = isHaikuLongContext ? 0.05 : 0.01;
     const haikuOutRate = isHaikuLongContext ? 2.50 : 0.50;
+    const argonInRate = isArgonStandardPricingActive() ? 4.00 : 2.00;
+    const argonCachedRate = isArgonStandardPricingActive() ? 0.20 : 0.10;
+    const argonOutRate = isArgonStandardPricingActive() ? 20.00 : 10.00;
 
-    // Resolve per-million-token pricing across Anthropic Claude (Opus 5.5: $4/$0.20/$20, Opus 4.5: $5/$0.50/$25, Sonnet 5.5: $2/$0.10/$10, Sonnet 4.5: $3/$0.30/$15, Haiku 5.5: $0.10/$0.01/$0.50 <=100k) and Google Gemini (Argon: $2/$0.10/$10, Hydrogen: $1.50/$0.075/$7.50, Flash: $0.75/$0.075/$3.75) model families
-    const inRate = isOpus45 ? 5.00 : isOpus ? 4.00 : isSonnet45 ? 3.00 : isSonnet ? 2.00 : isHaiku ? haikuInRate : isFlash ? 0.75 : isHydrogen ? 1.50 : 2.00;
-    const cachedRate = isOpus45 ? 0.50 : isOpus ? 0.20 : isSonnet45 ? 0.30 : isSonnet ? 0.10 : isHaiku ? haikuCachedRate : isFlash ? 0.075 : isHydrogen ? 0.075 : 0.10;
-    const outRate = isOpus45 ? 25.00 : isOpus ? 20.00 : isSonnet45 ? 15.00 : isSonnet ? 10.00 : isHaiku ? haikuOutRate : isFlash ? 3.75 : isHydrogen ? 7.50 : 10.00;
+    // Resolve per-million-token pricing across Anthropic Claude and Google Gemini model families
+    const inRate = isOpus45 ? 5.00 : isOpus ? 4.00 : isSonnet45 ? 3.00 : isSonnet ? 2.00 : isHaiku ? haikuInRate : isFlash ? 0.75 : isHydrogen ? 1.50 : argonInRate;
+    const cachedRate = isOpus45 ? 0.50 : isOpus ? 0.20 : isSonnet45 ? 0.30 : isSonnet ? 0.10 : isHaiku ? haikuCachedRate : isFlash ? 0.075 : isHydrogen ? 0.075 : argonCachedRate;
+    const outRate = isOpus45 ? 25.00 : isOpus ? 20.00 : isSonnet45 ? 15.00 : isSonnet ? 10.00 : isHaiku ? haikuOutRate : isFlash ? 3.75 : isHydrogen ? 7.50 : argonOutRate;
 
     const uncachedIn = Math.max(0, totalIn - totalCached);
     const cost = ((uncachedIn * inRate) + (totalCached * cachedRate) + (totalOut * outRate)) / 1000000;

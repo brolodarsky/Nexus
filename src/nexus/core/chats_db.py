@@ -1444,6 +1444,7 @@ def log_message(
     model_name: str | None = None,
     cost_usd: float | None = None,
     run_id: str | None = None,
+    persist_conversation_model: bool = True,
 ) -> int | None:
     if not conversation_id:
         return None
@@ -1536,9 +1537,10 @@ def log_message(
         if msg_id is not None and images:
             _register_upload_refs_conn(conn, f"msg:{msg_id}", images)
 
-        # Only overwrite remembered model metadata when this message actually carries model attribution;
-        # synthetic entries (`branch_context`, `branch_merge`) and error logs pass None and must preserve prior state
-        if model_tier or model_name:
+        # Only overwrite remembered model metadata when this message actually carries model attribution
+        # and the caller did not flag it as a single-turn `1× Boost` (`persist_conversation_model=False`);
+        # synthetic entries (`branch_context`, `branch_merge`) and boosted turns preserve the baseline model.
+        if persist_conversation_model and (model_tier or model_name):
             conn.execute(
                 "UPDATE conversations SET last_updated = ?, last_model_tier = ?, last_model_name = ? WHERE id = ?",
                 (now, model_tier, model_name, conversation_id),

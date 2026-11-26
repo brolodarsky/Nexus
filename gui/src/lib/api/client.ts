@@ -39,6 +39,32 @@ export function getApiBase(): string {
 // Callers should invoke getApiBase() to guarantee dynamic runtime host resolution in browser sessions.
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
+/**
+ * Returns the Nexus API bearer token synced into `gui/.env.local` by `start.ps1`.
+ */
+export function getApiToken(): string {
+  return (process.env.NEXT_PUBLIC_API_TOKEN ?? "").trim();
+}
+
+/**
+ * Builds standard `Authorization: Bearer <token>` headers for JSON, upload, and SSE fetch calls.
+ */
+export function getAuthHeaders(): Record<string, string> {
+  const token = getApiToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/**
+ * Appends `?token=<token>` (or `&token=...`) onto direct browser media/iframe URLs (`<img>`, `<audio>`, `<iframe>`)
+ * because native HTML element fetches cannot send custom `Authorization` headers.
+ */
+export function appendTokenQuery(url: string): string {
+  const token = getApiToken();
+  if (!token || !url || /[?&]token=/.test(url)) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}token=${encodeURIComponent(token)}`;
+}
+
 // Interface describing the health status payload returned by GET /api/health
 export interface HealthResponse {
   status: string;  // e.g. "ok"
@@ -72,6 +98,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...getAuthHeaders(),
       ...init?.headers,
     },
   });

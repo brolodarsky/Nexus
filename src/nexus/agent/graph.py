@@ -53,7 +53,7 @@ from nexus.agent.sanitization import (
 )
 from nexus.agent.subagent import spawn_subagent
 from nexus.core.config import settings
-from nexus.core.constants import get_chat_model, resolve_model_config
+from nexus.core.constants import get_chat_model, resolve_model_config, resolve_resilience_max_retries
 from nexus.core.context_telemetry import build_llm_call_manifest
 # inject_root_instructions: Dynamically loads and hydrates `Vault/Master Instructions.md` (<1ms disk read)
 from nexus.core.engine_constitution import inject_root_instructions
@@ -147,7 +147,7 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
             thread_ids=[active_thread_id, active_convo_id],
             model_name=active_model_name,
             tier=effective_tier,
-            max_retries=settings.ai_max_retries,
+            max_retries=resolve_resilience_max_retries(effective_tier),
         )
     except Exception as e:
         err_msg = str(e)
@@ -180,7 +180,7 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
                 thread_ids=[active_thread_id, active_convo_id],
                 model_name=fallback_resolved["model_name"],
                 tier="low",
-                max_retries=settings.ai_max_retries,
+                max_retries=resolve_resilience_max_retries("low"),
             )
             active_model_name = fallback_resolved["model_name"]
             effective_tier = "low"

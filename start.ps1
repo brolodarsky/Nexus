@@ -19,6 +19,32 @@ Write-Host "  ║         🧠 Nexus Control Panel              ║" -Foreground
 Write-Host "  ═══════════════════════════════════════════════" -ForegroundColor DarkCyan
 Write-Host ""
 
+# ── Sync API Bearer Token (`S6`) into Next.js `gui/.env.local` ──
+# Generates `.secrets/api_token` on first run (or reads `NEXUS_API_TOKEN` from `.env`) and writes
+# `NEXT_PUBLIC_API_TOKEN` into gitignored `gui/.env.local` BEFORE starting Next.js so browser requests
+# over localhost, LAN Wi-Fi, and Tailscale authenticate seamlessly with zero manual login prompts.
+$apiToken = (& $VENV_PYTHON -c "from nexus.api.security import get_or_create_api_token; print(get_or_create_api_token())").Trim()
+if ($LASTEXITCODE -ne 0 -or -not $apiToken) {
+    Write-Host "  [✗] Failed to initialize Nexus API token." -ForegroundColor Red
+    exit 1
+}
+
+$guiEnvPath = Join-Path $GUI_DIR ".env.local"
+$tokenLine = "NEXT_PUBLIC_API_TOKEN=$apiToken"
+$existingEnv = if (Test-Path $guiEnvPath) { Get-Content $guiEnvPath -Raw -Encoding UTF8 } else { "" }
+if ($existingEnv -match "(?m)^NEXT_PUBLIC_API_TOKEN=.*$") {
+    $updatedEnv = [regex]::Replace($existingEnv, "(?m)^NEXT_PUBLIC_API_TOKEN=.*$", $tokenLine)
+} elseif ($existingEnv -and -not $existingEnv.EndsWith("`n")) {
+    $updatedEnv = "$existingEnv`r`n$tokenLine`r`n"
+} else {
+    $updatedEnv = "$existingEnv$tokenLine`r`n"
+}
+if ($updatedEnv -ne $existingEnv) {
+    # Write UTF-8 without BOM so Next.js dotenv parser reads the first key cleanly
+    [System.IO.File]::WriteAllText($guiEnvPath, $updatedEnv, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "  [✓] Synced API bearer token into gui/.env.local" -ForegroundColor DarkGreen
+}
+
 # ── Start FastAPI backend ────────────────────────────────────
 Write-Host "  [1/2] Starting FastAPI backend on port 8000..." -ForegroundColor Yellow
 
@@ -61,7 +87,7 @@ $backend = Start-Process -FilePath $VENV_PYTHON `
     -PassThru
 
 # Polling health check with process exit detection
-# Python and Uvicorn import heavy packages (FastAPI, LangGraph, Pydantic, Chroma) during startup,
+# Python and Uvicorn import heavy packages (FastAPI, LangGraph, Pydantic) during startup,
 # which typically takes 3-6 seconds. We poll /api/health every second up to 15 seconds.
 $backendReady = $false
 $maxRetries = 15

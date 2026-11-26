@@ -150,6 +150,7 @@ def audit_runs(
                         cached_tokens=cached_tok,
                         model_name=model_name,
                         tier=model_tier,
+                        as_of=row["timestamp"],
                     )
                 )
 
@@ -164,6 +165,7 @@ def audit_runs(
                         cached_tokens=cached_tok,
                         model_name=model_name,
                         tier=model_tier,
+                        as_of=row["timestamp"],
                     )
                 )
 

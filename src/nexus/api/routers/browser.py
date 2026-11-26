@@ -31,6 +31,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 # BaseModel / Field: Pydantic schema validation for incoming REST POST bodies
 from pydantic import BaseModel, Field
 
+from nexus.api.security import (
+    verify_api_token,
+    verify_browser_probe_or_token,
+    verify_browser_ws_auth,
+)
 from nexus.core.constants import PROJECT_ROOT
 from nexus.core.logger import logger
 
@@ -255,14 +260,14 @@ bridge_manager = BrowserBridgeManager()
 async def browser_bridge_websocket(websocket: WebSocket) -> None:
     """Loopback WebSocket endpoint that the Chrome Extension service worker connects to."""
     client_host = websocket.client.host if websocket.client else None
-    if not is_loopback_host(client_host):
-        logger.warning(f"Rejected non-loopback /api/browser/ws connection from '{client_host}'.")
+    if not is_loopback_host(client_host) or not verify_browser_ws_auth(websocket):
+        logger.warning(f"Rejected unauthorized/non-loopback /api/browser/ws connection from '{client_host}'.")
         await websocket.close(code=1008)
         return
     await bridge_manager.accept_connection(websocket)
 
 
-@router.get("/status", dependencies=[Depends(require_loopback_client)])
+@router.get("/status", dependencies=[Depends(require_loopback_client), Depends(verify_browser_probe_or_token)])
 async def get_browser_bridge_status() -> Dict[str, Any]:
     """Check whether the Nexus Browser Bridge Chrome Extension is connected and responsive."""
     status = bridge_manager.get_status()
@@ -277,7 +282,7 @@ async def get_browser_bridge_status() -> Dict[str, Any]:
     return status
 
 
-@router.get("/tabs", dependencies=[Depends(require_loopback_client)])
+@router.get("/tabs", dependencies=[Depends(require_loopback_client), Depends(verify_api_token)])
 async def list_browser_tabs_endpoint(
     group_name: Optional[str] = None,
     query: Optional[str] = None,
@@ -294,7 +299,7 @@ async def list_browser_tabs_endpoint(
     )
 
 
-@router.post("/read", dependencies=[Depends(require_loopback_client)])
+@router.post("/read", dependencies=[Depends(require_loopback_client), Depends(verify_api_token)])
 async def read_browser_tabs_endpoint(req: BrowserReadRequest) -> Dict[str, Any]:
     """Extract clean Markdown from the live rendered DOM of matching Chrome tabs (optionally stamping form refs)."""
     return await bridge_manager.send_command(
@@ -311,7 +316,7 @@ async def read_browser_tabs_endpoint(req: BrowserReadRequest) -> Dict[str, Any]:
     )
 
 
-@router.post("/open", dependencies=[Depends(require_loopback_client)])
+@router.post("/open", dependencies=[Depends(require_loopback_client), Depends(verify_api_token)])
 async def open_browser_tabs_endpoint(req: BrowserOpenRequest) -> Dict[str, Any]:
     """Open 1-10 HTTP(S) URLs in Chrome tabs and optionally group them into a Chrome Tab Group."""
     return await bridge_manager.send_command(
@@ -326,7 +331,7 @@ async def open_browser_tabs_endpoint(req: BrowserOpenRequest) -> Dict[str, Any]:
     )
 
 
-@router.post("/fill", dependencies=[Depends(require_loopback_client)])
+@router.post("/fill", dependencies=[Depends(require_loopback_client), Depends(verify_api_token)])
 async def fill_browser_form_endpoint(req: BrowserFillRequest) -> Dict[str, Any]:
     """Draft-fill form fields in an open Chrome tab using element refs (never auto-submits)."""
     return await bridge_manager.send_command(

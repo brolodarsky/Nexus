@@ -8,6 +8,8 @@ taking into account:
 3. Output / completion tokens ($ / 1M tokens)
 """
 
+# date, datetime, timezone: Used for date-aware pricing schedule transitions (e.g., Dec 1 Argon cutover)
+from datetime import date, datetime, timezone
 # Dict, Optional, Any: Type hints for pricing dictionary mapping and nullable parameters
 from typing import Any, Dict, Optional
 
@@ -26,6 +28,19 @@ CONTEXT_STEPUP_MULTIPLIER: float = 2.0
 # Context threshold (100k tokens) above which Claude Haiku 5.5 steps up 5x ($0.10/$0.01/$0.50 -> $0.50/$0.05/$2.50)
 HAIKU_CONTEXT_STEPUP_THRESHOLD: int = 100_000
 HAIKU_CONTEXT_STEPUP_MULTIPLIER: float = 5.0
+
+# Scheduled promotional rate cutover for Gemini 4 Argon (effective 2026-12-01 local/UTC boundary)
+ARGON_PROMO_END_DATE: date = date(2026, 12, 1)
+ARGON_PROMO_PRICING: Dict[str, float] = {
+    "input": 2.00,      # $2.00 / 1M prompt tokens (promo rate through 2026-11-30)
+    "cached": 0.10,     # $0.10 / 1M cached tokens (95% discount)
+    "output": 10.00,    # $10.00 / 1M completion & thinking tokens
+}
+ARGON_STANDARD_PRICING: Dict[str, float] = {
+    "input": 4.00,      # $4.00 / 1M prompt tokens (standard rate starting 2026-12-01)
+    "cached": 0.20,     # $0.20 / 1M cached tokens (95% discount)
+    "output": 20.00,    # $20.00 / 1M completion & thinking tokens
+}
 
 # Base pricing per 1M tokens (for context <= 128k tokens)
 MODEL_PRICING: Dict[str, Dict[str, float]] = {
@@ -170,26 +185,44 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
 # Fallback baseline pricing by standardized tier when model name is unmapped
 TIER_FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
     "low": MODEL_PRICING["gemini-3.8-flash"],
-    "medium": MODEL_PRICING["gemini-2.5-pro"],
+    "medium": MODEL_PRICING["gemini-4-hydrogen"],
     "strong": MODEL_PRICING["gemini-4-argon"],
 }
+
+
+def _coerce_as_of_date(as_of: Optional[date | datetime | str] = None) -> date:
+    """Normalize an optional ISO timestamp string, datetime, or date into a calendar `date` (defaults to today)."""
+    if isinstance(as_of, datetime):
+        return as_of.date()
+    if isinstance(as_of, date):
+        return as_of
+    if isinstance(as_of, str) and len(as_of.strip()) >= 10:
+        try:
+            return date.fromisoformat(as_of.strip()[:10])
+        except ValueError:
+            pass
+    return datetime.now().date()
 
 
 def resolve_model_pricing(
     model_name: Optional[str] = None,
     tier: Optional[str] = None,
     input_tokens: int = 0,
+    as_of: Optional[date | datetime | str] = None,
 ) -> Dict[str, float]:
     """
     Resolves the exact or fuzzy pricing rates ($ / 1M tokens) for a given model or tier.
 
     When prompt context exceeds `CONTEXT_STEPUP_THRESHOLD` (128,000 tokens), Google Gemini API
-    doubles prompt input, cached token, and candidate output rates for the Pro / Argon reasoning family.
+    doubles prompt input, cached token, and candidate output rates for the legacy Pro family.
+    When evaluating Gemini 4 Argon (`gemini-4-argon`), `as_of` automatically selects promotional rates
+    (`$2/$0.10/$10`) before `2026-12-01` and standard rates (`$4/$0.20/$20`) on or after `2026-12-01`.
     
     Args:
         model_name: Concrete model identifier (e.g. 'gemini-4-argon', 'gpt-5.4-mini')
         tier: Standardized capability tier ('low', 'medium', 'strong')
         input_tokens: Total prompt context length in tokens used to check for the >128k step-up threshold
+        as_of: Optional run date/ISO timestamp so retrospective audits apply historical promo rates accurately.
 
     Returns:
         Dict with keys 'input', 'cached', 'output' containing rates per 1M tokens.
@@ -238,6 +271,16 @@ def resolve_model_pricing(
             # 5. Default safe fallback (strong tier)
             base_rates = TIER_FALLBACK_PRICING["strong"]
 
+    # Date-aware cutover for Gemini 4 Argon (promo $2/$0.10/$10 prior to 2026-12-01; $4/$0.20/$20 starting 2026-12-01)
+    is_argon_target = (
+        "argon" in clean_model
+        or (not clean_model and clean_tier in ("", "strong") and base_rates is TIER_FALLBACK_PRICING["strong"])
+        or base_rates is MODEL_PRICING["gemini-4-argon"]
+    )
+    if is_argon_target:
+        effective_date = _coerce_as_of_date(as_of)
+        base_rates = ARGON_STANDARD_PRICING if effective_date >= ARGON_PROMO_END_DATE else ARGON_PROMO_PRICING
+
     # 6. Apply context-length tier step-up:
     # - Claude Haiku 5.5 steps up 5x above 100k input tokens ($0.10/$0.01/$0.50 -> $0.50/$0.05/$2.50).
     # - Legacy Gemini 1.5/2.5 Pro models double rates above 128k tokens.
@@ -279,13 +322,14 @@ def calculate_token_cost(
     cached_tokens: int = 0,
     model_name: Optional[str] = None,
     tier: Optional[str] = None,
+    as_of: Optional[date | datetime | str] = None,
 ) -> float:
     """
     Computes total USD cost for a given token usage breakdown.
 
     Deducts `cached_tokens` from `input_tokens` so cached tokens are billed at
     their discounted cache rate and only net uncached prompt tokens pay full price.
-    Applies the >128k context tier step-up if `input_tokens` exceeds 128,000 for Pro/Argon models.
+    Applies the >128k context tier step-up if `input_tokens` exceeds 128,000 for legacy Pro models.
 
     Args:
         input_tokens: Total prompt token count (including cached tokens)
@@ -293,11 +337,12 @@ def calculate_token_cost(
         cached_tokens: Prompt tokens served from provider context cache
         model_name: Provider model name for rate resolution
         tier: Capability tier fallback
+        as_of: Optional run date/ISO timestamp for historical rate accuracy
 
     Returns:
         Total estimated cost in USD rounded to 6 decimal places.
     """
-    rates = resolve_model_pricing(model_name=model_name, tier=tier, input_tokens=input_tokens)
+    rates = resolve_model_pricing(model_name=model_name, tier=tier, input_tokens=input_tokens, as_of=as_of)
 
     # Prompt tokens that were NOT served from cache
     uncached_input = max(0, int(input_tokens or 0) - int(cached_tokens or 0))
@@ -318,12 +363,13 @@ def calculate_cache_savings(
     cached_tokens: int,
     model_name: Optional[str] = None,
     tier: Optional[str] = None,
+    as_of: Optional[date | datetime | str] = None,
 ) -> float:
     """
     Calculates the USD amount saved by prompt caching vs paying full input price.
-    Applies the >128k context tier step-up if `input_tokens` exceeds 128,000 for Pro/Argon models.
+    Applies the >128k context tier step-up if `input_tokens` exceeds 128,000 for legacy Pro models.
     """
-    rates = resolve_model_pricing(model_name=model_name, tier=tier, input_tokens=input_tokens)
+    rates = resolve_model_pricing(model_name=model_name, tier=tier, input_tokens=input_tokens, as_of=as_of)
     cached_count = min(int(input_tokens or 0), max(0, int(cached_tokens or 0)))
     # Difference between full input rate and discounted cached rate
     discount_per_million = rates["input"] - rates["cached"]

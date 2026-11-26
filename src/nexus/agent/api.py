@@ -26,6 +26,7 @@ from nexus.core.chats_db import (
     load_thread_lc_messages,
     start_run_record,
 )
+from nexus.core.config import warn_if_langsmith_enabled
 from nexus.core.constants import PROJECT_ROOT, resolve_model_config
 from nexus.core.context_telemetry import build_head_agent_start_manifest
 from nexus.core.engine_constitution import inject_root_instructions
@@ -115,6 +116,7 @@ def run_nexus_agent_with_trace(
         Dictionary with keys: `run_id`, `response`, `agent`, `domain`, `confidence`, `reasoning`, `model_tier`, `model_name`, `tool_calls`, `final_state`.
     """
     active_thread = thread_id or "nexus_primary"
+    warn_if_langsmith_enabled()
     active_run_id = run_id or str(uuid.uuid4())[:8]
     resolved_model = resolve_model_config(model_tier)
     effective_tier = resolved_model["tier"]

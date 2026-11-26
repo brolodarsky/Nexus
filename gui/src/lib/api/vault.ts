@@ -3,7 +3,7 @@
  * Connects to FastAPI `/api/vault` routes.
  */
 
-import { apiFetch, getApiBase } from "./client";
+import { apiFetch, appendTokenQuery, getApiBase } from "./client";
 
 // Interface for tree view representation of the Vault folder structure
 export interface VaultStructureResponse {
@@ -76,6 +76,6 @@ export async function generatePodcast(path: string, force: boolean = false): Pro
 // Formats direct audio streaming URL for playing note podcasts in the browser
 export function getPodcastAudioUrl(path: string): string {
   // getApiBase(): Dynamically resolves host IP so podcast audio streams work seamlessly over LAN/Tailscale
-  return `${getApiBase()}/api/vault/podcast/download?path=${encodeURIComponent(path)}`;
+  return appendTokenQuery(`${getApiBase()}/api/vault/podcast/download?path=${encodeURIComponent(path)}`);
 }
 

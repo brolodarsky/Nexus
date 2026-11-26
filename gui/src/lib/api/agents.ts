@@ -3,7 +3,7 @@
  * Connects to FastAPI `/api/agents` routes.
  */
 
-import { apiFetch, getApiBase } from "./client";
+import { apiFetch, appendTokenQuery, getApiBase, getAuthHeaders } from "./client";
 import type { TraceEvent } from "./stream";
 
 // Interface for synchronous chat response returned by POST /api/agents/ask
@@ -161,7 +161,8 @@ export async function getAvailableModels(): Promise<ModelsCatalogResponse> {
 export async function askBrain(
   query: string,
   conversationId: string,
-  modelTier?: string
+  modelTier?: string,
+  persistModelSelection?: boolean
 ): Promise<AskResponse> {
   return apiFetch<AskResponse>("/api/agents/ask", {
     method: "POST",
@@ -169,6 +170,7 @@ export async function askBrain(
       query,
       conversation_id: conversationId,
       model_tier: modelTier,
+      ...(persistModelSelection === false ? { persist_model_selection: false } : {}),
     }),
   });
 }
@@ -369,7 +371,7 @@ export function resolveImageUrl(urlOrPath: string): string {
     return urlOrPath;
   }
   const base = getApiBase();
-  return `${base}${urlOrPath.startsWith("/") ? "" : "/"}${urlOrPath}`;
+  return appendTokenQuery(`${base}${urlOrPath.startsWith("/") ? "" : "/"}${urlOrPath}`);
 }
 
 // Uploads a binary image file via multipart/form-data to POST /api/agents/upload
@@ -379,6 +381,7 @@ export async function uploadImage(file: File): Promise<UploadImageResponse> {
   const base = getApiBase();
   const res = await fetch(`${base}/api/agents/upload`, {
     method: "POST",
+    headers: getAuthHeaders(),
     body: formData,
   });
   if (!res.ok) {

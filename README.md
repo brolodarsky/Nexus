@@ -10,7 +10,7 @@ Rather than a static archive or a generic note template, Nexus acts as a cogniti
 *   **Agentic File System (AFS):** Deterministic Python filesystem utilities (`vault_reader.py`) navigate the local Vault to locate, read, and cross-reference documents without requiring pre-indexing or external vector databases.
 *   **Plain-English Instructions Hierarchy (`Master Instructions.md` $\to$ `Section Instructions.md` $\to$ YAML `instructions:` $\to$ Inline Heading Rules):** Universal Vault integrity gates, domain SOPs, note-level maintenance contracts, and inline section rules live natively inside the Vault in plain Markdown/YAML and are deterministically injected on sliced reads, pre-hydrated into subagents, and enforced before HITL writes (`instruction_guard.py`).
 *   **Deterministic Automation Layer (`src/nexus/shared_tools/`):** Python and Node.js integrations for Gmail work, Google Calendar work, webpage text extraction, YouTube transcripts, HL7 medical XML parsing, ADB phone chat scraping, edge-TTS audio podcast generation, PDF/DOCX resume rendering, etc.
-*   **Next.js 16 Control Panel, Conversation Branching DAG & Multimodal Vision (`gui/`, `src/nexus/api/`):** Full-stack web studio featuring real-time SSE execution telemetry ("Thinking Panel"), Universal Conversation Branching (`chats.db` DAG with proportional `Parent Context Brief` tangent slicing, full history forking, and `Distill & Merge` subroutine returns), per-turn model selector dropdown (`Strong`, `Fast` Flash, `Hydrogen`, Claude Opus/Sonnet/Haiku), HITL diff review queue with two-phase commit, mobile PWA support over Tailscale/LAN, and multimodal vision analysis with image and PDF document uploads, clipboard screenshot paste (`Ctrl+V`), and drag-and-drop.
+*   **Next.js 16 Control Panel, Conversation Branching DAG & Multimodal Vision (`gui/`, `src/nexus/api/`):** Full-stack web studio protected by Bearer token authentication and `Host`-header validation (`src/nexus/api/security.py`, auto-synced by `start.ps1` into `gui/.env.local`) for localhost, LAN Wi-Fi, and Tailscale mobile PWA access, featuring real-time SSE execution telemetry ("Thinking Panel"), Universal Conversation Branching (`chats.db` DAG with proportional `Parent Context Brief` tangent slicing, full history forking, and `Distill & Merge` subroutine returns), per-turn model selector dropdown (`Strong`, `Medium` Hydrogen/Sonnet default, `Low` Flash/Haiku) with `1× Boost` single-turn Strong auto-revert, HITL diff review queue with two-phase commit, and multimodal vision analysis with image and PDF document uploads, clipboard screenshot paste (`Ctrl+V`), and drag-and-drop.
 
 ## Production Case Study: Radical Transparency
 
@@ -49,8 +49,9 @@ Nexus/
 │   │   ├── graph.py             # LangGraph StateGraph topology & Head Agent orchestration (call_model, traced_tool_node, route_after_agent)
 │   │   ├── runtime.py           # Shared execution runtime (CORE_TOOLS, cancellation registry, provider tracking, resilient LLM/ToolNode callers)
 │   │   ├── sanitization.py      # Message extractors & cross-provider thought/signature sanitization
-│   │   └── subagent.py          # Isolated dynamic subagent worker loop (spawn_subagent, pre-hydration, budget caps, synthesis landings)
-│   ├── api/                     # FastAPI backend application & routers
+│   │   └── subagent.py          # Isolated dynamic subagent worker loop (spawn_subagent, pre-hydration, tier clamp, budget caps, synthesis landings)
+│   ├── api/                     # FastAPI backend application, auth/host security & routers
+│   │   └── security.py          # Bearer/X-Nexus-Token verification, scoped media ?token=, & pure-ASGI Host validation
 │   ├── core/                    # Shared engine configuration
 │   │   ├── chat_branching.py    # Universal Conversation Branching, Subroutine Merge & Agent Seeded Conversation Engine
 │   │   ├── chat_titles.py       # Thread-safe conversation auto-titling engine (coalescing + SQLite CAS)
@@ -175,7 +176,7 @@ This repository distinguishes between capabilities and constraints that define h
 | `src/nexus/api/routers/hitl.py` | HITL transaction endpoints: list pending, approve with stale-base guard (`?force=true` override), reject, 3-way rebase (`/{id}/rebase`), rollback (`/{id}/rollback`), and recent revisions (`/revisions/recent`). | Via GUI or API |
 | `src/nexus/api/routers/tools.py` | Operational tools endpoints: resume/cover letter portfolio scanning, markdown editing, headless Chromium/Word rendering, and asset streaming. | Via GUI (`/tools`) or API |
 | `resume_engine/` | PDF and DOCX document compiler with page geometry budget metrics. Accessible via the Control Panel Tools page (`/tools`) or headless CLI. | GUI `/tools` or `node src/nexus/shared_tools/resume_engine/render.js` |
-| `start.ps1` | Launches the full Nexus Control Panel (FastAPI + Next.js). | `.\start.ps1` |
+| `start.ps1` | Syncs `.secrets/api_token` into `gui/.env.local` and launches the full Nexus Control Panel (FastAPI + Next.js). | `.\start.ps1` |
 
 ## Architectural Methods
 

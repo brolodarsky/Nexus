@@ -91,13 +91,23 @@ def test_resolve_model_pricing():
     fuzzy_flash = resolve_model_pricing("models/gemini-3.8-flash-exp")
     assert fuzzy_flash == flash_rates
 
-    # Tier fallbacks ("low" defaults to Gemini 3.8 Flash)
+    # Tier fallbacks ("low" defaults to Gemini 3.8 Flash, "medium" to Gemini 4 Hydrogen)
     low_rates = resolve_model_pricing(tier="low")
     assert low_rates == TIER_FALLBACK_PRICING["low"]
     assert low_rates == flash_rates
 
+    med_rates = resolve_model_pricing(tier="medium")
+    assert med_rates == TIER_FALLBACK_PRICING["medium"]
+    assert med_rates == hydrogen_rates
+
+    # Date-aware Dec 1 Gemini 4 Argon rate cutover ($2/$0.10/$10 before 2026-12-01; $4/$0.20/$20 starting 2026-12-01)
+    argon_pre_dec1 = resolve_model_pricing("gemini-4-argon", as_of="2026-11-30T23:59:59Z")
+    assert argon_pre_dec1 == {"input": 2.00, "cached": 0.10, "output": 10.00}
+    argon_post_dec1 = resolve_model_pricing("gemini-4-argon", as_of="2026-12-01T00:00:00Z")
+    assert argon_post_dec1 == {"input": 4.00, "cached": 0.20, "output": 20.00}
+
     strong_rates = resolve_model_pricing(tier="strong")
-    assert strong_rates == TIER_FALLBACK_PRICING["strong"]
+    assert strong_rates in (argon_pre_dec1, argon_post_dec1)
 
 
 def test_context_stepup_pricing_threshold():

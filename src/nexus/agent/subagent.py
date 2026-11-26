@@ -34,8 +34,8 @@ from nexus.agent.runtime import (
     is_thread_cancelled,
 )
 from nexus.agent.sanitization import extract_message_text, extract_message_thinking
-from nexus.core.config import settings
-from nexus.core.constants import ModelTier, get_chat_model, resolve_model_config
+from nexus.core.config import EngineSettings, settings
+from nexus.core.constants import ModelTier, get_chat_model, resolve_model_config, resolve_resilience_max_retries
 from nexus.core.context_telemetry import (
     build_llm_call_manifest,
     build_subagent_start_manifest,
@@ -198,6 +198,17 @@ def spawn_subagent(
                        to pre-hydrate directly under `# Pre-Hydrated Disk Context` (fails fast if any ref cannot be resolved).
     """
     effective_tier: ModelTier = model_tier if model_tier in ("low", "medium", "strong") else "low"
+    # Subagent Tier Clamp (`C3`): enforce Architect-Drafter cost boundary by clamping `"strong"` worker requests
+    # down to `"low"` unless `NEXUS_ALLOW_STRONG_SUBAGENTS=true` is explicitly enabled in `.env` or settings.
+    allow_strong_subagents = bool(
+        EngineSettings().nexus_allow_strong_subagents
+        or getattr(settings, "nexus_allow_strong_subagents", False)
+    )
+    was_tier_clamped = False
+    if effective_tier == "strong" and not allow_strong_subagents:
+        effective_tier = "low"
+        was_tier_clamped = True
+
     # Propagate conversation_id from parent while scoping thread_id, agent_id, and agent_role to this subagent
     parent_ctx = get_hitl_execution_context()
     parent_convo = parent_ctx.get("conversation_id") or "nexus_primary"
@@ -310,6 +321,11 @@ def spawn_subagent(
                 "context_summary": sub_ctx_summary,
             },
         )
+        if was_tier_clamped:
+            local_tracer.info(
+                "🔒 Clamped requested subagent tier 'strong' -> 'low' (set NEXUS_ALLOW_STRONG_SUBAGENTS=true to permit strong subagents).",
+                data={"requested_tier": "strong", "effective_tier": "low"},
+            )
 
         # Run ReAct loop until the subagent finishes tool calls or hits its turn / uncached-token budget cap
         max_turns = max(1, int(getattr(settings, "subagent_max_turns", 25) or 25))
@@ -360,7 +376,7 @@ def spawn_subagent(
                 thread_ids=[parent_convo, parent_thread, sub_id],
                 model_name=sub_model_name,
                 tier=effective_tier,
-                max_retries=settings.ai_max_retries,
+                max_retries=resolve_resilience_max_retries(effective_tier),
             )
             usage_stats = _log_token_usage(local_tracer, ai_msg, model_name=sub_model_name, tier=effective_tier)
             turn_in = int(usage_stats.get("input_tokens", 0) or 0)
@@ -441,7 +457,7 @@ def spawn_subagent(
                     thread_ids=[parent_convo, parent_thread, sub_id],
                     model_name=sub_model_name,
                     tier=effective_tier,
-                    max_retries=settings.ai_max_retries,
+                    max_retries=resolve_resilience_max_retries(effective_tier),
                 )
                 _log_token_usage(local_tracer, final_ai_msg, model_name=sub_model_name, tier=effective_tier)
 
@@ -484,7 +500,7 @@ def spawn_subagent(
                         thread_ids=[parent_convo, parent_thread, sub_id],
                         model_name=sub_model_name,
                         tier=effective_tier,
-                        max_retries=settings.ai_max_retries,
+                        max_retries=resolve_resilience_max_retries(effective_tier),
                     )
                     _log_token_usage(local_tracer, final_ai_msg, model_name=sub_model_name, tier=effective_tier)
 

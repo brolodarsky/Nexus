@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 # Literal: Constrains string arguments to an explicit compile-time set of allowed values
 # Any: Allows heterogeneous dictionary value types in model catalog metadata responses
@@ -11,7 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 # ChatOpenAI: LangChain client for OpenAI chat models
 from langchain_openai import ChatOpenAI
 from nexus.core.config import EngineSettings, settings
-from nexus.core.cost import resolve_model_pricing
+from nexus.core.cost import ARGON_PROMO_END_DATE, resolve_model_pricing
 
 # Paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -111,10 +112,10 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
         "openai": openai_tier_map,
     }
 
-    # Normalize requested tier/model; fall back to `nexus_primary_tier` from `.env` when omitted
+    # Normalize requested tier/model; fall back to `nexus_primary_tier` from `.env` (default `"medium"`) when omitted
     raw_choice = (tier or "").strip()
     lower_choice = raw_choice.lower()
-    default_tier = live_settings.nexus_primary_tier if live_settings.nexus_primary_tier in ("low", "medium", "strong") else "strong"
+    default_tier = live_settings.nexus_primary_tier if live_settings.nexus_primary_tier in ("low", "medium", "strong") else "medium"
 
     # Support `"provider:tier"` composite selectors (e.g. `"anthropic:strong"`, `"anthropic:low"`, `"gemini:strong"`)
     if ":" in lower_choice:
@@ -130,10 +131,10 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
         effective_tier = default_tier
         model_name = active_map[effective_tier]
     elif lower_choice in ("gemini-4-hydrogen", "hydrogen"):
-        # Explicit selection of Hydrogen even when `"low"` tier defaults to `gemini-3.8-flash`
+        # Explicit selection of Hydrogen maps symmetrically to Gemini `"medium"` tier
         active_provider = "gemini"
         model_name = "gemini-4-hydrogen"
-        effective_tier = "low"
+        effective_tier = "medium"
     elif lower_choice in ("low", "medium", "strong"):
         effective_tier = lower_choice
         model_name = active_map[effective_tier]
@@ -152,12 +153,12 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
         active_map = provider_maps.get(active_provider, active_map)
         # 2. Reverse-lookup its tier if it matches a configured tier, else classify `"low"` vs `"medium"` vs `"strong"` by family name
         matched_tier = next((t for t, m in active_map.items() if m.lower() == lower_choice), None)
-        is_fast_family = any(tok in lower_choice for tok in ("flash", "hydrogen", "mini", "haiku"))
-        is_medium_family = "sonnet" in lower_choice
+        is_fast_family = any(tok in lower_choice for tok in ("flash", "mini", "haiku"))
+        is_medium_family = any(tok in lower_choice for tok in ("sonnet", "hydrogen", "terra"))
         effective_tier = matched_tier or ("low" if is_fast_family else "medium" if is_medium_family else "strong")
         model_name = raw_choice
 
-    tier_Wait_labels = {
+    tier_labels = {
         "strong": f"Strong · {model_name}",
         "medium": f"Medium · {model_name}",
         "low": f"Fast · {model_name}",
@@ -166,7 +167,7 @@ def resolve_model_config(tier: str | None = None, provider: str | None = None) -
         "tier": effective_tier,
         "provider": active_provider,
         "model_name": model_name,
-        "label": tier_Wait_labels.get(effective_tier, model_name),
+        "label": tier_labels.get(effective_tier, model_name),
     }
 
 
@@ -244,6 +245,10 @@ def _build_model_catalog_entry(entry_id: str, tier: str, provider: str, model_na
     meta = _MODEL_CATALOG_META.get(model_name, {})
     rates = resolve_model_pricing(model_name=model_name, tier=tier)
     fallback_short = model_name.split("/")[-1]
+    # Clear the temporary Argon Dec 1 promo pill automatically once the cutover date arrives
+    pricing_note = meta.get("pricing_note")
+    if model_name == "gemini-4-argon" and date.today() >= ARGON_PROMO_END_DATE:
+        pricing_note = None
     return {
         "id": entry_id,
         "tier": tier,
@@ -257,7 +262,7 @@ def _build_model_catalog_entry(entry_id: str, tier: str, provider: str, model_na
             "output_per_m": rates["output"],
             "cached_per_m": rates["cached"],
             "summary": f"{_format_usd_rate(rates['input'])} / {_format_usd_rate(rates['output'])}",
-            "note": meta.get("pricing_note"),
+            "note": pricing_note,
         },
     }
 
@@ -321,9 +326,14 @@ def get_available_models() -> dict[str, Any]:
     }
 
 
-# `tier: ModelTier | str | None` selects the capability/cost level (`"low"`, `"medium"`, `"strong"`, or explicit model ID). If `None`, reads `nexus_primary_tier` fresh from `.env`.
-# `provider: str | None` optionally forces the provider family (`"gemini"`, `"anthropic"`, `"openai"`), e.g. for subagent provider matching.
-# `-> BaseChatModel` returns a configured LangChain chat model (`ChatGoogleGenerativeAI`, `ChatAnthropic`, or `ChatOpenAI`) ready for `.invoke()` or `.bind_tools()`.
+def resolve_resilience_max_retries(tier: str, live_settings: EngineSettings | None = None) -> int:
+    """Resolve the outer `_invoke_llm_with_resilience` retry budget for a capability tier."""
+    cfg = live_settings or EngineSettings()
+    if cfg.ai_max_retries is not None:
+        return int(cfg.ai_max_retries)
+    return int(cfg.ai_max_retries_strong if tier == "strong" else cfg.ai_max_retries_default)
+
+
 # `tier: ModelTier | str | None` selects the capability/cost level (`"low"`, `"medium"`, `"strong"`, or explicit model ID). If `None`, reads `nexus_primary_tier` fresh from `.env`.
 # `provider: str | None` optionally forces the provider family (`"gemini"`, `"anthropic"`, `"openai"`), e.g. for subagent provider matching.
 # `include_thoughts: bool | None` optionally overrides `EngineSettings.ai_include_thoughts` (e.g. `False` for lightweight background titling).
@@ -340,10 +350,6 @@ def get_chat_model(
     on the very next turn without needing to edit `.py` files (which would cause `uvicorn --reload` to kill in-flight HTTP/SSE streams).
     """
     live_settings = EngineSettings()
-    # Resolve configurable HTTP timeout (default 300s) and max retry count (default 3) from `.env`
-    # Reasoning models (`gemini-4-argon`, `claude-opus-5-5`) require >90s on massive context histories to prevent 504 DEADLINE_EXCEEDED
-    timeout = live_settings.ai_request_timeout
-    max_retries = live_settings.ai_max_retries
     # Resolve whether Gemini/Anthropic should return visible reasoning summaries (per-call override wins over .env default)
     effective_include_thoughts = (
         bool(live_settings.ai_include_thoughts) if include_thoughts is None else bool(include_thoughts)
@@ -352,6 +358,14 @@ def get_chat_model(
     resolved = resolve_model_config(tier, provider=provider)
     effective_tier = resolved["tier"]
     model_name = resolved["model_name"]
+    # Resolve tier-appropriate HTTP timeout & SDK retry budget unless explicitly overridden via `AI_REQUEST_TIMEOUT` / `AI_MAX_RETRIES`:
+    # `"strong"` models get 180s + 1 retry for deep reasoning; `"medium"`/`"low"` models fail fast at 60s + 2 retries.
+    timeout = (
+        int(live_settings.ai_request_timeout)
+        if live_settings.ai_request_timeout is not None
+        else int(live_settings.ai_timeout_strong if effective_tier == "strong" else live_settings.ai_timeout_default)
+    )
+    max_retries = resolve_resilience_max_retries(effective_tier, live_settings=live_settings)
     gemini_key = live_settings.gemini_api_key or live_settings.google_api_key or GEMINI_API_KEY
     anthropic_key = live_settings.anthropic_api_key or ANTHROPIC_API_KEY
 

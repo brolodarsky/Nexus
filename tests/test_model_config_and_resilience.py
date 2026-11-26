@@ -38,11 +38,18 @@ from nexus.core.engine_constitution import inject_root_instructions
 
 
 def test_engine_settings_timeout_and_retries_defaults(monkeypatch: pytest.MonkeyPatch):
-    """Verify EngineSettings default timeout is 300s (5m) and max_retries is 3, with .env override support."""
-    # Test default values
+    """Verify EngineSettings per-tier timeout/retry defaults, medium primary tier, and .env overrides."""
     settings = EngineSettings()
-    assert settings.ai_request_timeout == 300
-    assert settings.ai_max_retries == 3
+    assert settings.nexus_primary_tier == "medium"
+    assert settings.gemini_model_medium == "gemini-4-hydrogen"
+    assert settings.nexus_allow_strong_subagents is False
+    assert settings.ai_timeout_strong == 180
+    assert settings.ai_max_retries_strong == 1
+    assert settings.ai_timeout_default == 60
+    assert settings.ai_max_retries_default == 2
+    assert settings.ai_request_timeout is None
+    assert settings.ai_max_retries is None
+    assert settings.langchain_tracing_v2 == "false"
 
     # Test environment variable overrides
     monkeypatch.setenv("AI_REQUEST_TIMEOUT", "240")
@@ -53,12 +60,22 @@ def test_engine_settings_timeout_and_retries_defaults(monkeypatch: pytest.Monkey
 
 
 def test_get_chat_model_applies_timeout_and_retries(monkeypatch: pytest.MonkeyPatch):
-    """Verify get_chat_model extracts timeout and retries from EngineSettings and applies to clients."""
-    monkeypatch.setenv("AI_REQUEST_TIMEOUT", "200")
-    monkeypatch.setenv("AI_MAX_RETRIES", "4")
+    """Verify get_chat_model applies per-tier timeouts/retries by default and honors AI_REQUEST_TIMEOUT/AI_MAX_RETRIES."""
     monkeypatch.setenv("AI_PROVIDER", "gemini")
     monkeypatch.setenv("GEMINI_API_KEY", "test-key-xyz")
+    monkeypatch.delenv("AI_REQUEST_TIMEOUT", raising=False)
+    monkeypatch.delenv("AI_MAX_RETRIES", raising=False)
 
+    strong_gemini = get_chat_model(tier="strong")
+    assert getattr(strong_gemini, "timeout", None) == 180
+    assert getattr(strong_gemini, "max_retries", None) == 1
+
+    default_gemini = get_chat_model(tier="low")
+    assert getattr(default_gemini, "timeout", None) == 60
+    assert getattr(default_gemini, "max_retries", None) == 2
+
+    monkeypatch.setenv("AI_REQUEST_TIMEOUT", "200")
+    monkeypatch.setenv("AI_MAX_RETRIES", "4")
     gemini_model = get_chat_model(tier="low")
     assert getattr(gemini_model, "timeout", None) == 200
     assert getattr(gemini_model, "max_retries", None) == 4
@@ -122,6 +139,8 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
 
     catalog = get_available_models()
     assert catalog["provider"] == "gemini"
+    assert catalog["default_tier"] == "medium"
+    assert catalog["default_model"] == "gemini-4-hydrogen"
     assert [m["label"] for m in catalog["models"]] == [
         "Gemini 4 Argon",
         "Gemini 4 Hydrogen",
@@ -143,9 +162,9 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
 
     strong_entry = next(m for m in catalog["models"] if m["id"] == "strong")
     assert strong_entry["model_name"] == "gemini-4-argon"
-    assert strong_entry["pricing"]["summary"] == "$2 / $10"
+    assert strong_entry["pricing"]["summary"] in ("$2 / $10", "$4 / $20")
 
-    hydrogen_entry = next(m for m in catalog["models"] if m["id"] == "gemini-4-hydrogen")
+    hydrogen_entry = next(m for m in catalog["models"] if m["id"] == "medium")
     assert hydrogen_entry["model_name"] == "gemini-4-hydrogen"
     assert hydrogen_entry["provider"] == "gemini"
     assert hydrogen_entry["tier"] == "medium"
@@ -185,15 +204,15 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
 
     med_cfg = resolve_model_config("medium")
     assert med_cfg["tier"] == "medium"
-    assert med_cfg["model_name"] == "gemini-3.8-flash"
+    assert med_cfg["model_name"] == "gemini-4-hydrogen"
 
     hydrogen_cfg = resolve_model_config("gemini-4-hydrogen")
-    assert hydrogen_cfg["tier"] == "low"
+    assert hydrogen_cfg["tier"] == "medium"
     assert hydrogen_cfg["provider"] == "gemini"
     assert hydrogen_cfg["model_name"] == "gemini-4-hydrogen"
 
     hydrogen_alias_cfg = resolve_model_config("hydrogen")
-    assert hydrogen_alias_cfg["tier"] == "low"
+    assert hydrogen_alias_cfg["tier"] == "medium"
     assert hydrogen_alias_cfg["provider"] == "gemini"
 
     opus_cfg = resolve_model_config("claude-opus-5-5")
@@ -1074,6 +1093,60 @@ def test_invoke_llm_with_resilience_thinking_unsupported_self_heals() -> None:
     assert mock_llm.thinking is None
     assert len(seen_thinking) == 2
     tracer.info.assert_called_once()
+
+
+def test_spawn_subagent_clamps_strong_tier_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify spawn_subagent clamps model_tier='strong' -> 'low' unless NEXUS_ALLOW_STRONG_SUBAGENTS=true."""
+    from nexus.agent.subagent import spawn_subagent
+    import nexus.core.config as config_mod
+
+    recorded_tiers: list[str] = []
+    mock_llm = MagicMock()
+    mock_bound = MagicMock()
+    mock_llm.bind_tools.return_value = mock_bound
+    mock_bound.invoke.return_value = AIMessage(content="Clamped synthesis")
+
+    def fake_get_chat_model(tier=None, temperature=0.0):
+        recorded_tiers.append(str(tier))
+        return mock_llm
+
+    monkeypatch.setattr("nexus.agent.subagent.get_chat_model", fake_get_chat_model)
+    monkeypatch.setattr("nexus.agent.subagent.get_active_turn_provider", lambda *a, **k: "gemini")
+    monkeypatch.setattr("nexus.agent.subagent.hydrate_subagent_context_files", lambda *a, **k: ("", None))
+    monkeypatch.setattr("nexus.agent.subagent.inject_root_instructions", lambda: "Root instructions")
+    monkeypatch.delenv("NEXUS_ALLOW_STRONG_SUBAGENTS", raising=False)
+    monkeypatch.setattr(config_mod.settings, "nexus_allow_strong_subagents", False)
+
+    out_clamped = spawn_subagent.invoke({"task_prompt": "Inspect logs", "model_tier": "strong"})
+    assert out_clamped == "Clamped synthesis"
+    assert recorded_tiers == ["low"]
+
+    monkeypatch.setenv("NEXUS_ALLOW_STRONG_SUBAGENTS", "true")
+    out_allowed = spawn_subagent.invoke({"task_prompt": "Deep synthesis", "model_tier": "strong"})
+    assert out_allowed == "Clamped synthesis"
+    assert recorded_tiers == ["low", "strong"]
+
+
+def test_langsmith_opt_in_and_startup_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify LangSmith defaults off and emits a one-time privacy warning when explicitly enabled."""
+    import nexus.core.config as config_mod
+    import nexus.core.logger as logger_mod
+
+    monkeypatch.setattr(config_mod, "_langsmith_warned", False)
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
+    assert config_mod.is_langsmith_tracing_enabled() is False
+    assert config_mod.warn_if_langsmith_enabled() is False
+
+    warnings: list[str] = []
+    monkeypatch.setattr(logger_mod.logger, "warning", lambda msg, *a, **k: warnings.append(str(msg)))
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "true")
+    assert config_mod.is_langsmith_tracing_enabled() is True
+    assert config_mod.warn_if_langsmith_enabled() is True
+    assert len(warnings) == 1
+    assert "PRIVACY WARNING" in warnings[0]
+    # Second call in same process should not spam duplicate warnings
+    assert config_mod.warn_if_langsmith_enabled() is True
+    assert len(warnings) == 1
 
 
 

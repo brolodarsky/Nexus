@@ -52,6 +52,9 @@ export interface ChatInputBarProps {
   modelOptions: ModelOption[];
   selectedModelTier: string;
   activeModelLabel: string;
+  singleTurnBoost?: boolean;
+  revertModelLabel?: string;
+  onToggleSingleTurnBoost?: () => void;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   pendingImages?: string[];
   onAddImages?: (urls: string[]) => void;
@@ -71,6 +74,9 @@ const ChatInputBar = memo(function ChatInputBar({
   modelOptions,
   selectedModelTier,
   activeModelLabel,
+  singleTurnBoost = false,
+  revertModelLabel,
+  onToggleSingleTurnBoost,
   inputRef,
   pendingImages = [],
   onAddImages,
@@ -205,6 +211,10 @@ const ChatInputBar = memo(function ChatInputBar({
       }
     }
   };
+
+  const selectedModelOpt =
+    modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
+  const isStrongSelected = selectedModelOpt?.tier === "strong";
 
   // Render compact collapsed bottom rail if minimized by the user
   if (isCollapsed) {
@@ -394,17 +404,42 @@ const ChatInputBar = memo(function ChatInputBar({
           </button>
         </div>
 
-        {/* Bottom toolbar inside input card: Per-turn model dropdown + attachment + send action */}
+        {/* Bottom toolbar inside input card: Per-turn model dropdown + 1× Boost pill + attachment + send action */}
         <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap pt-2 border-t border-border-subtle/50 px-1">
-          {/* Per-Turn Model Selector Dropdown (shared component & lifted state with ChatSidebar) */}
-          <ModelSelectorDropdown
-            modelOptions={modelOptions}
-            selectedModelTier={selectedModelTier}
-            fallbackLabel={activeModelLabel}
-            placement="up"
-            disabled={loading}
-            onSelect={onSelectModelTier}
-          />
+          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+            {/* Per-Turn Model Selector Dropdown (shared component & lifted state with ChatSidebar) */}
+            <ModelSelectorDropdown
+              modelOptions={modelOptions}
+              selectedModelTier={selectedModelTier}
+              fallbackLabel={activeModelLabel}
+              placement="up"
+              disabled={loading}
+              onSelect={onSelectModelTier}
+            />
+
+            {/* Single-Turn Strong Boost toggle (`C3`): prevents sticky expensive Strong/Opus spend across follow-up turns */}
+            {isStrongSelected && onToggleSingleTurnBoost && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={onToggleSingleTurnBoost}
+                title={
+                  singleTurnBoost
+                    ? `1× Boost active: automatically reverts to ${revertModelLabel ?? "default fast model"} after this turn. Click to pin Strong for this thread.`
+                    : `Strong tier pinned (${selectedModelOpt?.pricing?.summary ?? "high cost"} per 1M). Click to enable 1× Boost auto-revert after one turn.`
+                }
+                className={`px-2 py-1 rounded-lg text-[0.7rem] font-medium border transition-colors shrink-0 disabled:opacity-50 ${
+                  singleTurnBoost
+                    ? "bg-accent-cyan/10 text-accent-cyan border-accent-cyan/30 hover:bg-accent-cyan/20"
+                    : "bg-amber-500/15 text-amber-300 border-amber-500/35 hover:bg-amber-500/25"
+                }`}
+              >
+                {singleTurnBoost
+                  ? `⚡ 1× Boost → ${revertModelLabel ?? "Medium"}`
+                  : `📌 Sticky Strong${selectedModelOpt?.pricing?.summary ? ` (${selectedModelOpt.pricing.summary})` : ""}`}
+              </button>
+            )}
+          </div>
 
           <div className="flex items-center gap-2 ml-auto shrink-0">
             {/* Hidden file input invoked by the paperclip attachment button */}

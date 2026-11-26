@@ -73,6 +73,27 @@ function historyMatchesMessages(history: ChatHistoryEntry[], current: Message[])
   return true;
 }
 
+// Resolves a non-"strong" revert target for Single-Turn Boost (`1× Boost`), staying within the active provider family when possible
+function resolveBoostRevertOption(
+  options: ModelOption[],
+  selectedOpt: ModelOption | undefined,
+  preferredBaselineId: string
+): ModelOption | undefined {
+  const preferred = options.find((m) => m.id === preferredBaselineId);
+  if (preferred && preferred.tier !== "strong") {
+    return preferred;
+  }
+  const sameProviderMedium = selectedOpt
+    ? options.find((m) => m.provider === selectedOpt.provider && m.tier === "medium")
+    : undefined;
+  return (
+    sameProviderMedium ??
+    options.find((m) => m.tier === "medium") ??
+    options.find((m) => m.tier !== "strong") ??
+    options[0]
+  );
+}
+
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
@@ -92,8 +113,12 @@ export default function ChatPage() {
   // isInputCollapsed: toggles the bottom message bar between full multiline composer and compact collapsed rail
   const [isInputCollapsed, setIsInputCollapsed] = useState<boolean>(false);
   // Per-turn model selection state: catalog of available models from `/api/agents/models` + currently selected tier
+  // Defaults everyday Commander turns to `"medium"` (`Gemini 4 Hydrogen` / `Claude Sonnet 5.5`), reserving Strong for explicit boost.
   const [modelOptions, setModelOptions] = useState<ModelOption[]>(FALLBACK_MODELS);
-  const [selectedModelTier, setSelectedModelTier] = useState<string>("strong");
+  const [selectedModelTier, setSelectedModelTier] = useState<string>("medium");
+  // singleTurnBoost: when True on a `"strong"` selection, automatically reverts to `baselineModelId` right after submission
+  const [singleTurnBoost, setSingleTurnBoost] = useState<boolean>(false);
+  const [baselineModelId, setBaselineModelId] = useState<string>("medium");
   // Staged image attachments uploaded via composer or clipboard paste for the upcoming turn
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   // activeRunIds: UUIDs of conversations currently executing a background turn on the server (shown as pulsing dots in sidebar)
@@ -111,9 +136,11 @@ export default function ChatPage() {
   const messagesRef = useRef<Message[]>([]);
   const loadingRef = useRef<boolean>(false);
   const activeRunIdsRef = useRef<string[]>([]);
-  // modelOptionsRef / selectedModelTierRef: mirror model state for stable stream callbacks
+  // modelOptionsRef / selectedModelTierRef / singleTurnBoostRef / baselineModelIdRef: mirror model state for stable stream callbacks
   const modelOptionsRef = useRef<ModelOption[]>(FALLBACK_MODELS);
-  const selectedModelTierRef = useRef<string>("strong");
+  const selectedModelTierRef = useRef<string>("medium");
+  const singleTurnBoostRef = useRef<boolean>(false);
+  const baselineModelIdRef = useRef<string>("medium");
   // conversationsRef: mirror of `conversations` so mount/switch callbacks read latest list synchronously
   const conversationsRef = useRef<Conversation[]>([]);
   // userOverrodeModelRef: tracks whether user manually picked a model in the active thread so async loads don't clobber it
@@ -174,6 +201,10 @@ export default function ChatPage() {
   }, [selectedModelTier]);
 
   useEffect(() => {
+    singleTurnBoostRef.current = singleTurnBoost;
+  }, [singleTurnBoost]);
+
+  useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
 
@@ -206,8 +237,16 @@ export default function ChatPage() {
   // Applies a conversation's remembered model to the UI selector without overwriting the user's global MODEL_STORAGE_KEY
   const applyConversationModel = useCallback(
     (ref: Pick<RunModelRef, "name" | "tier"> | null | undefined, options?: ModelOption[]): boolean => {
-      const matchedId = resolveConversationModelSelection(options ?? modelOptionsRef.current, ref);
+      const activeOptions = options ?? modelOptionsRef.current;
+      const matchedId = resolveConversationModelSelection(activeOptions, ref);
       if (!matchedId) return false;
+      const matchedOpt = activeOptions.find((m) => m.id === matchedId);
+      if (matchedOpt && matchedOpt.tier !== "strong") {
+        baselineModelIdRef.current = matchedId;
+        setBaselineModelId(matchedId);
+      }
+      singleTurnBoostRef.current = false;
+      setSingleTurnBoost(false);
       selectedModelTierRef.current = matchedId;
       setSelectedModelTier(matchedId);
       return true;
@@ -221,7 +260,13 @@ export default function ChatPage() {
       try {
         const savedTier = localStorage.getItem(MODEL_STORAGE_KEY);
         if (savedTier) {
-          setSelectedModelTier(savedTier);
+          const normalizedSaved = RETIRED_MODEL_REPLACEMENTS[savedTier.toLowerCase()] ?? savedTier;
+          setSelectedModelTier(normalizedSaved);
+          const savedOpt = modelOptionsRef.current.find((m) => m.id === normalizedSaved);
+          if (savedOpt && savedOpt.tier !== "strong") {
+            baselineModelIdRef.current = normalizedSaved;
+            setBaselineModelId(normalizedSaved);
+          }
         }
       } catch {
         // Ignore storage access errors in restricted browser contexts
@@ -299,6 +344,11 @@ export default function ChatPage() {
           if (migratedTier && effectiveOptions.some((m) => m.id === migratedTier)) {
             localStorage.setItem(MODEL_STORAGE_KEY, migratedTier);
             if (!appliedConversationModel && !userOverrodeModelRef.current) {
+              const migratedOpt = effectiveOptions.find((m) => m.id === migratedTier);
+              if (migratedOpt && migratedOpt.tier !== "strong") {
+                baselineModelIdRef.current = migratedTier;
+                setBaselineModelId(migratedTier);
+              }
               selectedModelTierRef.current = migratedTier;
               setSelectedModelTier(migratedTier);
             }
@@ -308,6 +358,11 @@ export default function ChatPage() {
             (!savedTier || !effectiveOptions.some((m) => m.id === savedTier)) &&
             catalog.default_tier
           ) {
+            const defOpt = effectiveOptions.find((m) => m.id === catalog.default_tier);
+            if (defOpt && defOpt.tier !== "strong") {
+              baselineModelIdRef.current = catalog.default_tier;
+              setBaselineModelId(catalog.default_tier);
+            }
             selectedModelTierRef.current = catalog.default_tier;
             setSelectedModelTier(catalog.default_tier);
           }
@@ -371,13 +426,71 @@ export default function ChatPage() {
       });
   }, [setProgrammaticInput, applyConversationModel]);
 
-  // Persist user's per-turn model selection preference and mark manual override for the active thread
+  // Persist user's per-turn model selection preference and arm `1× Boost` auto-revert when escalating to Strong
   const handleSelectModelTier = useCallback((tierId: string) => {
     userOverrodeModelRef.current = true;
+    const chosenOpt = modelOptionsRef.current.find((m) => m.id === tierId);
+    const isStrongChoice = chosenOpt?.tier === "strong";
+
+    if (isStrongChoice) {
+      // Escalating to Strong arms `1× Boost` by default so follow-up turns auto-revert to the baseline fast/medium model
+      const revertOpt = resolveBoostRevertOption(
+        modelOptionsRef.current,
+        chosenOpt,
+        baselineModelIdRef.current
+      );
+      if (revertOpt) {
+        baselineModelIdRef.current = revertOpt.id;
+        setBaselineModelId(revertOpt.id);
+      }
+      singleTurnBoostRef.current = true;
+      setSingleTurnBoost(true);
+      try {
+        localStorage.setItem(MODEL_STORAGE_KEY, baselineModelIdRef.current);
+      } catch {
+        // Ignore storage quota errors
+      }
+    } else {
+      baselineModelIdRef.current = tierId;
+      setBaselineModelId(tierId);
+      singleTurnBoostRef.current = false;
+      setSingleTurnBoost(false);
+      try {
+        localStorage.setItem(MODEL_STORAGE_KEY, tierId);
+      } catch {
+        // Ignore storage quota errors
+      }
+    }
+
     selectedModelTierRef.current = tierId;
     setSelectedModelTier(tierId);
+    inputRef.current?.focus();
+  }, []);
+
+  // Toggles between one-shot `1× Boost` auto-revert and sticky Strong pinning for the active thread
+  const handleToggleSingleTurnBoost = useCallback(() => {
+    const nextBoost = !singleTurnBoostRef.current;
+    singleTurnBoostRef.current = nextBoost;
+    setSingleTurnBoost(nextBoost);
+
+    if (nextBoost) {
+      const activeOpt = modelOptionsRef.current.find((m) => m.id === selectedModelTierRef.current);
+      const revertOpt = resolveBoostRevertOption(
+        modelOptionsRef.current,
+        activeOpt,
+        baselineModelIdRef.current
+      );
+      if (revertOpt) {
+        baselineModelIdRef.current = revertOpt.id;
+        setBaselineModelId(revertOpt.id);
+      }
+    }
+
     try {
-      localStorage.setItem(MODEL_STORAGE_KEY, tierId);
+      localStorage.setItem(
+        MODEL_STORAGE_KEY,
+        nextBoost ? baselineModelIdRef.current : selectedModelTierRef.current
+      );
     } catch {
       // Ignore storage quota errors
     }
@@ -493,6 +606,7 @@ export default function ChatPage() {
         fallbackModelName?: string | null;
         reconnectAttempt?: number;
         minReplyHistoryLength?: number;
+        persistModelSelection?: boolean;
       }
     ): BrainStreamCallbacks => {
       // Recursive inner builder avoids self-referencing the outer `useCallback` binding before initialization
@@ -630,15 +744,17 @@ export default function ChatPage() {
             lastCompletedTurnRef.current = { convId: targetConvId, at: Date.now() };
             finishLocalStream(true);
             inputRef.current?.focus();
-            setConversations((prev) => {
-              const next = prev.map((c) =>
-                c.id === targetConvId
-                  ? { ...c, last_model_tier: effectiveTier, last_model_name: effectiveName }
-                  : c
-              );
-              conversationsRef.current = next;
-              return next;
-            });
+            if (attemptOptions?.persistModelSelection !== false) {
+              setConversations((prev) => {
+                const next = prev.map((c) =>
+                  c.id === targetConvId
+                    ? { ...c, last_model_tier: effectiveTier, last_model_name: effectiveName }
+                    : c
+                );
+                conversationsRef.current = next;
+                return next;
+              });
+            }
             refreshConversationsAndSyncTitles([targetConvId]);
             void refreshConversationCaptures(targetConvId);
           },
@@ -803,16 +919,23 @@ export default function ChatPage() {
               m.id > activeStatus.user_message_id!
           );
 
-        // Sync remembered model from active run or fresh server history only on thread switches/initial load
-        // (never on background polls or window focus, and never overriding a manual dropdown pick)
+        // Sync remembered model from conversation baseline or active run on thread switches/initial load
+        // (never on background polls or window focus, and never overriding a manual dropdown pick or 1× Boost revert)
         if (options?.syncModelFromRemote && !userOverrodeModelRef.current) {
+          const convRecord = conversationsRef.current.find((c) => c.id === convId);
           if (
             activeStatus.active &&
             !alreadyCommittedAssistant &&
-            (activeStatus.model_name || activeStatus.model_tier)
+            (activeStatus.model_name || activeStatus.model_tier) &&
+            !(convRecord?.last_model_name || convRecord?.last_model_tier)
           ) {
             applyConversationModel(
               { name: activeStatus.model_name, tier: activeStatus.model_tier },
+              modelOptionsRef.current
+            );
+          } else if (convRecord?.last_model_name || convRecord?.last_model_tier) {
+            applyConversationModel(
+              { name: convRecord.last_model_name, tier: convRecord.last_model_tier },
               modelOptionsRef.current
             );
           } else {
@@ -1243,7 +1366,14 @@ export default function ChatPage() {
       setProgrammaticInput(nextDraft);
       setPendingImages([]);
 
-      // 3. Reset active thread to null and persist new chat indicator
+      // 3. Reset active thread to null, clear any armed 1× Boost back to baseline, and persist new chat indicator
+      userOverrodeModelRef.current = false;
+      if (singleTurnBoostRef.current) {
+        singleTurnBoostRef.current = false;
+        setSingleTurnBoost(false);
+        selectedModelTierRef.current = baselineModelIdRef.current;
+        setSelectedModelTier(baselineModelIdRef.current);
+      }
       activeConvIdRef.current = null;
       setActiveConvId(null);
       setMessages([]);
@@ -1377,19 +1507,26 @@ export default function ChatPage() {
         modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
       const turnTier = turnModelOption?.tier ?? selectedModelTier;
       const turnModelName = turnModelOption?.model_name ?? null;
+      const isBoostedTurn = singleTurnBoostRef.current && turnTier === "strong";
+      const revertOpt = isBoostedTurn
+        ? resolveBoostRevertOption(modelOptions, turnModelOption, baselineModelIdRef.current)
+        : undefined;
+      const revertTargetId = revertOpt?.id ?? baselineModelIdRef.current;
+      const persistedTier = isBoostedTurn ? (revertOpt?.tier ?? "medium") : turnTier;
+      const persistedModelName = isBoostedTurn ? (revertOpt?.model_name ?? null) : turnModelName;
       // Clear manual-override guard now that the selected model is being committed to this turn
       userOverrodeModelRef.current = false;
 
       let targetConvId = activeConvId;
       let isNewConv = false;
       if (!targetConvId) {
-        // Create new conversation on first message and seed its remembered model metadata
+        // Create new conversation on first message and seed its remembered baseline model metadata
         isNewConv = true;
         const initialTitleText = query || "Image Analysis";
         const title = initialTitleText.slice(0, 30) + (initialTitleText.length > 30 ? "..." : "");
         const res = await createConversation(title, {
-          tier: turnTier,
-          name: turnModelName,
+          tier: persistedTier,
+          name: persistedModelName,
         });
         targetConvId = res.conversation_id;
         // Mark active stream thread BEFORE updating activeConvId so useEffect([activeConvId]) doesn't clobber live state
@@ -1408,8 +1545,7 @@ export default function ChatPage() {
         });
       } else {
         activeStreamConvIdRef.current = targetConvId;
-        // Optimistically bump `last_updated`, record remembered model, and move the active thread to index 0 on Send
-        // so the sidebar and model memory update immediately without waiting for `onDone` to refetch SQLite
+        // Optimistically bump `last_updated`, record remembered model (unless 1× Boost), and move the active thread to index 0
         const bumpedIso = new Date().toISOString();
         setConversations((prev) => {
           const target = prev.find((c) => c.id === targetConvId);
@@ -1418,8 +1554,9 @@ export default function ChatPage() {
             {
               ...target,
               last_updated: bumpedIso,
-              last_model_tier: turnTier,
-              last_model_name: turnModelName,
+              ...(isBoostedTurn
+                ? {}
+                : { last_model_tier: turnTier, last_model_name: turnModelName }),
             },
             ...prev.filter((c) => c.id !== targetConvId),
           ];
@@ -1472,12 +1609,22 @@ export default function ChatPage() {
           fallbackModelTier: turnModelOption?.tier ?? selectedModelTier,
           fallbackModelName: turnModelOption?.model_name ?? null,
           minReplyHistoryLength: expectedReplyMinLength,
+          persistModelSelection: isBoostedTurn ? false : true,
         }),
         selectedModelTier,
-        imagesToSend.length > 0 ? imagesToSend : undefined
+        imagesToSend.length > 0 ? imagesToSend : undefined,
+        isBoostedTurn ? false : true
       );
 
       abortRef.current = abort;
+
+      // Immediately snap the composer selector back to the baseline model once the 1× Boost turn has been dispatched
+      if (isBoostedTurn) {
+        singleTurnBoostRef.current = false;
+        setSingleTurnBoost(false);
+        selectedModelTierRef.current = revertTargetId;
+        setSelectedModelTier(revertTargetId);
+      }
     },
     [loading, activeConvId, selectedModelTier, modelOptions, pendingImages, createStreamCallbacks, setProgrammaticInput]
   );
@@ -1670,6 +1817,12 @@ export default function ChatPage() {
   const activeModelOption =
     modelOptions.find((m) => m.id === selectedModelTier) ?? modelOptions[0];
   const activeModelLabel = activeModelOption?.label ?? selectedModelTier;
+  const revertBoostOption = resolveBoostRevertOption(
+    modelOptions,
+    activeModelOption,
+    baselineModelId
+  );
+  const revertModelLabel = revertBoostOption?.short_label ?? revertBoostOption?.label ?? "Medium";
   // Use the running turn's model metadata in the live Thinking Panel banner so switching threads preserves accuracy
   // Resolves concrete model name before tier ID so e.g. Claude Haiku 5.5 (`tier: "low"`) never matches Gemini's `id: "low"` entry
   const liveStatusModelLabel = useMemo(
@@ -1741,6 +1894,9 @@ export default function ChatPage() {
           modelOptions={modelOptions}
           selectedModelTier={selectedModelTier}
           activeModelLabel={activeModelLabel}
+          singleTurnBoost={singleTurnBoost}
+          revertModelLabel={revertModelLabel}
+          onToggleSingleTurnBoost={handleToggleSingleTurnBoost}
           inputRef={inputRef}
           pendingImages={pendingImages}
           onAddImages={handleAddImages}

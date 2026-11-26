@@ -7,10 +7,12 @@ Automatically boots the Telegram Mobile Bridge long-polling worker during server
 # used by FastAPI's `lifespan` hook to run startup initialization before `yield` and shutdown cleanup after `yield`.
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nexus.api.routers import agents, browser, chat_branches, hitl, tools, vault
+from nexus.api.security import HostValidationMiddleware, get_or_create_api_token, verify_api_token
+from nexus.core.config import warn_if_langsmith_enabled
 from nexus.shared_tools.telegram_bridge import (
     get_telegram_bridge_status,
     start_telegram_poller,
@@ -21,7 +23,10 @@ from nexus.shared_tools.telegram_bridge import (
 # `app: FastAPI` is the application instance passed by Starlette/Uvicorn during server startup and shutdown.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage background engine workers across the FastAPI lifecycle."""
+    """Manage background engine workers and startup security/privacy initialization across FastAPI lifespan."""
+    # Ensure `.secrets/api_token` exists before serving authenticated requests and warn if LangSmith is opted in
+    get_or_create_api_token()
+    warn_if_langsmith_enabled()
     await start_telegram_poller()
     try:
         yield
@@ -63,14 +68,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Register HostValidationMiddleware AFTER CORSMiddleware so it executes outermost on incoming requests,
+# rejecting DNS-rebinding `Host` headers before routing or SSE streaming begins.
+app.add_middleware(HostValidationMiddleware)
 
 # ── Route Mounts ──────────────────────────────────────────────
-app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
-app.include_router(chat_branches.router, prefix="/api/agents", tags=["agents"])
-app.include_router(vault.router, prefix="/api/vault", tags=["vault"])
-app.include_router(hitl.router, prefix="/api/hitl", tags=["hitl"])
+# Protect all `/api/*` routers with Bearer / `X-Nexus-Token` auth (`verify_api_token`).
+# `/api/browser/*` retains its stricter loopback check plus Chrome Extension probe/WS verification.
+_auth_deps = [Depends(verify_api_token)]
+app.include_router(agents.router, prefix="/api/agents", tags=["agents"], dependencies=_auth_deps)
+app.include_router(chat_branches.router, prefix="/api/agents", tags=["agents"], dependencies=_auth_deps)
+app.include_router(vault.router, prefix="/api/vault", tags=["vault"], dependencies=_auth_deps)
+app.include_router(hitl.router, prefix="/api/hitl", tags=["hitl"], dependencies=_auth_deps)
 app.include_router(browser.router, prefix="/api/browser", tags=["browser"])
-app.include_router(tools.router, prefix="/api/tools", tags=["tools"])
+app.include_router(tools.router, prefix="/api/tools", tags=["tools"], dependencies=_auth_deps)
 
 
 # ── Health Check & Mobile Bridge Status ───────────────────────
@@ -81,11 +92,12 @@ async def health_check():
         "status": "ok",
         "engine": "Nexus",
         "version": "2.0.0",
+        "auth_enabled": True,
         "telegram": get_telegram_bridge_status(),
     }
 
 
-@app.get("/api/telegram/status")
+@app.get("/api/telegram/status", dependencies=_auth_deps)
 async def telegram_status():
     """Returns live status and configuration diagnostics for the Telegram Mobile Bridge."""
     return get_telegram_bridge_status()

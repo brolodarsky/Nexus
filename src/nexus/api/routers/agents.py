@@ -74,6 +74,7 @@ class AskRequest(BaseModel):
     conversation_id: str                # UUID linking to chats.db conversation thread
     model_tier: Optional[str] = None    # Optional per-turn model tier/ID override ("strong", "medium", "low")
     images: Optional[list[str]] = None  # Optional list of image URLs/paths (e.g. ["/api/agents/uploads/<uuid>.png"])
+    persist_model_selection: bool = True # When False (1× Boost), log turn model on messages without overwriting conversation baseline
 
 
 
@@ -571,6 +572,7 @@ async def ask_brain(request: AskRequest):
             images=request.images,
             model_tier=resolved_model.get("tier"),
             model_name=resolved_model.get("model_name"),
+            persist_conversation_model=request.persist_model_selection,
         )
         
         # Subscribe to trace_bus so synchronous `/ask` also captures 100% of LLM & Subagent trace steps scoped to this conversation
@@ -637,6 +639,7 @@ async def ask_brain(request: AskRequest):
             model_name=used_model,
             cost_usd=turn_cost_formatted,
             run_id=effective_run_id,
+            persist_conversation_model=request.persist_model_selection,
         )
 
         # Schedule backend-driven Turn-1 auto-titling for placeholder conversations (non-blocking)
@@ -687,6 +690,7 @@ def _run_pipeline(
     active_run: ActiveRun,
     unsub_trace: Callable[[], None],
     model_tier: Optional[str] = None,
+    persist_model_selection: bool = True,
 ):
     """
     Runs agent graph execution in a background thread so the async event loop is not blocked.
@@ -770,6 +774,7 @@ def _run_pipeline(
             model_name=used_model,
             cost_usd=turn_cost_formatted,
             run_id=effective_run_id,
+            persist_conversation_model=persist_model_selection,
         )
 
         # Trigger background Turn-1 auto-titling directly on the backend so switching/closing tabs never skips titling
@@ -982,6 +987,7 @@ async def ask_brain_stream(request: AskRequest, req: Request):
         images=request.images,
         model_tier=resolved_model.get("tier"),
         model_name=resolved_model.get("model_name"),
+        persist_conversation_model=request.persist_model_selection,
     )
 
     active_run = ActiveRun(
@@ -1006,7 +1012,7 @@ async def ask_brain_stream(request: AskRequest, req: Request):
     try:
         pipeline_thread = threading.Thread(
             target=_run_pipeline,
-            args=(active_run, unsub_trace, request.model_tier),
+            args=(active_run, unsub_trace, request.model_tier, request.persist_model_selection),
             daemon=True,
         )
         pipeline_thread.start()

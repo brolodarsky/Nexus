@@ -45,8 +45,12 @@ assert.strictEqual(
   "strong"
 );
 assert.strictEqual(
+  resolveConversationModelSelection(FALLBACK_MODELS, { name: "gemini-4-hydrogen", tier: "medium" }),
+  "medium"
+);
+assert.strictEqual(
   resolveConversationModelSelection(FALLBACK_MODELS, { name: "gemini-4-hydrogen", tier: "low" }),
-  "gemini-4-hydrogen"
+  "medium"
 );
 assert.strictEqual(
   resolveConversationModelSelection(FALLBACK_MODELS, { name: "gemini-3.8-flash", tier: "low" }),
@@ -65,7 +69,7 @@ assert.strictEqual(
   "claude-haiku-5-5"
 );
 
-// 2. Retired Anthropic 4.5 IDs migrate cleanly to 5.5 catalog entries
+// 2. Retired Anthropic 4.5 IDs and legacy Hydrogen IDs migrate cleanly to current catalog entries
 assert.strictEqual(
   resolveConversationModelSelection(FALLBACK_MODELS, { name: "claude-sonnet-4-5", tier: "medium" }),
   "claude-sonnet-5-5"
@@ -73,6 +77,10 @@ assert.strictEqual(
 assert.strictEqual(
   resolveConversationModelSelection(FALLBACK_MODELS, { name: "claude-opus-4.5", tier: "strong" }),
   "claude-opus-5-5"
+);
+assert.strictEqual(
+  resolveConversationModelSelection(FALLBACK_MODELS, { name: null, tier: "gemini-4-hydrogen" }),
+  "medium"
 );
 
 // 3. Unlisted/other-provider concrete model names must return null rather than falling back to tier

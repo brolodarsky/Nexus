@@ -3,7 +3,7 @@
  * Interacts with FastAPI endpoints under /api/tools/ for the Resume Engine and future modules.
  */
 
-import { apiFetch, getApiBase } from "./client";
+import { apiFetch, appendTokenQuery, getApiBase } from "./client";
 
 // ── Domain Types & Data Contracts ────────────────────────────────────────────
 
@@ -156,5 +156,5 @@ export function getResumeFileUrl(path: string, format: "pdf" | "docx" = "pdf", d
   const encodedPath = encodeURIComponent(path);
   const dlParam = download ? "&download=true" : "";
   // getApiBase(): Dynamically resolves host IP so compiled PDF/DOCX downloads work over LAN/Tailscale
-  return `${getApiBase()}/api/tools/resume/file?path=${encodedPath}&format=${format}${dlParam}`;
+  return appendTokenQuery(`${getApiBase()}/api/tools/resume/file?path=${encodedPath}&format=${format}${dlParam}`);
 }

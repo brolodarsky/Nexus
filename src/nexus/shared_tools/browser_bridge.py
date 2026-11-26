@@ -216,14 +216,17 @@ def _dispatch_browser_command(
 
     # Phase 1: Probe FastAPI `/api/browser/status` (fast 0.8s timeout) to see if `start.ps1` is active
     try:
-        with httpx.Client(timeout=0.8) as probe_client:
+        from nexus.api.security import get_or_create_api_token
+
+        auth_headers = {"X-Nexus-Token": get_or_create_api_token()}
+        with httpx.Client(timeout=0.8, headers=auth_headers) as probe_client:
             status_resp = probe_client.get(f"{FASTAPI_BASE_URL}/status")
             if status_resp.status_code == 200:
                 status_json = status_resp.json()
                 if status_json.get("connected"):
                     loaded_version = (status_json.get("metadata") or {}).get("bridge_version")
                     # FastAPI has an active Chrome Extension socket! Route through REST API.
-                    with httpx.Client(timeout=timeout) as api_client:
+                    with httpx.Client(timeout=timeout, headers=auth_headers) as api_client:
                         if action == "ping":
                             ping_out: Dict[str, Any] = {
                                 "ok": True,

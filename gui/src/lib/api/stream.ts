@@ -2,7 +2,7 @@
  * stream.ts — Server-Sent Events (SSE) streaming client and telemetry trace types for Nexus Agent execution.
  */
 
-import { getApiBase } from "./client";
+import { getApiBase, getAuthHeaders } from "./client";
 
 // Discriminated union of trace events emitted during live agent graph execution
 export interface TraceEvent {
@@ -128,6 +128,10 @@ function consumeBrainSseStream(
     try {
       const res = await fetch(url, {
         ...init,
+        headers: {
+          ...getAuthHeaders(),
+          ...init.headers,
+        },
         signal: controller.signal, // Connects the abort signal to the fetch request
       });
 
@@ -253,7 +257,8 @@ export function askBrainStream(
   conversationId: string,
   callbacks: BrainStreamCallbacks,
   modelTier?: string,
-  images?: string[]
+  images?: string[],
+  persistModelSelection?: boolean
 ): () => void {
   // getApiBase(): Dynamically targets the host's backend port (e.g. over LAN/Tailscale) without proxy buffering
   return consumeBrainSseStream(
@@ -266,6 +271,7 @@ export function askBrainStream(
         conversation_id: conversationId,
         model_tier: modelTier,
         images: images && images.length > 0 ? images : undefined,
+        ...(persistModelSelection === false ? { persist_model_selection: false } : {}),
       }),
     },
     callbacks
