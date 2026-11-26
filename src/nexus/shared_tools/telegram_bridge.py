@@ -487,7 +487,7 @@ def transcribe_audio_bytes(
     # 2. Secondary Path: Gemini Hydrogen native multimodal audio transcription
     if gemini_key:
         try:
-            from nexus.agent.graph import extract_message_text
+            from nexus.agent.sanitization import extract_message_text
 
             clean_gemini_mime = lower_mime if lower_mime and "/" in lower_mime else f"audio/{ext}"
             if "ogg" in clean_gemini_mime or "opus" in clean_gemini_mime or ext == "ogg":

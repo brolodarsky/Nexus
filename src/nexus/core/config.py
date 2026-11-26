@@ -52,7 +52,7 @@ class EngineSettings(BaseSettings):
     # - nexus_subagent_timeout: Maximum total wall-clock budget for a single `spawn_subagent` worker loop.
     nexus_tool_timeout: int = 120
     nexus_subagent_timeout: int = 900
-    # Subagent ReAct loop circuit breakers (`spawn_subagent` in `src/nexus/agent/graph.py`):
+    # Subagent ReAct loop circuit breakers (`spawn_subagent` in `src/nexus/agent/subagent.py`):
     # Both fields live on `EngineSettings` (`pydantic_settings.BaseSettings`) and can be overridden in `.env`
     # via `SUBAGENT_MAX_TURNS` and `SUBAGENT_MAX_UNCACHED_INPUT_TOKENS`.
     # - subagent_max_turns: Maximum tool-calling iterations before forcing a final synthesis turn (soft notice at max_turns - 2).

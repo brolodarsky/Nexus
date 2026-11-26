@@ -94,7 +94,7 @@ def test_subagent_agent_start_captures_prehydrated_context_and_llm_call_manifest
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify spawn_subagent emits agent_start AFTER pre-hydration with system, prehydrated, and llm_call manifests."""
-    from nexus.agent import graph as graph_mod
+    from nexus.agent import subagent as subagent_mod
 
     vault_dir = tmp_path / "Vault"
     sec_dir = vault_dir / "6. Engineering"
@@ -102,9 +102,9 @@ def test_subagent_agent_start_captures_prehydrated_context_and_llm_call_manifest
     (sec_dir / "Section Instructions.md").write_text("Follow Engineering ADR rules.", encoding="utf-8")
     (sec_dir / "Spec.md").write_text("# Spec\nContent here.", encoding="utf-8")
 
-    monkeypatch.setattr(graph_mod, "inject_root_instructions", lambda: "ROOT_MASTER_INSTRUCTIONS")
+    monkeypatch.setattr(subagent_mod, "inject_root_instructions", lambda: "ROOT_MASTER_INSTRUCTIONS")
     monkeypatch.setattr(
-        graph_mod,
+        subagent_mod,
         "hydrate_subagent_context_files",
         lambda *_a, **_kw: (
             "# Pre-Hydrated Disk Context\n\n## `6. Engineering/Section Instructions.md`\nFollow Engineering ADR rules.\n\n## `6. Engineering/Spec.md`\n# Spec\nContent here.",
@@ -114,9 +114,9 @@ def test_subagent_agent_start_captures_prehydrated_context_and_llm_call_manifest
 
     mock_base_llm = MagicMock()
     mock_base_llm.bind_tools.return_value = MagicMock()
-    monkeypatch.setattr(graph_mod, "get_chat_model", lambda **_kw: mock_base_llm)
+    monkeypatch.setattr(subagent_mod, "get_chat_model", lambda **_kw: mock_base_llm)
     monkeypatch.setattr(
-        graph_mod,
+        subagent_mod,
         "_invoke_llm_with_resilience",
         lambda **_kw: AIMessage(
             content="Subagent finished cleanly.",
@@ -132,13 +132,13 @@ def test_subagent_agent_start_captures_prehydrated_context_and_llm_call_manifest
     emitted: list[dict] = []
     unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-sub-ctx")
     tok = set_trace_thread_id("conv-sub-ctx")
-    ctx_tok = graph_mod.set_hitl_execution_context(conversation_id="conv-sub-ctx", thread_id="conv-sub-ctx")
+    ctx_tok = subagent_mod.set_hitl_execution_context(conversation_id="conv-sub-ctx", thread_id="conv-sub-ctx")
     try:
-        out = graph_mod.spawn_subagent.invoke(
+        out = subagent_mod.spawn_subagent.invoke(
             {"task_prompt": "Summarize Spec.md", "model_tier": "low", "context_files": ["6. Engineering/Spec.md"]}
         )
     finally:
-        graph_mod.reset_hitl_execution_context(ctx_tok)
+        subagent_mod.reset_hitl_execution_context(ctx_tok)
         reset_trace_thread_id(tok)
         unsub()
 
@@ -167,7 +167,7 @@ def test_head_agent_run_persists_live_trace_thread_messages_and_deduplicates_mes
 ) -> None:
     """Verify run_nexus_agent_with_trace streams live steps to SQLite, preserves thinking signatures, and avoids message_traces dupes."""
     from nexus.agent import api as api_mod
-    from nexus.agent import graph as graph_mod
+    from nexus.agent import runtime as runtime_mod
 
     conv_id = create_conversation(title="Unified Telemetry Turn")
     # Simulate agents.py persisting the incoming user message BEFORE calling run_nexus_agent_with_trace
@@ -180,7 +180,7 @@ def test_head_agent_run_persists_live_trace_thread_messages_and_deduplicates_mes
 
     def _fake_invoke(state, config=None):
         # Emit an llm_call event inside the active run scope
-        graph_mod.nexus_tracer.llm_call(metadata={"model_tier": "strong", "model_name": "gemini-4-argon"})
+        runtime_mod.nexus_tracer.llm_call(metadata={"model_tier": "strong", "model_name": "gemini-4-argon"})
         ai_reply = AIMessage(
             content=[
                 {"type": "thinking", "thinking": "Step-by-step check", "signature": "sig_abc"},

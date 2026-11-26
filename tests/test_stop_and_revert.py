@@ -27,7 +27,7 @@ from nexus.api.routers.agents import (
     _active_runs,
     _active_runs_lock,
 )
-from nexus.agent.graph import (
+from nexus.agent.runtime import (
     is_thread_cancelled,
     register_cancel_event,
     unregister_cancel_event,

@@ -48,7 +48,7 @@ from nexus.core.chats_db import (
 from nexus.core.conversation_cache import get_capture, list_captures
 from nexus.core.chat_titles import auto_generate_title_async, schedule_auto_title
 from nexus.core.hitl_queue import cancel_pending_transactions_for_conversation
-from nexus.agent.graph import (
+from nexus.agent.runtime import (
     register_cancel_event,
     unregister_cancel_event,
     is_thread_cancelled,

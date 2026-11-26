@@ -12,7 +12,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key")
 from langchain_core.messages import AIMessage, HumanMessage
 import pytest
 
-from nexus.agent import graph as graph_mod
+from nexus.agent import subagent as subagent_mod
 from nexus.core import chats_db, conversation_cache, hitl_queue as hq, instruction_guard as ig
 from nexus.core.engine_constitution import inject_root_instructions
 from nexus.core.hitl_queue import reset_hitl_execution_context, set_hitl_execution_context
@@ -668,14 +668,14 @@ def test_spawn_subagent_autohydrates_section_instructions_from_context_files_and
             write_results.append(res)
         return AIMessage(content="Done.")
 
-    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_with_turn1_write)
+    monkeypatch.setattr(subagent_mod, "_invoke_llm_with_resilience", _fake_invoke_with_turn1_write)
 
     conv_id = chats_db.create_conversation(title="Subagent Hydration Thread")
     ctx_tok = set_hitl_execution_context(conversation_id=conv_id, thread_id=conv_id)
     trace_tok = set_trace_thread_id(conv_id)
     try:
         # Case A: Explicit `context_files` omits `Section Instructions.md` -> auto-hydrated & Turn-1 write passes!
-        out_a = graph_mod.spawn_subagent.invoke(
+        out_a = subagent_mod.spawn_subagent.invoke(
             {
                 "task_prompt": "Update Campaign status to Active.",
                 "model_tier": "low",
@@ -688,7 +688,7 @@ def test_spawn_subagent_autohydrates_section_instructions_from_context_files_and
         assert "✅ Surgical modification staged to HITL queue" in write_results[-1]
 
         # When `Section Instructions.md` IS already explicitly in `context_files`, it is NOT duplicated.
-        graph_mod.spawn_subagent.invoke(
+        subagent_mod.spawn_subagent.invoke(
             {
                 "task_prompt": "Inspect Campaign.",
                 "model_tier": "low",
@@ -701,7 +701,7 @@ def test_spawn_subagent_autohydrates_section_instructions_from_context_files_and
         assert captured_prompts[-1].count("Strict 0-2 YOE filter.") == 1
 
         # Case B: `context_files=None`, `task_prompt` references `3.1. Career` and `[[Roadmap]]` -> auto-discovers BOTH!
-        out_b = graph_mod.spawn_subagent.invoke(
+        out_b = subagent_mod.spawn_subagent.invoke(
             {
                 "task_prompt": "Create new career listing in `3. Operations/3.1. Career/Saved/` and check [[Roadmap]].",
                 "model_tier": "low",
@@ -713,7 +713,7 @@ def test_spawn_subagent_autohydrates_section_instructions_from_context_files_and
         assert "✅ File creation staged to HITL queue" in write_results[-1]
 
         # Case C: Plain `task_prompt` touching no governed section gets NO `# Pre-Hydrated Disk Context` bloat.
-        graph_mod.spawn_subagent.invoke(
+        subagent_mod.spawn_subagent.invoke(
             {
                 "task_prompt": "Summarize general notes about groceries.",
                 "model_tier": "low",
@@ -728,7 +728,7 @@ def test_spawn_subagent_autohydrates_section_instructions_from_context_files_and
 
         # Case D: Hallucinated `context_files` still fails fast before LLM invocation.
         called_after = len(captured_prompts)
-        bad_out = graph_mod.spawn_subagent.invoke(
+        bad_out = subagent_mod.spawn_subagent.invoke(
             {
                 "task_prompt": "Check nonexistent file.",
                 "model_tier": "low",

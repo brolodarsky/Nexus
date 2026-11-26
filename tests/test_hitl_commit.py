@@ -549,8 +549,8 @@ def test_commit_move_refuses_when_source_edited_or_dest_exists(root: Path):
 
 
 def test_move_file_and_delete_file_tools(root: Path, monkeypatch: pytest.MonkeyPatch):
-    """Verifies move_file and delete_file @tool functions in shared.py and graph.py integration."""
-    import nexus.agent.graph as graph_module
+    """Verifies move_file and delete_file @tool functions in shared.py and runtime.py CORE_TOOLS integration."""
+    import nexus.agent.runtime as runtime_module
     import nexus.shared_tools.shared as shared_module
     import nexus.shared_tools.vault_reader as vr_module
 
@@ -559,7 +559,7 @@ def test_move_file_and_delete_file_tools(root: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(vr_module, "VAULT_PATH", vault)
 
     # 1. Verify CORE_TOOLS includes move_file and delete_file
-    core_tool_names = [t.name for t in graph_module.CORE_TOOLS]
+    core_tool_names = [t.name for t in runtime_module.CORE_TOOLS]
     assert "move_file" in core_tool_names
     assert "delete_file" in core_tool_names
 

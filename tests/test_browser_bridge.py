@@ -22,7 +22,7 @@ import pytest
 from fastapi.testclient import TestClient
 from websockets.asyncio.client import connect
 
-from nexus.agent.graph import CORE_TOOLS
+from nexus.agent.runtime import CORE_TOOLS
 from nexus.api.main import app
 from nexus.api.routers import browser as browser_router
 from nexus.core.tool_catalog import get_shared_tools_catalog

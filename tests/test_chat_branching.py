@@ -18,7 +18,8 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage
 
 from nexus.api.main import app
-from nexus.agent.graph import CORE_TOOLS, TOOLS
+from nexus.agent.graph import TOOLS
+from nexus.agent.runtime import CORE_TOOLS
 from nexus.core.chat_branching import spawn_seeded_conversation
 from nexus.core.hitl_queue import reset_hitl_execution_context, set_hitl_execution_context
 from nexus.shared_tools.shared import spawn_conversation

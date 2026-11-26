@@ -14,14 +14,13 @@ import uuid
 
 from langchain_core.messages import HumanMessage, ToolMessage
 
-from nexus.agent.graph import (
-    TOOLS,
-    extract_message_text,
+from nexus.agent.graph import TOOLS, nexus_graph
+from nexus.agent.runtime import (
     is_thread_cancelled,
-    nexus_graph,
     nexus_tracer,
     reset_subagent_counter,
 )
+from nexus.agent.sanitization import extract_message_text
 from nexus.core.chats_db import (
     append_thread_lc_messages,
     load_thread_lc_messages,

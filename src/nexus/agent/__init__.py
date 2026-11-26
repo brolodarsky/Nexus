@@ -8,7 +8,8 @@ from nexus.agent.api import (
     run_nexus_agent,
     run_nexus_agent_with_trace,
 )
-from nexus.agent.graph import nexus_graph, nexus_tracer
+from nexus.agent.graph import nexus_graph
+from nexus.agent.runtime import nexus_tracer
 
 __all__ = [
     "ask_nexus",

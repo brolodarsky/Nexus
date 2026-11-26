@@ -14,17 +14,23 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
 from nexus.agent.api import prepend_current_time_to_prompt, run_nexus_agent_with_trace
-from nexus.agent.graph import (
+from nexus.agent.graph import call_model
+from nexus.agent.runtime import (
     _build_system_message,
     _cooperative_sleep,
     _extract_retry_delay,
-    _infer_message_provider,
     _invoke_llm_with_resilience,
     _invoke_tool_node_resilient,
     _is_invalid_signature_error,
     _is_rate_limit_error,
+    register_cancel_event,
+    unregister_cancel_event,
+)
+from nexus.agent.sanitization import (
+    _infer_message_provider,
     _sanitize_messages_for_provider,
-    call_model,
+    extract_message_text,
+    extract_message_thinking,
 )
 from nexus.core.config import EngineSettings
 from nexus.core.constants import get_available_models, get_chat_model, resolve_model_config
@@ -254,10 +260,10 @@ def test_per_turn_model_tier_routing_and_catalog(monkeypatch: pytest.MonkeyPatch
 
     # Verify selecting an Anthropic model in call_model sets _active_turn_provider to "anthropic"
     call_model(state, config={"configurable": {"thread_id": "t1", "model_tier": "claude-opus-5-5"}})
-    import nexus.agent.graph as graph_mod
-    assert graph_mod._active_turn_provider == "anthropic"
-    assert resolve_model_config(f"{graph_mod._active_turn_provider}:low")["model_name"] == "claude-haiku-5-5"
-    assert resolve_model_config(f"{graph_mod._active_turn_provider}:medium")["model_name"] == "claude-sonnet-5-5"
+    import nexus.agent.runtime as runtime_mod
+    assert runtime_mod._active_turn_provider == "anthropic"
+    assert resolve_model_config(f"{runtime_mod._active_turn_provider}:low")["model_name"] == "claude-haiku-5-5"
+    assert resolve_model_config(f"{runtime_mod._active_turn_provider}:medium")["model_name"] == "claude-sonnet-5-5"
 
 
 def test_run_nexus_agent_with_trace_executor_shutdown_diagnostic_message(monkeypatch: pytest.MonkeyPatch):
@@ -383,7 +389,7 @@ def test_invoke_llm_with_resilience_temperature_deprecated_self_heals():
 def test_cooperative_sleep_cancellation():
     """Verify _cooperative_sleep polls thread cancellation and raises InterruptedError immediately."""
     import threading
-    from nexus.agent.graph import register_cancel_event, unregister_cancel_event
+    from nexus.agent.runtime import register_cancel_event, unregister_cancel_event
 
     thread_id = "test_coop_sleep_thread"
     event = threading.Event()
@@ -414,7 +420,7 @@ def test_invoke_llm_with_resilience_retries_and_succeeds(monkeypatch: pytest.Mon
     def fake_sleep(seconds: float, thread_ids: list):
         slept_intervals.append(seconds)
 
-    monkeypatch.setattr("nexus.agent.graph._cooperative_sleep", fake_sleep)
+    monkeypatch.setattr("nexus.agent.runtime._cooperative_sleep", fake_sleep)
 
     mock_tracer = MagicMock()
     res = _invoke_llm_with_resilience(
@@ -441,7 +447,7 @@ def test_invoke_llm_with_resilience_exhaustion(monkeypatch: pytest.MonkeyPatch):
     mock_llm = MagicMock()
     mock_llm.invoke.side_effect = Exception("429 RESOURCE_EXHAUSTED. Quota exceeded.")
 
-    monkeypatch.setattr("nexus.agent.graph._cooperative_sleep", lambda sec, tids: None)
+    monkeypatch.setattr("nexus.agent.runtime._cooperative_sleep", lambda sec, tids: None)
     mock_tracer = MagicMock()
 
     with pytest.raises(Exception, match="429 RESOURCE_EXHAUSTED"):
@@ -962,7 +968,7 @@ def test_get_chat_model_enables_thinking_for_gemini_and_anthropic(monkeypatch: p
 
 def test_extract_message_thinking_and_call_model_telemetry(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify extract_message_thinking extracts thoughts read-only and call_model emits llm_thinking without double-counting cost."""
-    from nexus.agent.graph import extract_message_text, extract_message_thinking
+    from nexus.agent.sanitization import extract_message_text, extract_message_thinking
     from nexus.core.cost import calculate_token_cost
     from nexus.core.trace import trace_bus, set_trace_thread_id, reset_trace_thread_id
 

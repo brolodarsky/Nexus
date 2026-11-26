@@ -11,7 +11,8 @@ Validates:
 from typing import Any, Dict
 import pytest
 
-from nexus.agent.graph import CORE_TOOLS, TOOLS
+from nexus.agent.graph import TOOLS
+from nexus.agent.runtime import CORE_TOOLS
 from nexus.shared_tools import web_search
 from nexus.shared_tools.shared import search_web
 

@@ -295,7 +295,7 @@ def auto_generate_title_sync(
         try:
             # Local imports preserve monkeypatch compatibility with `patch("nexus.core.constants.get_chat_model", ...)`
             from nexus.core.constants import get_chat_model
-            from nexus.agent.graph import extract_message_text
+            from nexus.agent.sanitization import extract_message_text
 
             # Disable visible thinking overhead for short 3-6 word background title generation
             chat_model = get_chat_model(tier="low", temperature=0.2, include_thoughts=False)
@@ -430,7 +430,7 @@ async def auto_generate_title_async(
         try:
             # Local imports preserve monkeypatch compatibility with `patch("nexus.core.constants.get_chat_model", ...)`
             from nexus.core.constants import get_chat_model
-            from nexus.agent.graph import extract_message_text
+            from nexus.agent.sanitization import extract_message_text
 
             # Disable visible thinking overhead for short 3-6 word background title generation
             chat_model = get_chat_model(tier="low", temperature=0.2, include_thoughts=False)

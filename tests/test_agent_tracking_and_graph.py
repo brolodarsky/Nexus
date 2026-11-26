@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from nexus.core.trace import AgentTracer, trace_bus, reset_trace_thread_id, set_trace_thread_id
-from nexus.agent.graph import (
+from nexus.agent.runtime import (
     _next_subagent_tracer,
     get_active_turn_provider,
     reset_subagent_counter,
@@ -283,7 +283,7 @@ def test_invoke_tool_node_resilient_timeout_returns_error_tool_messages():
     from langchain_core.tools import tool
     from langgraph.graph import END, START, MessagesState, StateGraph
     from langgraph.prebuilt import ToolNode
-    from nexus.agent.graph import _invoke_tool_node_resilient
+    from nexus.agent.runtime import _invoke_tool_node_resilient
 
     @tool
     def fast_tool() -> str:
@@ -329,23 +329,23 @@ def test_invoke_tool_node_resilient_timeout_returns_error_tool_messages():
 
 def test_spawn_subagent_emits_error_telemetry_and_returns_report_on_failure(monkeypatch: pytest.MonkeyPatch):
     """Verify spawn_subagent catches unhandled LLM/tool failures, emits tool_error + agent_end, and returns an error report."""
-    from nexus.agent import graph as graph_mod
+    from nexus.agent import subagent as subagent_mod
 
     emitted = []
     unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-subagent-err")
     token = set_trace_thread_id("conv-subagent-err")
-    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-subagent-err", thread_id="conv-subagent-err")
+    ctx_token = subagent_mod.set_hitl_execution_context(conversation_id="conv-subagent-err", thread_id="conv-subagent-err")
 
     monkeypatch.setattr(
-        graph_mod,
+        subagent_mod,
         "_invoke_llm_with_resilience",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("Simulated API crash")),
     )
 
     try:
-        res = graph_mod.spawn_subagent.invoke({"task_prompt": "Test failure handling", "model_tier": "low"})
+        res = subagent_mod.spawn_subagent.invoke({"task_prompt": "Test failure handling", "model_tier": "low"})
     finally:
-        graph_mod.reset_hitl_execution_context(ctx_token)
+        subagent_mod.reset_hitl_execution_context(ctx_token)
         reset_trace_thread_id(token)
         unsub()
 
@@ -363,7 +363,7 @@ def test_spawn_subagent_prehydrates_context_files_and_hitl_overlay(
 ):
     """Verify `spawn_subagent(context_files=...)` resolves disk + staged HITL files and prepends `# Pre-Hydrated Disk Context`."""
     from langchain_core.messages import AIMessage, HumanMessage
-    from nexus.agent import graph as graph_mod
+    from nexus.agent import subagent as subagent_mod
     import nexus.core.hitl_queue as hitl_mod
     import nexus.shared_tools.shared as shared_mod
     import nexus.shared_tools.vault_reader as vault_reader_mod
@@ -395,12 +395,12 @@ def test_spawn_subagent_prehydrates_context_files_and_hitl_overlay(
         captured_calls.append(kwargs["messages"])
         return AIMessage(content="Evaluated against verified BS in CS.")
 
-    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
+    monkeypatch.setattr(subagent_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
 
-    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-prehydrate", thread_id="conv-prehydrate")
+    ctx_token = subagent_mod.set_hitl_execution_context(conversation_id="conv-prehydrate", thread_id="conv-prehydrate")
     trace_token = set_trace_thread_id("conv-prehydrate")
     try:
-        res = graph_mod.spawn_subagent.invoke(
+        res = subagent_mod.spawn_subagent.invoke(
             {
                 "task_prompt": "Evaluate JD fit strictly using the attached resume.",
                 "model_tier": "low",
@@ -414,7 +414,7 @@ def test_spawn_subagent_prehydrates_context_files_and_hitl_overlay(
         )
     finally:
         reset_trace_thread_id(trace_token)
-        graph_mod.reset_hitl_execution_context(ctx_token)
+        subagent_mod.reset_hitl_execution_context(ctx_token)
 
     assert "Evaluated against verified BS in CS." in res
     assert len(captured_calls) == 1
@@ -436,7 +436,7 @@ def test_spawn_subagent_context_files_fail_fast_on_hallucinated_and_unsafe_paths
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Verify `spawn_subagent` fails fast without calling the LLM on missing or escaping `context_files` paths."""
-    from nexus.agent import graph as graph_mod
+    from nexus.agent import subagent as subagent_mod
     import nexus.core.hitl_queue as hitl_mod
     import nexus.shared_tools.shared as shared_mod
     import nexus.shared_tools.vault_reader as vault_reader_mod
@@ -459,14 +459,14 @@ def test_spawn_subagent_context_files_fail_fast_on_hallucinated_and_unsafe_paths
         llm_called = True
         raise AssertionError("LLM should never be invoked when context_files fail resolution")
 
-    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _should_not_run)
+    monkeypatch.setattr(subagent_mod, "_invoke_llm_with_resilience", _should_not_run)
 
     emitted = []
     unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-failfast")
     trace_token = set_trace_thread_id("conv-failfast")
-    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-failfast", thread_id="conv-failfast")
+    ctx_token = subagent_mod.set_hitl_execution_context(conversation_id="conv-failfast", thread_id="conv-failfast")
     try:
-        missing_res = graph_mod.spawn_subagent.invoke(
+        missing_res = subagent_mod.spawn_subagent.invoke(
             {
                 "task_prompt": "Compare JDs against resume.",
                 "model_tier": "low",
@@ -475,7 +475,7 @@ def test_spawn_subagent_context_files_fail_fast_on_hallucinated_and_unsafe_paths
                 ],
             }
         )
-        traversal_res = graph_mod.spawn_subagent.invoke(
+        traversal_res = subagent_mod.spawn_subagent.invoke(
             {
                 "task_prompt": "Read secret.",
                 "model_tier": "low",
@@ -483,7 +483,7 @@ def test_spawn_subagent_context_files_fail_fast_on_hallucinated_and_unsafe_paths
             }
         )
     finally:
-        graph_mod.reset_hitl_execution_context(ctx_token)
+        subagent_mod.reset_hitl_execution_context(ctx_token)
         reset_trace_thread_id(trace_token)
         unsub()
 
@@ -506,20 +506,20 @@ def test_subagent_turn_cap_uses_cache_preserving_synthesis_first(monkeypatch: py
     """Verify subagent_max_turns defaults to 25 and hard cap prefers cache-preserving bound synthesis before fallback."""
     from unittest.mock import MagicMock
     from langchain_core.messages import AIMessage, ToolMessage
-    from nexus.agent import graph as graph_mod
+    from nexus.agent import subagent as subagent_mod
     from nexus.core.config import EngineSettings
 
     default_settings = EngineSettings()
     assert default_settings.subagent_max_turns == 25
     assert default_settings.subagent_max_uncached_input_tokens == 450_000
 
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 2)
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_uncached_input_tokens", 450_000)
+    monkeypatch.setattr(subagent_mod.settings, "subagent_max_turns", 2)
+    monkeypatch.setattr(subagent_mod.settings, "subagent_max_uncached_input_tokens", 450_000)
 
     mock_base_llm = MagicMock()
     mock_bound_llm = MagicMock()
     mock_base_llm.bind_tools.return_value = mock_bound_llm
-    monkeypatch.setattr(graph_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
+    monkeypatch.setattr(subagent_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
 
     tool_exec_calls = []
 
@@ -536,7 +536,7 @@ def test_subagent_turn_cap_uses_cache_preserving_synthesis_first(monkeypatch: py
             ]
         }
 
-    monkeypatch.setattr(graph_mod, "_invoke_tool_node_resilient", _fake_tool_node)
+    monkeypatch.setattr(subagent_mod, "_invoke_tool_node_resilient", _fake_tool_node)
 
     llm_invocations = []
 
@@ -560,17 +560,17 @@ def test_subagent_turn_cap_uses_cache_preserving_synthesis_first(monkeypatch: py
             },
         )
 
-    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
+    monkeypatch.setattr(subagent_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
 
     emitted: list[dict] = []
     unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-turn-cap")
-    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-turn-cap", thread_id="conv-turn-cap")
+    ctx_token = subagent_mod.set_hitl_execution_context(conversation_id="conv-turn-cap", thread_id="conv-turn-cap")
     trace_token = set_trace_thread_id("conv-turn-cap")
     try:
-        res = graph_mod.spawn_subagent.invoke({"task_prompt": "Keep digging forever.", "model_tier": "low"})
+        res = subagent_mod.spawn_subagent.invoke({"task_prompt": "Keep digging forever.", "model_tier": "low"})
     finally:
         reset_trace_thread_id(trace_token)
-        graph_mod.reset_hitl_execution_context(ctx_token)
+        subagent_mod.reset_hitl_execution_context(ctx_token)
         unsub()
 
     assert res == "Budget-capped synthesis: Note.md lines 1-50 inspected."
@@ -596,15 +596,15 @@ def test_subagent_stubborn_tool_calls_trigger_unbound_fallback(monkeypatch: pyte
     """Verify spawn_subagent falls back to unbound sub_base_llm only if bound synthesis still emits tool_calls."""
     from unittest.mock import MagicMock
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-    from nexus.agent import graph as graph_mod
+    from nexus.agent import subagent as subagent_mod
 
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 1)
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_uncached_input_tokens", 450_000)
+    monkeypatch.setattr(subagent_mod.settings, "subagent_max_turns", 1)
+    monkeypatch.setattr(subagent_mod.settings, "subagent_max_uncached_input_tokens", 450_000)
 
     mock_base_llm = MagicMock()
     mock_bound_llm = MagicMock()
     mock_base_llm.bind_tools.return_value = mock_bound_llm
-    monkeypatch.setattr(graph_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
+    monkeypatch.setattr(subagent_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
 
     invocations = []
 
@@ -622,17 +622,17 @@ def test_subagent_stubborn_tool_calls_trigger_unbound_fallback(monkeypatch: pyte
             usage_metadata={"input_tokens": 250, "output_tokens": 25, "total_tokens": 275},
         )
 
-    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
+    monkeypatch.setattr(subagent_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
 
     emitted: list[dict] = []
     unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-stubborn-cap")
-    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-stubborn-cap", thread_id="conv-stubborn-cap")
+    ctx_token = subagent_mod.set_hitl_execution_context(conversation_id="conv-stubborn-cap", thread_id="conv-stubborn-cap")
     trace_token = set_trace_thread_id("conv-stubborn-cap")
     try:
-        res = graph_mod.spawn_subagent.invoke({"task_prompt": "Stubborn loop.", "model_tier": "low"})
+        res = subagent_mod.spawn_subagent.invoke({"task_prompt": "Stubborn loop.", "model_tier": "low"})
     finally:
         reset_trace_thread_id(trace_token)
-        graph_mod.reset_hitl_execution_context(ctx_token)
+        subagent_mod.reset_hitl_execution_context(ctx_token)
         unsub()
 
     assert res == "Fallback unbound synthesis completed."
@@ -652,15 +652,15 @@ def test_subagent_uncached_token_budget_ignores_cached_tokens(monkeypatch: pytes
     """Verify cumulative uncached tokens (input - cached) govern the budget cap without penalizing KV-cache hits."""
     from unittest.mock import MagicMock
     from langchain_core.messages import AIMessage, ToolMessage
-    from nexus.agent import graph as graph_mod
+    from nexus.agent import subagent as subagent_mod
 
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 25)
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_uncached_input_tokens", 1_000)
+    monkeypatch.setattr(subagent_mod.settings, "subagent_max_turns", 25)
+    monkeypatch.setattr(subagent_mod.settings, "subagent_max_uncached_input_tokens", 1_000)
 
     mock_base_llm = MagicMock()
     mock_bound_llm = MagicMock()
     mock_base_llm.bind_tools.return_value = mock_bound_llm
-    monkeypatch.setattr(graph_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
+    monkeypatch.setattr(subagent_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
 
     tool_exec_count = 0
 
@@ -674,7 +674,7 @@ def test_subagent_uncached_token_budget_ignores_cached_tokens(monkeypatch: pytes
             ]
         }
 
-    monkeypatch.setattr(graph_mod, "_invoke_tool_node_resilient", _fake_tool_node)
+    monkeypatch.setattr(subagent_mod, "_invoke_tool_node_resilient", _fake_tool_node)
 
     # Turn 1: 600 uncached (cum=600 < 1000) -> continues
     # Turn 2: 900 total, 800 cached -> 100 uncached (cum_unc=700 < 1000 even though cum_total=1500!) -> continues
@@ -699,17 +699,17 @@ def test_subagent_uncached_token_budget_ignores_cached_tokens(monkeypatch: pytes
             )
         return AIMessage(content="Uncached-token-capped synthesis completed.", usage_metadata=usage)
 
-    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
+    monkeypatch.setattr(subagent_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
 
     emitted: list[dict] = []
     unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-tok-cap")
-    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-tok-cap", thread_id="conv-tok-cap")
+    ctx_token = subagent_mod.set_hitl_execution_context(conversation_id="conv-tok-cap", thread_id="conv-tok-cap")
     trace_token = set_trace_thread_id("conv-tok-cap")
     try:
-        res = graph_mod.spawn_subagent.invoke({"task_prompt": "Scan large corpus.", "model_tier": "low"})
+        res = subagent_mod.spawn_subagent.invoke({"task_prompt": "Scan large corpus.", "model_tier": "low"})
     finally:
         reset_trace_thread_id(trace_token)
-        graph_mod.reset_hitl_execution_context(ctx_token)
+        subagent_mod.reset_hitl_execution_context(ctx_token)
         unsub()
 
     assert res == "Uncached-token-capped synthesis completed."
@@ -731,15 +731,15 @@ def test_subagent_soft_landing_warning_preserves_prefix_and_logs_cleanly(
     """Verify soft warning appends once to tail ToolMessage only (KV-safe) and run_logger preserves telemetry."""
     from unittest.mock import MagicMock
     from langchain_core.messages import AIMessage, ToolMessage
-    from nexus.agent import graph as graph_mod
+    from nexus.agent import subagent as subagent_mod
 
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_turns", 5)
-    monkeypatch.setattr(graph_mod.settings, "subagent_max_uncached_input_tokens", 450_000)
+    monkeypatch.setattr(subagent_mod.settings, "subagent_max_turns", 5)
+    monkeypatch.setattr(subagent_mod.settings, "subagent_max_uncached_input_tokens", 450_000)
 
     mock_base_llm = MagicMock()
     mock_bound_llm = MagicMock()
     mock_base_llm.bind_tools.return_value = mock_bound_llm
-    monkeypatch.setattr(graph_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
+    monkeypatch.setattr(subagent_mod, "get_chat_model", lambda **_kwargs: mock_base_llm)
 
     def _fake_tool_node(_node, state_or_input, timeout_seconds=None):
         last_tc = state_or_input["messages"][-1].tool_calls[0]
@@ -749,7 +749,7 @@ def test_subagent_soft_landing_warning_preserves_prefix_and_logs_cleanly(
             ]
         }
 
-    monkeypatch.setattr(graph_mod, "_invoke_tool_node_resilient", _fake_tool_node)
+    monkeypatch.setattr(subagent_mod, "_invoke_tool_node_resilient", _fake_tool_node)
 
     recorded_histories = []
 
@@ -777,17 +777,17 @@ def test_subagent_soft_landing_warning_preserves_prefix_and_logs_cleanly(
             },
         )
 
-    monkeypatch.setattr(graph_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
+    monkeypatch.setattr(subagent_mod, "_invoke_llm_with_resilience", _fake_invoke_llm)
 
     emitted: list[dict] = []
     unsub = trace_bus.subscribe(lambda evt: emitted.append(evt), thread_id="conv-soft-warn")
-    ctx_token = graph_mod.set_hitl_execution_context(conversation_id="conv-soft-warn", thread_id="conv-soft-warn")
+    ctx_token = subagent_mod.set_hitl_execution_context(conversation_id="conv-soft-warn", thread_id="conv-soft-warn")
     trace_token = set_trace_thread_id("conv-soft-warn")
     try:
-        res = graph_mod.spawn_subagent.invoke({"task_prompt": "Draft edits cleanly.", "model_tier": "low"})
+        res = subagent_mod.spawn_subagent.invoke({"task_prompt": "Draft edits cleanly.", "model_tier": "low"})
     finally:
         reset_trace_thread_id(trace_token)
-        graph_mod.reset_hitl_execution_context(ctx_token)
+        subagent_mod.reset_hitl_execution_context(ctx_token)
         unsub()
 
     assert res == "Clean soft-landed synthesis."

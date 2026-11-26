@@ -18,7 +18,7 @@ And supports `distill_and_merge_branch`:
 from typing import Any, Optional
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from nexus.agent.graph import extract_message_text
+from nexus.agent.sanitization import extract_message_text
 from nexus.core.chats_db import (
     append_thread_lc_messages,
     create_branch_conversation,
