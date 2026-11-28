@@ -370,6 +370,7 @@ _The Content Log & Reference_
 - **Memory & State:** Persistent state management, token-efficiency optimizations, and GraphRAG.
 	- **[[Concept - Cognitive Boundaries & Event-Driven Memory]]:** Neuroscience Event Segmentation Theory (EST), Von Neumann hardware mapping (ALU/RAM/Disk), two-phase sleep consolidation, and impedance matching.
 	- **[[Concept - Cognitive Impedance Matching & AI System Coupling]]**
+	- **[[Concept - Unified Content-Addressed State and Telemetry in Agent Systems]]:** Stateless graph execution over canonical SQLite thread state, SHA-256 deduplicated context manifests, and reference-counted telemetry GC.
 #### Agent Tool Use & Integration (The "Hands")
 - **[[Function Calling & Structured Outputs]]:** The foundational bridge between LLMs and code execution (JSON schema enforcement).
 - **[[Concept - Decision Models]]:** Non-autoregressive closed-set evaluation, low-latency intent routing, and agent control planes.
