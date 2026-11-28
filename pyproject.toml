@@ -30,11 +30,9 @@ dependencies = [
     "dataclasses-json==0.6.7",
     "dateparser==1.4.0",
     "decorator==5.2.1",
-    "defusedxml==0.7.1",
     "distro==1.9.0",
     "dotenv==0.9.9",
     "durationpy==0.10",
-    "edge-tts==7.2.7",
     "executing==2.2.1",
     "fastapi==0.136.3",
     "filelock==3.29.0",
@@ -179,6 +177,9 @@ dependencies = [
     "zipp==3.23.1",
     "zstandard==0.25.0",
 ]
+
+[project.scripts]
+nexus-mcp = "nexus.mcp.server:main"
 
 [dependency-groups]
 dev = [

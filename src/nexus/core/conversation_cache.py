@@ -23,6 +23,12 @@ from nexus.core.hitl_queue import get_hitl_execution_context
 
 DEFAULT_CONVERSATION_ID = "nexus_primary"
 CACHE_SCHEME = "cache://"
+# Minimum character length for surfacing fenced code/draft blocks in `cache://chat` manifests
+CHAT_BLOCK_MIN_CHARS = 200
+# Matches canonical `chat/m<message_id>-b<block_index>` keys (with `cache://` stripped)
+_CHAT_KEY_RE = re.compile(r"^chat/m(\d+)-b(\d+)$", re.IGNORECASE)
+# CommonMark fenced code block opener (`>=3` backticks or tildes with optional leading indent <= 3)
+_FENCE_OPEN_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})([^\r\n]*)$")
 
 # Universal analytics/tracking query parameter prefixes & names stripped during URL normalization.
 # Zero site-specific or ATS-specific regexes: strictly standard web tracking parameters.
@@ -90,8 +96,8 @@ def get_active_conversation_id() -> str:
     """Resolves the active `conversation_id` from HITL ContextVar, CLI subprocess env, or CLI fallback.
 
     Order of precedence:
-      1. `get_hitl_execution_context().get("conversation_id")` (set per turn and propagated to subagents)
-      2. `os.environ.get("NEXUS_CONVERSATION_ID")` (forwarded into `run_shared_tool_cli` subprocesses)
+      1. `get_hitl_execution_context().get("conversation_id")` (set per turn, subagent, or MCP session)
+      2. `os.environ.get("NEXUS_CONVERSATION_ID")` (explicit CLI subprocess override)
       3. `DEFAULT_CONVERSATION_ID` (`"nexus_primary"`) for standalone CLI/eval executions
     """
     ctx = get_hitl_execution_context()
@@ -272,7 +278,7 @@ def put_capture(
 
 
 def get_capture(conversation_id: Optional[str], ref: str) -> Optional[dict[str, Any]]:
-    """Resolves either a `cache://...` key (with or without scheme) or a URL within `conversation_id`."""
+    """Resolves a `cache://...` key (external or `cache://chat/m<id>-b<n>`) or URL within `conversation_id`."""
     convo_id = (conversation_id or "").strip() or get_active_conversation_id()
     raw_ref = (ref or "").strip()
     if not raw_ref:
@@ -307,6 +313,10 @@ def get_capture(conversation_id: Optional[str], ref: str) -> Optional[dict[str, 
             return dict(row) if row is not None else None
 
         norm_key = normalize_cache_key(raw_ref)
+        body = norm_key[len(CACHE_SCHEME) :]
+        if _CHAT_KEY_RE.match(body):
+            return get_chat_block(convo_id, norm_key)
+
         row = conn.execute(
             """
             SELECT cache_key, conversation_id, source_type, source_url, title, content, char_count, created_at
@@ -346,14 +356,232 @@ def list_captures(conversation_id: Optional[str]) -> list[dict[str, Any]]:
         return [dict(r) for r in rows]
 
 
+def _derive_block_title(lines: list[str], open_idx: int, inner_lines: list[str], block_index: int) -> str:
+    """Derive a concise human-readable title from a preceding Markdown heading/title or block content."""
+    heading_or_title_re = re.compile(
+        r"^(?:#{1,6}\s+.+|\*\*[^*\n]+\*\*.*|\d+[.)]\s+\*\*[^*\n]+\*\*.*|\d+[.)]\s+.+)$"
+    )
+    for idx in range(open_idx - 1, max(-1, open_idx - 6), -1):
+        candidate = lines[idx].strip()
+        if not candidate:
+            continue
+        if heading_or_title_re.match(candidate):
+            cleaned = re.sub(r"^#{1,6}\s+", "", candidate)
+            cleaned = re.sub(r"^\d+[.)]\s+", "", cleaned)
+            cleaned = cleaned.replace("**", "").replace("`", "").strip()
+            return cleaned[:80] if cleaned else f"Block #{block_index}"
+
+    for inner in inner_lines:
+        stripped = inner.strip()
+        if stripped and stripped != "---":
+            cleaned = re.sub(r"^#{1,6}\s+", "", stripped).replace("`", "").strip()
+            if cleaned:
+                return cleaned[:80]
+
+    return f"Block #{block_index}"
+
+
+def extract_fenced_blocks(content: str, min_chars: int = 0) -> list[dict[str, Any]]:
+    """Extract CommonMark fenced code/draft blocks verbatim from Markdown message text.
+
+    Tracks variable-length fences (` ``` ` vs ```` ```` ```` or `~~~`) so nested 3-backtick
+    code blocks inside a 4-backtick outer draft block remain intact. Assigns 1-indexed
+    `block_index` across all closed blocks before applying `min_chars` filtering so handles
+    (`m<id>-b<n>`) never shift.
+    """
+    if not content:
+        return []
+
+    lines = content.splitlines()
+    blocks: list[dict[str, Any]] = []
+    block_index = 0
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+    fence_lang = "text"
+    open_idx = 0
+    inner_lines: list[str] = []
+
+    for idx, line in enumerate(lines):
+        if not in_fence:
+            m = _FENCE_OPEN_RE.match(line)
+            if m:
+                seq = m.group(1)
+                info = m.group(2)
+                # CommonMark: backtick info strings cannot contain backticks (prevents inline ```` ```foo``` ```` false positives)
+                if seq[0] == "`" and "`" in info:
+                    continue
+                in_fence = True
+                fence_char = seq[0]
+                fence_len = len(seq)
+                info_tokens = info.strip().split()
+                fence_lang = info_tokens[0] if info_tokens else "text"
+                open_idx = idx
+                inner_lines = []
+        else:
+            close_re = re.compile(rf"^[ \t]{{0,3}}{re.escape(fence_char)}{{{fence_len},}}[ \t]*$")
+            if close_re.match(line):
+                block_index += 1
+                body = "\n".join(inner_lines)
+                if len(body) >= min_chars:
+                    blocks.append(
+                        {
+                            "block_index": block_index,
+                            "lang": fence_lang,
+                            "title": _derive_block_title(lines, open_idx, inner_lines, block_index),
+                            "content": body,
+                            "char_count": len(body),
+                            "line_count": len(inner_lines),
+                        }
+                    )
+                in_fence = False
+            else:
+                inner_lines.append(line)
+
+    return blocks
+
+
+def list_chat_blocks(
+    conversation_id: Optional[str],
+    *,
+    min_chars: int = CHAT_BLOCK_MIN_CHARS,
+    limit: int = 30,
+) -> list[dict[str, Any]]:
+    """Return lightweight metadata (no raw `content`) for fenced draft/code blocks in prior chat messages."""
+    convo_id = (conversation_id or "").strip() or get_active_conversation_id()
+    results: list[dict[str, Any]] = []
+    with chats_db._get_conn() as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, role, content, timestamp
+                FROM messages
+                WHERE conversation_id = ?
+                ORDER BY id DESC
+                """,
+                (convo_id,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+    for row in rows:
+        msg_id = int(row["id"])
+        role = str(row["role"] or "assistant")
+        ts = row["timestamp"] or ""
+        blocks = extract_fenced_blocks(row["content"] or "", min_chars=min_chars)
+        for blk in blocks:
+            results.append(
+                {
+                    "cache_key": f"{CACHE_SCHEME}chat/m{msg_id}-b{blk['block_index']}",
+                    "conversation_id": convo_id,
+                    "source_type": "chat",
+                    "source_url": None,
+                    "title": blk["title"],
+                    "role": role,
+                    "lang": blk["lang"],
+                    "message_id": msg_id,
+                    "block_index": blk["block_index"],
+                    "char_count": blk["char_count"],
+                    "line_count": blk["line_count"],
+                    "created_at": ts,
+                }
+            )
+            if len(results) >= limit:
+                return results
+    return results
+
+
+def get_chat_block(conversation_id: Optional[str], ref: str) -> Optional[dict[str, Any]]:
+    """Resolve a `cache://chat/m<id>-b<n>` reference strictly within `conversation_id`."""
+    convo_id = (conversation_id or "").strip() or get_active_conversation_id()
+    cleaned = (ref or "").strip()
+    if cleaned.lower().startswith(CACHE_SCHEME):
+        cleaned = cleaned[len(CACHE_SCHEME) :]
+    cleaned = cleaned.strip("/")
+    match = _CHAT_KEY_RE.match(cleaned)
+    if not match:
+        return None
+
+    msg_id = int(match.group(1))
+    block_idx = int(match.group(2))
+    with chats_db._get_conn() as conn:
+        try:
+            row = conn.execute(
+                """
+                SELECT id, role, content, timestamp
+                FROM messages
+                WHERE conversation_id = ? AND id = ?
+                LIMIT 1
+                """,
+                (convo_id, msg_id),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+
+    if row is None:
+        return None
+
+    for blk in extract_fenced_blocks(row["content"] or "", min_chars=0):
+        if blk["block_index"] == block_idx:
+            return {
+                "cache_key": f"{CACHE_SCHEME}chat/m{msg_id}-b{block_idx}",
+                "conversation_id": convo_id,
+                "source_type": "chat",
+                "source_url": None,
+                "title": blk["title"],
+                "content": blk["content"],
+                "char_count": blk["char_count"],
+                "created_at": row["timestamp"],
+            }
+    return None
+
+
+def format_chat_blocks_manifest(
+    conversation_id: Optional[str],
+    *,
+    min_chars: int = CHAT_BLOCK_MIN_CHARS,
+) -> str:
+    """Format prior chat message fenced draft/code blocks as a concise Markdown manifest."""
+    convo_id = (conversation_id or "").strip() or get_active_conversation_id()
+    blocks = list_chat_blocks(convo_id, min_chars=min_chars)
+    if not blocks:
+        return (
+            f"No fenced draft or code blocks (>= {min_chars} chars) were found in prior chat messages "
+            f"for conversation `{convo_id}`."
+        )
+
+    lines = [
+        f"# Cached Chat Draft Blocks ({len(blocks)} item(s) in conversation `{convo_id}`)",
+        "Use `read_file(\"<cache_key>\")` to inspect, `spawn_subagent(..., context_files=[\"<cache_key>\"])` "
+        "to pre-hydrate, or `{{cache:chat/m<id>-b<n>}}` inside `create_file` / `modify_file` to splice verbatim.",
+        "",
+    ]
+    for item in blocks:
+        key = item["cache_key"]
+        short_key = key[len(CACHE_SCHEME) :] if key.startswith(CACHE_SCHEME) else key
+        lines.append(
+            f"- `{key}` — **{item['title']}** ({item['role']}, {item['lang']}, "
+            f"{item['char_count']:,} chars, {item['line_count']} lines) · splice: `{{{{cache:{short_key}}}}}`"
+        )
+    return "\n".join(lines)
+
+
 def format_captures_manifest(conversation_id: Optional[str]) -> str:
     """Formats available per-conversation capture metadata as a concise Markdown manifest."""
     convo_id = (conversation_id or "").strip() or get_active_conversation_id()
     entries = list_captures(convo_id)
+    chat_blocks = list_chat_blocks(convo_id, limit=15)
+    if not entries and not chat_blocks:
+        return (
+            f"No external captures or chat draft blocks are currently cached for conversation `{convo_id}`.\n"
+            f"Call `read_browser_tabs`, `read_webpage`, `get_youtube_transcript`, or `fetch_emails` to populate external captures, "
+            f"or check `read_file(\"cache://chat\")` after assistant messages contain fenced blocks (>= {CHAT_BLOCK_MIN_CHARS} chars)."
+        )
+
     if not entries:
         return (
-            f"No external captures are currently cached for conversation `{convo_id}`.\n"
-            f"Call `read_browser_tabs`, `read_webpage`, or `fetch_emails` first to populate the cache."
+            f"No external captures are currently cached for conversation `{convo_id}`.\n\n"
+            f"{format_chat_blocks_manifest(convo_id)}"
         )
 
     lines = [
@@ -370,6 +598,9 @@ def format_captures_manifest(conversation_id: Optional[str]) -> str:
             f"- `{key}` — **{item['title']}** ({item['source_type']}, {item['char_count']:,} chars"
             f"{url_part}) · splice: `{{{{cache:{short_key}}}}}`"
         )
+    if chat_blocks:
+        lines.append("")
+        lines.append(format_chat_blocks_manifest(convo_id))
     return "\n".join(lines)
 
 

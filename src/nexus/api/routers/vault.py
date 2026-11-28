@@ -3,14 +3,11 @@ vault.py — Vault exploration routes.
 Exposes the Vault's structure and note contents over HTTP for the Control Panel.
 """
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
 import re
-import sys
-import subprocess
 from pathlib import Path
-from nexus.core.constants import VAULT_PATH, IGNORE_DIRS, PROJECT_ROOT
+from nexus.core.constants import VAULT_PATH, IGNORE_DIRS
 
 router = APIRouter()
 
@@ -158,7 +155,6 @@ class VaultEntry(BaseModel):
     type: str
     size: int | None = None
     mtime: float | None = None
-    has_audio: bool = False
 
 
 # VaultNoteSummary: models lightweight metadata for all markdown notes across the Vault
@@ -263,11 +259,6 @@ async def list_vault(path: str | None = Query(default=None)):
             
             if entry_type == "file" and not item.name.endswith(".md"):
                 continue
-                
-            has_audio = False
-            if entry_type == "file":
-                audio_file = item.with_suffix(".mp3")
-                has_audio = audio_file.exists()
 
             entries.append(VaultEntry(
                 name=item.name,
@@ -275,113 +266,8 @@ async def list_vault(path: str | None = Query(default=None)):
                 type=entry_type,
                 size=item.stat().st_size if item.is_file() else None,
                 mtime=item.stat().st_mtime if item.is_file() else None,
-                has_audio=has_audio
             ))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list directory: {str(e)}")
 
     return entries
-
-
-class GeneratePodcastRequest(BaseModel):
-    path: str
-    force: bool = False
-
-@router.post("/podcast/generate")
-async def generate_podcast(req: GeneratePodcastRequest):
-    """
-    Generates a podcast MP3 for a note.
-    """
-    note_path = req.path
-    if not note_path.strip():
-        raise HTTPException(status_code=400, detail="Path cannot be empty.")
-
-    clean_path = note_path.strip()
-    if (
-        clean_path.startswith(("/", "\\"))
-        or os.path.isabs(clean_path)
-        or bool(re.match(r"^[a-zA-Z]:", clean_path))
-        or Path(clean_path).is_absolute()
-        or bool(Path(clean_path).drive)
-    ):
-        raise HTTPException(status_code=400, detail="Invalid file path.")
-
-    resolved_vault = VAULT_PATH.resolve()
-    note_file = (resolved_vault / clean_path).resolve()
-    if not note_file.is_relative_to(resolved_vault):
-        raise HTTPException(status_code=400, detail="Invalid file path.")
-
-    if not note_file.exists() or not note_file.is_file():
-        raise HTTPException(status_code=404, detail="File not found.")
-
-    script_path = (PROJECT_ROOT / "tools" / "generate_podcast.py").resolve()
-    
-    cmd = [sys.executable, str(script_path), str(note_file)]
-    if req.force:
-        cmd.append("--force")
-
-    try:
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True
-        )
-        if "Error" in result.stdout or "Error" in result.stderr:
-            raise HTTPException(status_code=500, detail=f"Podcast generation failed: {result.stdout or result.stderr}")
-            
-        audio_file = note_file.with_suffix(".mp3")
-        if not audio_file.exists():
-            raise HTTPException(status_code=500, detail="Audio file was not generated.")
-
-        return {
-            "status": "success",
-            "message": "Podcast generated successfully",
-            "note_path": note_path,
-            "has_audio": True
-        }
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Subprocess failed (exit {e.returncode}): {e.stderr or e.stdout}"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to run podcast generator: {str(e)}"
-        )
-
-
-@router.get("/podcast/download")
-async def download_podcast(path: str = Query(..., description="Relative path from Vault root to the note")):
-    """
-    Streams or downloads the generated podcast MP3.
-    """
-    if not path.strip():
-        raise HTTPException(status_code=400, detail="Path cannot be empty.")
-
-    clean_path = path.strip()
-    if (
-        clean_path.startswith(("/", "\\"))
-        or os.path.isabs(clean_path)
-        or bool(re.match(r"^[a-zA-Z]:", clean_path))
-        or Path(clean_path).is_absolute()
-        or bool(Path(clean_path).drive)
-    ):
-        raise HTTPException(status_code=400, detail="Invalid note path.")
-
-    resolved_vault = VAULT_PATH.resolve()
-    note_file = (resolved_vault / clean_path).resolve()
-    if not note_file.is_relative_to(resolved_vault):
-        raise HTTPException(status_code=400, detail="Invalid note path.")
-
-    audio_file = note_file.with_suffix(".mp3")
-    if not audio_file.exists():
-        raise HTTPException(status_code=404, detail="Audio file not found for this note. Please generate it first.")
-
-    return FileResponse(
-        path=str(audio_file),
-        media_type="audio/mpeg",
-        filename=audio_file.name
-    )

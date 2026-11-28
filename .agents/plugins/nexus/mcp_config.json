@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "nexus": {
+      "command": "c:/Users/Willi/Documents/Projects/Nexus/.venv/Scripts/python.exe",
+      "args": ["-m", "nexus.mcp.server"],
+      "env": {
+        "NEXUS_STDIO_MCP": "1",
+        "NEXUS_NONINTERACTIVE_AUTH": "1"
+      }
+    }
+  }
+}

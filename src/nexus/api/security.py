@@ -46,9 +46,9 @@ _ALLOWED_LAN_NETWORKS = (
     ipaddress.ip_network("100.64.0.0/10"),
 )
 
-# Browser asset/media endpoints that load via HTML `<img>`, `<audio>`, or `<iframe>` tags
+# Browser asset/media endpoints that load via HTML `<img>` or `<iframe>` tags
 # (which cannot attach custom `Authorization` headers and therefore receive `?token=`).
-QUERY_TOKEN_EXACT_PATHS = frozenset({"/api/vault/podcast/download", "/api/tools/resume/file"})
+QUERY_TOKEN_EXACT_PATHS = frozenset({"/api/tools/resume/file"})
 QUERY_TOKEN_PREFIXES = ("/api/agents/uploads/",)
 
 

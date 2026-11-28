@@ -16,7 +16,7 @@ import {
 // ── Navigation & Tool Identifiers ────────────────────────────────────────────
 
 // Available primary tools hosted on the Tools suite
-type ActiveToolKey = "resume_engine" | "podcast_gen" | "web_scraper" | "youtube_transcript";
+type ActiveToolKey = "resume_engine" | "web_scraper" | "youtube_transcript";
 
 interface ToolTabMeta {
   id: ActiveToolKey;
@@ -33,13 +33,6 @@ const TOOL_TABS: ToolTabMeta[] = [
     icon: "📄",
     status: "active",
     tagline: "Compile markdown resumes & cover letters to PDF/DOCX with real-time page budget analysis.",
-  },
-  {
-    id: "podcast_gen",
-    label: "Podcast Generator",
-    icon: "🎙️",
-    status: "planned",
-    tagline: "Synthesize long-form markdown notes into multi-speaker MP3 podcasts via edge-tts.",
   },
   {
     id: "web_scraper",

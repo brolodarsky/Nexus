@@ -39,26 +39,33 @@ from nexus.core.instruction_guard import (
 from nexus.core.trace import AgentTracer
 from nexus.shared_tools.shared import (
     create_calendar_event,
+    create_email_draft,
     create_file,
     delete_calendar_event,
     delete_file,
+    export_agent_conversation,
     fetch_emails,
     fill_browser_form,
     get_calendar_schedule,
     get_directory_structure,
     get_recent_modifications,
+    get_youtube_transcript,
+    ingest_phone_chat,
     list_browser_tabs,
+    modify_emails,
     modify_file,
     move_file,
     open_browser_tabs,
     read_browser_tabs,
     read_file,
-    run_shared_tool_cli,
+    read_webpage,
+    render_resume_documents,
     search_vault,
     search_web,
     send_telegram_notification,
     spawn_conversation,
     transcribe_media,
+    trash_emails,
     update_calendar_event,
 )
 
@@ -228,8 +235,7 @@ def is_thread_cancelled(thread_id: Optional[str]) -> bool:
 
 # ── Core Tool Set (Shared by Parent NexusAgent and Subagents) ────────────────
 
-# Most-used deterministic tools bound directly so the agent can navigate, read, surgically edit,
-# check recent modifications, search the live web, inspect emails/calendar, or invoke any other `[CLI]` tool on demand.
+# Complete unified deterministic toolset bound in-process to NexusAgent/subagents and exposed identically via FastMCP.
 CORE_TOOLS = [
     read_file,
     modify_file,
@@ -240,19 +246,26 @@ CORE_TOOLS = [
     search_vault,
     get_recent_modifications,
     search_web,
+    read_webpage,
+    get_youtube_transcript,
     list_browser_tabs,
     read_browser_tabs,
     open_browser_tabs,
     fill_browser_form,
     fetch_emails,
+    modify_emails,
+    trash_emails,
+    create_email_draft,
     get_calendar_schedule,
     create_calendar_event,
     update_calendar_event,
     delete_calendar_event,
     send_telegram_notification,
     transcribe_media,
+    render_resume_documents,
+    ingest_phone_chat,
+    export_agent_conversation,
     spawn_conversation,
-    run_shared_tool_cli,
 ]
 
 

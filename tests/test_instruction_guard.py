@@ -770,3 +770,35 @@ def test_root_instructions_kv_prefix_stays_byte_identical_across_guard_operation
 
     after = inject_root_instructions()
     assert after == baseline
+
+
+def test_discover_section_instructions_ignores_fenced_code_blocks(
+    isolated_env: dict[str, Path],
+) -> None:
+    """Fenced code/draft blocks in `task_prompt` (incl. 4-backtick wrappers) must not trigger section auto-hydration."""
+    vault = isolated_env["vault"]
+    _write_note(vault, "1. Core/1.1. Philosophy/Section Instructions.md", "# Philosophy Rules\nRule 1.\n")
+    _write_note(vault, "3. Operations/3.1. Career Strategy/Section Instructions.md", "# Career Rules\nRule 2.\n")
+
+    fenced_only_prompt = (
+        "Create `Draft - Orchestrator Instructions.md` at Vault root with this content:\n\n"
+        "````markdown\n"
+        "# Orchestrator Draft\n"
+        "See [[1. Core/1.1. Philosophy/Section Instructions]] or `3. Operations/3.1. Career Strategy/Section Instructions.md`.\n"
+        "```text\n"
+        "3.1. Career Strategy\n"
+        "1.1. Philosophy\n"
+        "```\n"
+        "````\n"
+    )
+    assert ig.discover_section_instructions_for_subagent(fenced_only_prompt, vault_path=vault) == []
+
+    # Prose outside fenced blocks still triggers discovery, while fenced-only sections remain ignored.
+    mixed_prompt = (
+        "Audit `3.1. Career Strategy` and include this example:\n\n"
+        "```markdown\n"
+        "Example mention of 1.1. Philosophy inside a fence.\n"
+        "```\n"
+    )
+    discovered = ig.discover_section_instructions_for_subagent(mixed_prompt, vault_path=vault)
+    assert discovered == ["3. Operations/3.1. Career Strategy/Section Instructions.md"]

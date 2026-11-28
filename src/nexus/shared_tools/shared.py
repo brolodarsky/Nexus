@@ -1,15 +1,16 @@
 """
-shared.py — Shared @tool wrappers for the Universal NexusAgent and spawned subagents.
-Provides high-leverage, zero-drift tools for Vault navigation, reading, surgical file editing
-(exact Target/Replacement patching routed through HITL), new note creation, atomic note relocation
-and deletion (move_file, delete_file), recent modification queries, email/calendar access,
-and on-demand CLI tool execution.
+shared.py — Canonical Unified @tool Registry for NexusAgent and the Nexus MCP Server.
+Defines every typed Nexus capability once (Vault navigation, surgical HITL file edits,
+capture-cached web/YouTube/email readers, Gmail mutations, Google Calendar, Chrome Browser
+Bridge, Tavily search, Telegram notifications, media transcription, resume compiler,
+Android ADB ingestion, conversation export, and branch spawning).
 """
+import contextlib
 import json
 import os
 import re
-import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from langchain_core.tools import tool
@@ -22,37 +23,38 @@ from nexus.core.constants import PROJECT_ROOT, VAULT_PATH
 # Optional[str] (str | None) allows calling with no path to inspect the Vault root, or a section path to see notes.
 @tool
 def get_directory_structure(path: Optional[str] = None) -> str:
-    """Browse the Vault's directory tree. Acts as an 'agentic ls' for navigating sections and listing files.
-
-    - Called with NO path (or path=None): returns ALL folders recursively (no files).
-      Use this to orient yourself and identify which sections to drill into.
-    - Called WITH a specific folder path: returns folders AND files within that subtree.
-      Use this to see `Section Instructions.md`, `Protocol - *.md`, and living/standard notes in a section.
+    """List Vault folders (when `path` omitted), Vault root files + top folders (`path=""` / `"."`), or a section tree.
 
     Args:
-        path: Optional relative path from Vault root (e.g. "3. Operations/3.1. Career Strategy & Revenue").
-              If omitted, returns the full folder tree from the Vault root.
+        path: Optional Vault-relative folder path (e.g. "3. Operations/3.1. Career Strategy & Revenue").
     """
     from nexus.shared_tools.vault_reader import get_directory_tree
 
-    # If path is omitted, show folders only for fast orientation; when drilling into a section, show files too.
-    show_files = path is not None
-    return get_directory_tree(path=path, show_files=show_files)
+    # If path is omitted, show folders only for fast orientation; root aliases list depth-1 files + folders only.
+    if path is None:
+        return get_directory_tree(path=None, show_files=False)
+    clean_path = path.strip()
+    if clean_path in ("", ".", "/", "Vault", "Vault/"):
+        return get_directory_tree(path=None, show_files=True, max_depth=1)
+    return get_directory_tree(path=path, show_files=True)
 
 
 # ── 2. Vault File Reading & Search Tools ─────────────────────────────────────
 
 def _format_missing_cache_keys_hint(conversation_id: str) -> str:
-    """Formats the list of valid `cache://...` keys currently available in `conversation_id`."""
-    from nexus.core.conversation_cache import list_captures
+    """Formats valid `cache://...` external captures and `cache://chat/...` draft block handles."""
+    from nexus.core.conversation_cache import list_captures, list_chat_blocks
 
     entries = list_captures(conversation_id)
-    if not entries:
-        return f"No external captures are currently cached in conversation `{conversation_id}`."
+    chat_blocks = list_chat_blocks(conversation_id, limit=10)
+    if not entries and not chat_blocks:
+        return f"No external captures or chat draft blocks are currently cached in conversation `{conversation_id}`."
     bullets = []
     for item in entries:
         url_note = f" ({item['source_url']})" if item.get("source_url") else ""
         bullets.append(f"- `{item['cache_key']}` — {item['title']}{url_note}")
+    for blk in chat_blocks:
+        bullets.append(f"- `{blk['cache_key']}` — {blk['title']} (chat {blk['role']}, {blk['char_count']:,} chars)")
     return f"Valid cached keys in conversation `{conversation_id}`:\n" + "\n".join(bullets)
 
 
@@ -97,6 +99,7 @@ def read_vault_file_with_hitl_overlay(
     """Resolve and read a Vault note (with HITL overlays) or per-conversation `cache://` capture."""
     from nexus.core.conversation_cache import (
         format_captures_manifest,
+        format_chat_blocks_manifest,
         get_active_conversation_id,
         get_capture,
         is_cache_ref,
@@ -106,9 +109,11 @@ def read_vault_file_with_hitl_overlay(
     from nexus.shared_tools.vault_reader import format_partial_read_context, read_note_content, resolve_vault_note_path
 
     cleaned_ref = (file_path or "").strip()
-    # 0. Support per-conversation external capture lookups (`cache://`, `cache://<key>`, or cached URLs)
+    # 0. Support per-conversation external capture & chat-draft lookups (`cache://`, `cache://chat`, `cache://<key>`, or cached URLs)
     if cleaned_ref.lower().rstrip("/") in ("cache:", "cache://", "cache://list", "cache://*"):
         return format_captures_manifest(get_active_conversation_id())
+    if cleaned_ref.lower().rstrip("/") in ("cache://chat", "cache://chat/list", "cache://chat/*"):
+        return format_chat_blocks_manifest(get_active_conversation_id())
 
     if is_cache_ref(cleaned_ref) or cleaned_ref.lower().startswith(("http://", "https://")):
         active_convo = get_active_conversation_id()
@@ -234,6 +239,7 @@ def hydrate_subagent_context_files(
     """Pre-hydrates Vault files, auto-discovered `Section Instructions.md`, and `cache://` captures for `spawn_subagent`."""
     from nexus.core.conversation_cache import (
         format_captures_manifest,
+        format_chat_blocks_manifest,
         get_active_conversation_id,
         get_capture,
         is_cache_ref,
@@ -276,13 +282,21 @@ def hydrate_subagent_context_files(
             failure_blocks.append("- `<empty string>`: Error: Path cannot be empty.")
             continue
 
-        # Support `cache://` manifest and individual `cache://...` keys (or cached URLs) in this conversation
+        # Support `cache://` / `cache://chat` manifests and individual `cache://...` keys (or cached URLs) in this conversation
         if ref.lower().rstrip("/") in ("cache:", "cache://", "cache://list", "cache://*"):
             if "cache://" in seen_resolved_labels:
                 continue
             seen_resolved_labels.add("cache://")
             resolved_sections.append(
                 f"## `cache://` (Conversation Capture Manifest)\n\n{format_captures_manifest(active_convo)}"
+            )
+            continue
+        if ref.lower().rstrip("/") in ("cache://chat", "cache://chat/list", "cache://chat/*"):
+            if "cache://chat" in seen_resolved_labels:
+                continue
+            seen_resolved_labels.add("cache://chat")
+            resolved_sections.append(
+                f"## `cache://chat` (Chat Draft Blocks Manifest)\n\n{format_chat_blocks_manifest(active_convo)}"
             )
             continue
 
@@ -417,26 +431,17 @@ def read_file(
     start_page: Optional[int] = None,
     end_page: Optional[int] = None,
 ) -> str:
-    """Read a Vault note (including pending HITL edits) or a per-conversation cached external capture (`cache://...`).
+    """Read a Vault note (including pending HITL edits), PDF, or `cache://` external capture.
 
     Sliced reads automatically prepend frontmatter `instructions:` and enclosing heading rules.
-    CONTEXT HYGIENE DIRECTIVE: Reading 1–2 specific notes directly for quick queries is encouraged.
-    However, when researching across >2 files or auditing a section, DO NOT call `read_file` repeatedly
-    in the primary thread. Offload the inspection to parallel `spawn_subagent(task_prompt, context_files=...)`
-    calls so raw file bodies do not inflate your primary context window.
-
-    You can pass:
-      - A Vault-relative path or unique note title (e.g. `"3. Operations/3.1. Career Strategy & Revenue/Job Hunt War Room.md"` or `"Health Summary.md"`).
-      - `"cache://"` to list all external captures cached in the active conversation (`read_browser_tabs`, `read_webpage`, `fetch_emails`).
-      - A specific capture key (`"cache://tab/<slug>"`, `"cache://web/<slug>"`, `"cache://email/<id>"`) or cached URL.
-    Supports Markdown notes, plain-text files, PDF documents, and optional `start_line`/`end_line` or `start_page`/`end_page` slicing.
+    Offload >2-file reads to parallel `spawn_subagent(context_files=...)`.
 
     Args:
-        file_path: Relative Vault path, unique note filename, `"cache://"`, or a `"cache://..."` capture key.
-        start_line: Optional 1-indexed starting line number (inclusive).
-        end_line: Optional 1-indexed ending line number (inclusive).
-        start_page: Optional 1-indexed starting page for PDF documents (inclusive).
-        end_page: Optional 1-indexed ending page for PDF documents (inclusive).
+        file_path: Vault-relative path, unique filename, `"cache://"`, `"cache://chat"`, `"cache://<key>"`, or cached URL.
+        start_line: Optional 1-indexed start line (inclusive).
+        end_line: Optional 1-indexed end line (inclusive).
+        start_page: Optional 1-indexed PDF start page (inclusive).
+        end_page: Optional 1-indexed PDF end page (inclusive).
     """
     return read_vault_file_with_hitl_overlay(
         file_path=file_path,
@@ -454,19 +459,13 @@ def search_vault(
     tags: Optional[List[str]] = None,
     keywords: Optional[List[str]] = None,
 ) -> str:
-    """Search notes in the Vault for one or more keywords in a single pass. Returns matching file paths with snippets.
-
-    When checking multiple related terms (e.g. `["meetup", "hackathon", "Luma", "conference"]`), pass them
-    together in `keywords=[...]` instead of firing separate `search_vault` calls. Prefer passing `path`
-    to scope the search to a target section when known.
+    """Search Vault notes by keyword, multi-term `keywords=[...]` (OR-ranked), or YAML `tags`.
 
     Args:
         keyword: Optional single case-insensitive search term.
-        path: Optional relative folder path from Vault root to scope the search
-              (e.g. "3. Operations/3.1. Career Strategy & Revenue").
-        tags: Optional list of YAML frontmatter tags to filter by (e.g. ["career", "medical"]).
-        keywords: Optional list of case-insensitive search terms checked together in one pass (OR semantics,
-                  ranked by number of matched terms).
+        path: Optional Vault-relative folder path to scope the search.
+        tags: Optional YAML frontmatter tags filter.
+        keywords: Optional list of search terms evaluated together in one pass.
     """
     from nexus.shared_tools.vault_reader import search_within
 
@@ -480,17 +479,13 @@ def get_recent_modifications(
     path: Optional[str] = None,
     limit: int = 50,
 ) -> str:
-    """List Vault documents modified today (default) or within a specified time window, sorted newest-first.
-
-    Use this tool during daily plan reconciliations, session boundary flushes, or status audits
-    to deterministically see what documents were actually created or edited without guessing.
+    """List Vault notes created or modified today (default) or within a lookback window, newest-first.
 
     Args:
-        hours: Optional rolling lookback window in hours (e.g. 6.0 for the last 6 hours).
-               Leave omitted to list all documents modified today since 00:00:00 local time.
-        since_date: Optional ISO date 'YYYY-MM-DD' to list modifications since 00:00:00 on that date.
-        path: Optional relative folder path from Vault root to scope the query to a specific section.
-        limit: Maximum number of modified documents to return (default: 50).
+        hours: Optional rolling lookback in hours (omit for edits since local midnight).
+        since_date: Optional ISO date `'YYYY-MM-DD'`.
+        path: Optional Vault-relative folder scope.
+        limit: Max notes to return (default: 50).
     """
     from nexus.shared_tools.vault_reader import get_recent_modifications as _get_recent_modifications
 
@@ -527,6 +522,22 @@ def _apply_surgical_replacement(source_text: str, target: str, replacement: str)
 _CACHE_PLACEHOLDER_RE = re.compile(r"\{\{\s*cache\s*:\s*([^{}\r\n]+?)\s*\}\}", re.IGNORECASE)
 
 
+def _is_literal_cache_placeholder(text: str, match: re.Match[str]) -> bool:
+    """Return True when a `{{cache:...}}` match is documentation/metasyntax rather than an active splice key.
+
+    Leaves inline-backticked syntax examples (`` `{{cache:...}}` ``) and metasyntax placeholders
+    containing `...`, `<...>`, `*`, or whitespace untouched so documenting Nexus cache syntax inside
+    instruction notes never trips fail-fast cache validation.
+    """
+    start, end = match.span()
+    if start > 0 and end < len(text) and text[start - 1] == "`" and text[end] == "`":
+        return True
+    inner_ref = match.group(1).strip()
+    if "..." in inner_ref or any(ch in "<>*" for ch in inner_ref) or re.search(r"\s", inner_ref):
+        return True
+    return False
+
+
 def _resolve_cache_placeholders(
     text: str,
     conversation_id: Optional[str] = None,
@@ -534,8 +545,8 @@ def _resolve_cache_placeholders(
     """Deterministically replaces `{{cache:<key>}}` placeholders with verbatim text from `conversation_cache`.
 
     Uses a single-pass regex lambda callback so backslashes (e.g. `\\1`, Windows paths) inside
-    cached captures are inserted literally and literal `{{cache:...}}` strings inside captured
-    bodies are never recursively expanded.
+    cached captures are inserted literally, literal `{{cache:...}}` strings inside captured
+    bodies are never recursively expanded, and inline-backticked/metasyntax doc examples pass through.
     """
     from nexus.core.conversation_cache import get_active_conversation_id, get_capture
 
@@ -546,11 +557,15 @@ def _resolve_cache_placeholders(
     if not matches:
         return text, None, 0
 
+    active_matches = [m for m in matches if not _is_literal_cache_placeholder(text, m)]
+    if not active_matches:
+        return text, None, 0
+
     convo_id = (conversation_id or "").strip() or get_active_conversation_id()
     resolved_by_token: dict[str, str] = {}
     missing_refs: list[str] = []
 
-    for match in matches:
+    for match in active_matches:
         raw_token = match.group(0)
         if raw_token in resolved_by_token:
             continue
@@ -569,14 +584,17 @@ def _resolve_cache_placeholders(
             None,
             (
                 f"Error: Unresolved cache placeholder(s) {missing_display} in conversation `{convo_id}`. "
-                f"Check the key name or capture the source via `read_browser_tabs` / `read_webpage` / `fetch_emails` first.\n\n"
+                f"Check the key name (`read_file(\"cache://\")` / `read_file(\"cache://chat\")`) or capture the source first.\n\n"
                 f"{hint}"
             ),
             0,
         )
 
-    spliced = _CACHE_PLACEHOLDER_RE.sub(lambda m: resolved_by_token[m.group(0)], text)
-    return spliced, None, len(matches)
+    spliced = _CACHE_PLACEHOLDER_RE.sub(
+        lambda m: m.group(0) if _is_literal_cache_placeholder(text, m) else resolved_by_token[m.group(0)],
+        text,
+    )
+    return spliced, None, len(active_matches)
 
 
 @tool
@@ -586,28 +604,16 @@ def modify_file(
     replacement: str,
     reasoning: str,
 ) -> str:
-    """Surgically modify an existing (or pending staged) Vault note by replacing an exact `target` block with `replacement`.
+    """Surgically patch an exact `target` block in an existing (or pending HITL) Vault note with `replacement`.
 
-    If governing `Section Instructions.md`, frontmatter `instructions:`, or inline section rules were not yet read in this scope, the first write blocks with those rules until retried.
-    CUMULATIVE OVERLAY STACKING: If this note already has a pending transaction in the HITL queue (`hitl.db`),
-    `modify_file` automatically applies your `target -> replacement` edit on top of the pending `proposed_content`
-    and updates the single HITL card in place (preserving the true on-disk baseline and appending your reasoning).
-
-    VERBATIM CACHE SPLICING: To insert a cached capture verbatim without re-typing, include
-    `{{cache:<type>/<slug>}}` (or `{{cache:cache://...}}`) inside `replacement`; Python replaces it
-    deterministically before staging.
-
-    NEVER regenerate an entire existing file just to edit a section or bullet. Instead:
-    1. Call `read_file` first so you know the exact current text (including any staged pending edits).
-    2. Set `target` to the exact contiguous character sequence (including whitespace/indentation) you want to replace.
-    3. Set `replacement` to the drop-in replacement text (or empty string "" to delete `target`).
-    4. Python patches only that block into the file and stages/updates the single cumulative diff in `hitl.db`.
+    Stacks onto pending HITL edits in place; enforces section/frontmatter instruction hydration.
+    Supports `{{cache:<key>}}` placeholders in `replacement` for deterministic verbatim capture splicing.
 
     Args:
-        file_path: Vault-relative path or unique filename of the note to edit.
-        target: The exact contiguous string in the file to be replaced (must match current/staged text).
-        replacement: The new text to substitute in place of `target` (supports `{{cache:<key>}}` splice placeholders).
-        reasoning: Concise explanation of WHY this edit is being proposed for human HITL review.
+        file_path: Vault-relative path or unique filename.
+        target: Exact contiguous text block to replace (read via `read_file` first).
+        replacement: Drop-in replacement text (or `""` to delete `target`; supports `{{cache:<key>}}`).
+        reasoning: Concise justification shown in the HITL review queue.
     """
     from nexus.core.hitl_queue import add_transaction, get_file_mutation_lock, get_pending_for_file
     from nexus.shared_tools.vault_reader import resolve_vault_note_path
@@ -725,20 +731,15 @@ def create_file(
     reasoning: str,
     overwrite: bool = False,
 ) -> str:
-    """Propose creating a brand-new note in the Vault (staged to the HITL review queue).
+    """Stage creation of a new Vault note (or `overwrite=True` replacement) into the HITL review queue.
 
-    If ancestor `Section Instructions.md` (or overwritten file `instructions:`) were not yet read in this scope, the first write blocks with those rules until retried.
-    Fails if the file already exists unless `overwrite=True` (for existing files, always prefer `modify_file`).
-    Ensure new notes include standard YAML frontmatter (`aliases`, `tags`, `type`) and a `**Back to:**` header bar.
-    When archiving external content (job listings, webpages, emails), embed `{{cache:<type>/<slug>}}`
-    (or `{{cache:cache://...}}`) instead of re-typing long captures; Python deterministically splices
-    the exact verbatim capture from the active conversation cache before staging.
+    Enforces section instruction hydration and expands `{{cache:<key>}}` placeholders verbatim before staging.
 
     Args:
-        file_path: Vault-relative path for the new file (e.g. "3. Operations/3.1. Career Strategy & Revenue/Missions/Acme Corp.md").
-        content: Full Markdown content for the new file (supports `{{cache:<key>}}` verbatim splice placeholders).
-        reasoning: Concise explanation of WHY this file is being created.
-        overwrite: Set True only if intentionally replacing an entire existing file (default: False).
+        file_path: Vault-relative path for the note.
+        content: Full Markdown body (include YAML frontmatter, `**Back to:**`, and optional `{{cache:<key>}}`).
+        reasoning: Concise justification for HITL review.
+        overwrite: Set True only to replace an entire existing file (default: False).
     """
     from nexus.core.hitl_queue import add_transaction, get_file_mutation_lock
 
@@ -817,21 +818,13 @@ def move_file(
     reasoning: str,
     overwrite: bool = False,
 ) -> str:
-    """Propose moving or renaming an existing note within the Vault (staged to the HITL review queue).
-
-    Enables atomic note relocation and archival (e.g. moving a concluded Mission from
-    `Campaign - */Mission - *.md` to `<Section>/Archive/YYYY/Mission - *.md` or relocating a note
-    to a new section) without leaving orphaned files behind.
-
-    Stages the move to `hitl.db` for review in the Control Panel. Upon human approval,
-    the note is atomically written to `destination_path` and unlinked from `source_path`,
-    with a pre-commit snapshot saved in `revisions` enabling full one-click rollback.
+    """Stage an atomic Vault note move/rename/archival into the HITL review queue.
 
     Args:
-        source_path: Existing note path (relative to Vault root) or unique note filename.
-        destination_path: Target Vault-relative path where the note should be moved.
-        reasoning: Concise explanation of WHY this note is being moved or archived.
-        overwrite: Set True only if intentionally overwriting an existing note at destination (default: False).
+        source_path: Existing Vault-relative path or unique note filename.
+        destination_path: Target Vault-relative destination path.
+        reasoning: Concise justification for moving or archiving the note.
+        overwrite: Set True only to replace an existing file at `destination_path` (default: False).
     """
     from nexus.core.hitl_queue import add_transaction, get_file_mutation_lock, get_pending_for_file
     from nexus.shared_tools.vault_reader import resolve_vault_note_path
@@ -943,19 +936,11 @@ def delete_file(
     file_path: str,
     reasoning: str,
 ) -> str:
-    """Propose deleting an existing note from the Vault (staged to the HITL review queue).
-
-    NEVER delete files directly. Staging to HITL allows the user to review the proposed
-    deletion in the Control Panel before the note is unlinked from disk.
-    Upon approval, a pre-commit snapshot is saved in `revisions` so the deletion can
-    be completely reversed via one-click rollback.
-
-    If the note represents concluded pursuit or historical state, prefer moving it to
-    `<Section>/Archive/YYYY/` via `move_file` rather than permanently deleting it.
+    """Stage deletion of a Vault note into the HITL review queue (prefer `move_file` for archival).
 
     Args:
-        file_path: Vault-relative path or unique note filename (e.g. "3. Operations/3.1. Career Strategy & Revenue/Saved Job Listings/Expired Job.md").
-        reasoning: Concise explanation of WHY this note should be deleted.
+        file_path: Vault-relative path or unique filename to delete.
+        reasoning: Concise justification for HITL review.
     """
     from nexus.core.hitl_queue import add_transaction, get_file_mutation_lock, get_pending_for_file, update_transaction_status
     from nexus.shared_tools.vault_reader import resolve_vault_note_path
@@ -1158,29 +1143,16 @@ def fetch_emails(
 ) -> str:
     """Two-phase Gmail search and selective body hydration across connected accounts.
 
-    Read-only operation. Use the two-step scan-then-select workflow to avoid pulling long
-    newsletters or irrelevant threads into context:
-      1. **Scan (default `include_body=False`):** Sweeps `in:inbox` (or all mail with `include_archived=True`)
-         and returns lightweight metadata (`id`, `account`, `thread_id`, `subject`, `sender`, `date`, `labels`, `snippet`).
-         Combine related search terms with Gmail `OR` syntax in a single query when scanning.
-      2. **Select (`message_ids=[...]`):** Pass the exact `id` list of ONLY the relevant emails to batch-hydrate
-         full Markdown bodies (up to 4,000 chars inline, full untruncated capture in `cache://email/<id>`,
-         plus `attachments`, `inline_media`, and `non_text_notice`).
-
-    When sweeping or triaging inbox mail, read and follow `[[Protocol - Email Triage]]` (or pass
-    `context_files=["Protocol - Email Triage.md"]` to `spawn_subagent`).
+    Scans `in:inbox` metadata+snippets by default (`include_body=False`), then batch-hydrates full bodies
+    and `cache://email/<id>` captures via `message_ids=[...]`. Follow `[[Protocol - Email Triage]]` on sweeps.
 
     Args:
-        count: Number of emails to collect during search/sweep (default: 10).
-        include_archived: When False (default), sweeps `in:inbox` (excludes archived mail). Set True
-                          to include archived mail as well.
-        query: Optional Gmail search syntax (e.g. 'from:recruiter newer_than:7d', 'luma OR meetup OR hackathon').
-               Leave empty ("") to sweep recent inbox emails without filtering.
-        account: Account alias ('all' for all configured accounts, 'default', or specific email/alias).
-        include_body: When False (default), returns lightweight metadata + snippet only. Set True to
-                      hydrate full bodies for up to 20 search matches immediately.
-        message_ids: Optional list of Gmail message `id` strings from a prior scan to batch-hydrate
-                     full bodies and `cache://email/<id>` captures directly (skips search).
+        count: Max emails to return during scan (default: 10).
+        include_archived: Set True to include non-inbox archived mail (default: False).
+        query: Optional Gmail search syntax (combine terms with `OR`).
+        account: `'all'` (default), `'default'`, or specific account alias/email.
+        include_body: Set True to hydrate up to 20 full bodies immediately (default: False).
+        message_ids: Exact Gmail IDs to batch-hydrate full bodies and `cache://email/<id>` captures.
     """
     from nexus.shared_tools import gmail_engine
 
@@ -1272,16 +1244,168 @@ def fetch_emails(
         return json.dumps([{"error": f"fetch_emails failed: {exc}"}])
 
 
-@tool
-def get_calendar_schedule(days_ahead: int = 1, days_back: int = 0) -> str:
-    """Fetch live schedule from Google Calendar for today, past days, and/or upcoming days.
+# Shared multi-account Gmail resolution helper used by `fetch_emails`, `modify_emails`, and `trash_emails`.
+def _resolve_gmail_candidate_accounts(account: str, gmail_engine_mod: Any) -> List[str]:
+    """Return concrete Gmail account aliases to query, expanding `'all'` without triggering reserved alias loops."""
+    if (account or "").strip().lower() == "all":
+        return [
+            acc for acc in gmail_engine_mod.list_available_accounts()
+            if acc.lower() != "all"
+        ] or ["default"]
+    return [account or "default"]
 
-    Use this tool to inspect the user's real-time schedule, audit yesterday's completed blocks
-    for daily event receipts (`days_back=1`), detect shifted time blocks, and ground daily planning.
+
+# Executes a per-message Gmail write callable across concrete candidate accounts with client caching.
+# - op_fn: Callable taking `(message_id, account, service)` and returning a JSON-serializable status value.
+def _run_gmail_batch_action(
+    message_ids: List[str],
+    account: str,
+    action_name: str,
+    op_fn: Any,
+) -> str:
+    """Apply a Gmail mutation across deduplicated `message_ids` with multi-account fallback and JSON reporting."""
+    from nexus.shared_tools import gmail_engine
+
+    # Deduplicate non-empty message IDs while preserving caller order
+    deduped_ids: List[str] = []
+    seen: set[str] = set()
+    for raw_id in message_ids or []:
+        cleaned = str(raw_id or "").strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            deduped_ids.append(cleaned)
+
+    if not deduped_ids:
+        return json.dumps({"error": f"`message_ids` cannot be empty in `{action_name}`."})
+
+    try:
+        candidates = _resolve_gmail_candidate_accounts(account, gmail_engine)
+    except Exception as exc:
+        return json.dumps({"error": f"{action_name} failed to resolve accounts: {exc}"})
+
+    # Cache one Gmail Discovery client per account across all message IDs in the batch
+    service_cache: dict[str, object] = {}
+    results: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+
+    for mid in deduped_ids:
+        last_exc: Optional[Exception] = None
+        matched = False
+        for acc in candidates:
+            try:
+                if acc not in service_cache:
+                    service_cache[acc] = gmail_engine.get_gmail_service(account=acc)
+                outcome = op_fn(mid, acc, service_cache[acc], gmail_engine)
+                results.append({"id": mid, "account": acc, "result": outcome})
+                matched = True
+                break
+            except Exception as exc:
+                last_exc = exc
+        if not matched:
+            errors.append({"id": mid, "error": str(last_exc or "Unknown error")})
+
+    return json.dumps({"results": results, "errors": errors}, ensure_ascii=False)
+
+
+# Signature breakdown for modify_emails:
+# - message_ids: List[str] of Gmail message IDs to mutate in one batch.
+# - add_labels / remove_labels: Optional[List[str]] of human label names (e.g. "INBOX", "UNREAD", "Receipts").
+# - account: str target mailbox alias or "all" to probe configured accounts for each ID.
+@tool
+def modify_emails(
+    message_ids: List[str],
+    add_labels: Optional[List[str]] = None,
+    remove_labels: Optional[List[str]] = None,
+    account: str = "default",
+) -> str:
+    """Add or remove Gmail labels on message IDs (e.g. `remove_labels=["INBOX"]` to archive).
+
+    Confirm with the user before mutating mail per `[[Protocol - Email Triage]]`.
 
     Args:
-        days_ahead: Number of days forward to inspect (default: 1 for today; set to 0 when only inspecting past days).
-        days_back: Number of days backward to include (default: 0; pass `days_back=1` to inspect yesterday's calendar).
+        message_ids: Gmail message IDs to update.
+        add_labels: Label names to add (e.g. `["Receipts"]`).
+        remove_labels: Label names to remove (e.g. `["INBOX", "UNREAD"]`).
+        account: Target account alias or `"all"`.
+    """
+    if not add_labels and not remove_labels:
+        return json.dumps({"error": "Specify at least one label in `add_labels` or `remove_labels`."})
+
+    return _run_gmail_batch_action(
+        message_ids=message_ids,
+        account=account,
+        action_name="modify_emails",
+        op_fn=lambda mid, acc, svc, gm: gm.modify_labels(
+            message_id=mid,
+            add=add_labels,
+            remove=remove_labels,
+            account=acc,
+            service=svc,
+        ),
+    )
+
+
+@tool
+def trash_emails(
+    message_ids: List[str],
+    account: str = "default",
+) -> str:
+    """Move Gmail message IDs to Trash (recoverable for 30 days; confirm with user first).
+
+    Args:
+        message_ids: Gmail message IDs to move to Trash.
+        account: Target account alias or `"all"`.
+    """
+    return _run_gmail_batch_action(
+        message_ids=message_ids,
+        account=account,
+        action_name="trash_emails",
+        op_fn=lambda mid, acc, svc, gm: gm.trash_message(message_id=mid, account=acc, service=svc),
+    )
+
+
+@tool
+def create_email_draft(
+    to: str,
+    subject: str,
+    body: str,
+    reply_to_message_id: Optional[str] = None,
+    account: str = "default",
+    send_as: Optional[str] = None,
+) -> str:
+    """Create a Gmail draft without sending (user reviews and sends manually in Gmail).
+
+    Args:
+        to: Recipient email address(es), comma-separated.
+        subject: Email subject line.
+        body: Plain-text draft body.
+        reply_to_message_id: Optional Gmail message ID to thread this draft as a reply.
+        account: Concrete account alias (or `"all"` when `send_as` is provided).
+        send_as: Optional verified Gmail `'Send mail as'` email for the `From` header.
+    """
+    from nexus.shared_tools import gmail_engine
+
+    try:
+        res = gmail_engine.create_draft(
+            to=to,
+            subject=subject,
+            body=body,
+            reply_to_message_id=reply_to_message_id,
+            account=account,
+            send_as=send_as,
+        )
+        return json.dumps(res, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"error": f"create_email_draft failed: {exc}"})
+
+
+@tool
+def get_calendar_schedule(days_ahead: int = 1, days_back: int = 0) -> str:
+    """Fetch Google Calendar events for today, past days (`days_back`), or upcoming days (`days_ahead`).
+
+    Args:
+        days_ahead: Days forward from today (default: 1; set 0 when querying only past days).
+        days_back: Days backward from today (default: 0).
     """
     from datetime import datetime, time, timedelta
     from nexus.shared_tools.calendar_engine import format_events_as_markdown, list_events
@@ -1311,14 +1435,14 @@ def create_calendar_event(
     description: str = "",
     location: str = "",
 ) -> str:
-    """Create a new event on Google Calendar.
+    """Create a Google Calendar event.
 
     Args:
-        summary: Event title (e.g. 'Deep Work: Resume Engine', 'Gym: Push Day').
-        start_iso: RFC3339 datetime string (e.g. '2026-10-21T16:00:00-04:00') or date 'YYYY-MM-DD'.
-        end_iso: RFC3339 datetime string (e.g. '2026-10-21T17:30:00-04:00') or date 'YYYY-MM-DD'.
-        description: Optional notes, exercise target sets, or agenda.
-        location: Optional location string or video meeting link.
+        summary: Event title.
+        start_iso: RFC3339 datetime or `'YYYY-MM-DD'` date.
+        end_iso: RFC3339 datetime or `'YYYY-MM-DD'` date.
+        description: Optional event description.
+        location: Optional location or meeting link.
     """
     from nexus.shared_tools.calendar_engine import create_event
 
@@ -1347,15 +1471,15 @@ def update_calendar_event(
     description: str = "",
     location: str = "",
 ) -> str:
-    """Update or reschedule an existing event on Google Calendar.
+    """Update an existing Google Calendar event by `event_id` (from `get_calendar_schedule`).
 
     Args:
-        event_id: The unique Google Calendar event ID (as returned by `get_calendar_schedule`).
-        summary: New event title (leave empty to keep unchanged).
-        start_iso: New start time in RFC3339 format (leave empty to keep unchanged).
-        end_iso: New end time in RFC3339 format (leave empty to keep unchanged).
-        description: New description (leave empty to keep unchanged).
-        location: New location (leave empty to keep unchanged).
+        event_id: Google Calendar event ID.
+        summary: Optional updated title.
+        start_iso: Optional updated RFC3339 start time.
+        end_iso: Optional updated RFC3339 end time.
+        description: Optional updated description.
+        location: Optional updated location.
     """
     from nexus.shared_tools.calendar_engine import update_event
 
@@ -1395,7 +1519,7 @@ def delete_calendar_event(event_id: str) -> str:
         return f"❌ Failed to delete event '{event_id}': {exc}"
 
 
-# ── 5. Live Web Search & On-Demand Shared CLI Tool Runner ────────────────────
+# ── 5. Live Web, Browser Bridge, YouTube & Domain Utilities ──────────────────
 
 # Signature breakdown:
 # - query: Search string sent to Tavily (avoid hardcoding stale year anchors unless looking for historical data)
@@ -1412,18 +1536,15 @@ def search_web(
     include_domains: Optional[List[str]] = None,
     exclude_domains: Optional[List[str]] = None,
 ) -> str:
-    """Search the live web via Tavily for up-to-date information, documentation, company/JD intel, or peer-reviewed studies.
-
-    Returns a clean Markdown digest containing a synthesized summary and numbered results with exact source URLs
-    and snippets. Always cite the exact study, documentation, or article URL returned—never link bare domain homepages.
+    """Search the live web via Tavily; returns a Markdown digest with exact source URLs.
 
     Args:
-        query: Search query string (e.g. "Palantir Forward Deployed Software Engineer compensation NYC", "fluoxetine CYP2D6 interaction PubMed").
-        max_results: Maximum number of results to return (1-15, default: 5).
-        search_depth: "basic" for fast standard lookups (default) or "advanced" for deeper academic/technical extraction.
-        topic: Category filter — "general" (default), "news", or "finance".
-        include_domains: Optional list of domains to restrict search to (e.g. ["pubmed.ncbi.nlm.nih.gov", "pmc.ncbi.nlm.nih.gov"]).
-        exclude_domains: Optional list of domains to exclude from results.
+        query: Search query string.
+        max_results: Max results (1–15, default: 5).
+        search_depth: `"basic"` (default) or `"advanced"`.
+        topic: `"general"` (default), `"news"`, or `"finance"`.
+        include_domains: Optional domain allowlist.
+        exclude_domains: Optional domain blocklist.
     """
     from nexus.shared_tools.web_search import execute_web_search, format_search_results_as_markdown
 
@@ -1448,17 +1569,12 @@ def list_browser_tabs(
     query: Optional[str] = None,
     active_only: bool = False,
 ) -> str:
-    """List open tabs and Chrome Tab Groups from the user's live Chrome browser (strictly read-only).
-
-    Use this tool whenever the user refers to their open browser tabs, a Chrome Tab Group
-    (e.g. a group of job listings, articles, or shopping pages), or their active webpage.
-    Returns all open Chrome Tab Groups (title, color, tab count) and matching tabs with their
-    `tab_id`, title, URL, and group assignment.
+    """List open Chrome tabs and Chrome Tab Groups (`tab_id`, title, URL, group) read-only.
 
     Args:
-        group_name: Optional Chrome Tab Group title to filter by (case-insensitive, e.g. 'Jobs').
-        query: Optional keyword filter matching tab title, URL, or group name.
-        active_only: Set True to list only the currently active/focused tab.
+        group_name: Optional Chrome Tab Group title filter.
+        query: Optional substring filter across title, URL, or group.
+        active_only: Set True for only the focused tab (default: False).
     """
     from nexus.shared_tools.browser_bridge import format_tabs_as_markdown, list_tabs
 
@@ -1482,20 +1598,15 @@ def read_browser_tabs(
     max_chars: int = 15000,
     include_refs: bool = False,
 ) -> str:
-    """Extract clean Markdown from the live rendered DOM of open Chrome tabs.
-
-    Reads directly from the user's authenticated Chrome session via the local Nexus Browser Bridge,
-    bypassing anti-bot walls (LinkedIn, Workday, Greenhouse, Cloudflare) with zero vision tokens.
-    Automatically persists each extracted tab under `cache://tab/<slug>` in the active conversation cache.
-    Pass `include_refs=True` when inspecting a form page to receive transient `ref` handles for `fill_browser_form`.
+    """Extract Markdown from live authenticated Chrome tabs and cache under `cache://tab/<slug>`.
 
     Args:
-        tab_ids: Optional list of specific integer `tab_id` values to read (e.g. [142, 145]).
-        group_name: Optional Chrome Tab Group title (case-insensitive, e.g. 'Jobs').
-        query: Optional substring filter matching tab title or URL.
-        active_only: Set True to read only the currently active/focused tab.
-        max_chars: Maximum characters of Markdown to return per tab (default: 15000).
-        include_refs: Set True to stamp transient `ref` handles onto visible form controls (default: False).
+        tab_ids: Optional Chrome `tab_id` integers to read.
+        group_name: Optional Chrome Tab Group title filter.
+        query: Optional title/URL substring filter.
+        active_only: Set True for only the focused tab.
+        max_chars: Max Markdown chars per tab (default: 15000).
+        include_refs: Set True to stamp `ref` handles for `fill_browser_form` (default: False).
     """
     from nexus.shared_tools.browser_bridge import format_tab_reads_as_markdown, read_tabs
 
@@ -1522,16 +1633,13 @@ def open_browser_tabs(
     group_color: str = "blue",
     activate_first: bool = False,
 ) -> str:
-    """Open 1-10 `http(s)` URLs in the user's live Chrome browser and optionally organize them in a Chrome Tab Group.
-
-    Use this to stage shortlisted links (e.g. therapist profiles, direct ATS portals, booking pages)
-    into a clean Chrome Tab Group so the user does not have to click URLs one by one.
+    """Open 1–10 `http(s)` URLs in Chrome, optionally grouped into a Chrome Tab Group.
 
     Args:
-        urls: List of 1-10 `http://` or `https://` URLs to open.
-        group_name: Optional Chrome Tab Group title (e.g. 'Therapists', 'Direct ATS').
-        group_color: Group badge color ('grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange').
-        activate_first: Set True to focus the first opened tab immediately (default: False).
+        urls: 1–10 `http://` or `https://` URLs.
+        group_name: Optional Chrome Tab Group title.
+        group_color: Group color (`blue`, `grey`, `red`, `yellow`, `green`, `pink`, `purple`, `cyan`, `orange`).
+        activate_first: Focus the first opened tab (default: False).
     """
     from nexus.shared_tools.browser_bridge import format_open_tabs_as_markdown, open_tabs
 
@@ -1552,16 +1660,13 @@ def fill_browser_form(
     tab_id: int,
     fields: Dict[str, Any],
 ) -> str:
-    """Draft-fill form controls inside an open Chrome tab without submitting (human review required).
+    """Draft-fill visible form fields in a Chrome tab using `ref` handles from `read_browser_tabs(..., include_refs=True)`.
 
-    Always call `read_browser_tabs(tab_ids=[tab_id], include_refs=True)` first to obtain exact `ref`
-    handles (`f0_1`, `s..._1`). Populates inputs, textareas, selects, checkboxes, and editable blocks,
-    highlights filled fields in Chrome for visual review, and hard-blocks passwords, payment/SSN fields,
-    and form submission. Always instruct the user to review the highlighted fields and submit manually.
+    Highlights filled controls for human review; never submits forms or fills passwords/payment/SSN fields.
 
     Args:
-        tab_id: Target Chrome `tab_id` integer containing the form.
-        fields: Dictionary mapping element `ref` strings to draft values (e.g. `{"f0_1": "Jane Doe"}`).
+        tab_id: Target Chrome `tab_id`.
+        fields: Map of element `ref` handles (e.g. `{"f0_1": "Jane Doe"}`) to draft values.
     """
     from nexus.shared_tools.browser_bridge import fill_form, format_fill_form_as_markdown
 
@@ -1569,53 +1674,203 @@ def fill_browser_form(
     return format_fill_form_as_markdown(result)
 
 
+# Signature breakdown for read_webpage:
+# - url: Target http(s) URL to extract (checks `conversation_cache` first before fetching live HTML).
+# - output_format: Extraction format (`"markdown"`, `"txt"`, `"json"`, `"xml"`).
 @tool
-def run_shared_tool_cli(module: str, cli_args: Optional[List[str]] = None) -> str:
-    """Invoke any `[CLI]` module listed in the `Shared Tools` catalog on demand via `.venv` Python.
-
-    Use this for specialized tools not bound as primary tools (e.g. `nexus.shared_tools.read_webpage`,
-    `nexus.shared_tools.youtube_transcript`, `nexus.shared_tools.generate_podcast`,
-    `nexus.shared_tools.resume_engine.render_docx`, `nexus.shared_tools.gmail_engine`).
-    Pass `cli_args=["--help"]` first if you need to inspect a module's CLI flags.
+def read_webpage(url: str, output_format: str = "markdown") -> str:
+    """Extract clean webpage content (`trafilatura` + JSON-LD/meta fallback) and cache under `cache://web/<slug>`.
 
     Args:
-        module: Dotted Python module path starting with `nexus.shared_tools.` (e.g. "nexus.shared_tools.read_webpage").
-        cli_args: Optional list of CLI argument strings (e.g. ["https://example.com"] or ["--help"]).
+        url: Target `http://` or `https://` URL.
+        output_format: Output format (`"markdown"`, `"txt"`, `"json"`, or `"xml"`, default: `"markdown"`).
     """
-    from nexus.core.conversation_cache import get_active_conversation_id
+    from nexus.shared_tools.read_webpage import scrape_url_with_cache
 
-    clean_mod = module.strip()
-    # Security boundary: restrict execution strictly to modules inside `nexus.shared_tools.`
-    if not clean_mod.startswith("nexus.shared_tools."):
-        return "Error: Only `nexus.shared_tools.<module>` modules may be invoked via `run_shared_tool_cli`."
+    content, cache_key = scrape_url_with_cache(url, output_format=output_format)
+    if not content:
+        return f"Error: Could not extract content from '{url}'."
 
-    cmd = [sys.executable, "-m", clean_mod] + (cli_args or [])
-    # Disable interactive OAuth browser flows and propagate conversation_id so subprocess CLI tools
-    # (`read_webpage`, `browser_bridge`) share the exact active conversation capture cache partition.
-    child_env = {
-        **os.environ,
-        "NEXUS_NONINTERACTIVE_AUTH": "1",
-        "NEXUS_CONVERSATION_ID": get_active_conversation_id(),
-    }
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(PROJECT_ROOT),
-            env=child_env,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=60,
+    if cache_key and output_format in ("markdown", "txt"):
+        short_key = cache_key[len("cache://"):] if cache_key.startswith("cache://") else cache_key
+        return (
+            f"- **Cache Key:** `{cache_key}` *(embed verbatim via `{{{{cache:{short_key}}}}}`)*\n\n"
+            f"{content}"
         )
-        output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
-        output = output.strip()
-        if len(output) > 8000:
-            output = output[:8000] + "\n... [output truncated at 8000 chars]"
-        return output or f"(exit code {proc.returncode}, no output)"
-    except Exception as e:
-        return f"Error running `{clean_mod}`: {e}"
+    return content
+
+
+# Signature breakdown for get_youtube_transcript:
+# - url_or_id: YouTube watch/short URL or 11-char video ID.
+# - save_to_inbox: bool = False writes `Vault/0. Inbox/YouTube - <title>.md` (or `output_note_path`) directly.
+# - output_note_path: Optional[str] Vault-relative path override (validated inside `VAULT_PATH`).
+@tool
+def get_youtube_transcript(
+    url_or_id: str,
+    save_to_inbox: bool = False,
+    output_note_path: Optional[str] = None,
+) -> str:
+    """Fetch a YouTube video's transcript, cache under `cache://youtube/<id>`, and optionally save to Inbox.
+
+    Args:
+        url_or_id: YouTube URL or video ID.
+        save_to_inbox: Save a formatted capture note to `Vault/0. Inbox/` (default: False).
+        output_note_path: Optional Vault-relative path to save the note.
+    """
+    from nexus.shared_tools.youtube_transcript import fetch_youtube_transcript
+
+    return fetch_youtube_transcript(
+        url_or_id=url_or_id,
+        save_to_inbox=save_to_inbox,
+        output_note_path=output_note_path,
+    )
+
+
+# Signature breakdown for render_resume_documents:
+# - file_paths: List[str] of resume/cover-letter paths in `3.1.3. Professional Portfolio & Evidence/` (or `["all"]`).
+# - formats: Optional[List[str]] subset of `["pdf", "docx"]` (defaults to both).
+@tool
+def render_resume_documents(
+    file_paths: List[str],
+    formats: Optional[List[str]] = None,
+) -> str:
+    """Compile portfolio Markdown resumes/cover letters to PDF (Playwright) and DOCX with page-fill metrics.
+
+    Args:
+        file_paths: Paths inside `3.1.3. Professional Portfolio & Evidence/` (or `["all"]`).
+        formats: Formats to render (`["pdf", "docx"]` default).
+    """
+    from nexus.shared_tools.resume_engine.service import render_documents
+
+    try:
+        res = render_documents(file_paths=file_paths, formats=formats)
+        return json.dumps(res, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"success": False, "error": f"render_resume_documents failed: {exc}"})
+
+
+# Signature breakdown for ingest_phone_chat:
+# - screens: int = 1 number of phone screens to scroll/capture via Android ADB.
+# - raw: bool = False emits plain `[Me]/[Them]` lines instead of formatted Markdown.
+# - save_to_inbox: bool = True persists the captured conversation to `Vault/0. Inbox/`.
+# - device: Optional[str] ADB device serial when multiple Android devices are attached.
+@tool
+def ingest_phone_chat(
+    screens: int = 1,
+    raw: bool = False,
+    save_to_inbox: bool = True,
+    device: Optional[str] = None,
+) -> str:
+    """Capture the visible Android messaging thread over USB/wireless ADB and optionally save to `0. Inbox/`.
+
+    Args:
+        screens: Number of screens to scroll up and capture (default: 1).
+        raw: Return plain `[Me]`/`[Them]` lines instead of Markdown (default: False).
+        save_to_inbox: Save capture note under `Vault/0. Inbox/` (default: True).
+        device: Optional ADB device serial.
+    """
+    from datetime import datetime
+    from nexus.shared_tools import ingest_phone
+
+    try:
+        # Redirect interactive print() progress banners from `ingest_phone` to stderr so MCP stdio stays valid
+        with contextlib.redirect_stdout(sys.stderr):
+            resolved_device = ingest_phone.check_device(device)
+            messages, app_package, contact_name = ingest_phone.capture_conversation(
+                resolved_device, max(1, int(screens or 1)), 1.5
+            )
+    except SystemExit as exc:
+        return f"Error: Android ADB capture failed (exit {exc.code}). Ensure USB debugging and ADB device connection."
+    except Exception as exc:
+        return f"Error: Android ADB capture failed: {exc}"
+
+    if not messages:
+        return "Error: No messages extracted. Make sure a chat thread is open on the connected Android screen."
+
+    output = (
+        ingest_phone.format_raw(messages)
+        if raw
+        else ingest_phone.format_markdown(messages, app_package, contact_name, max(1, int(screens or 1)))
+    )
+
+    if save_to_inbox:
+        app_name = ingest_phone.APP_NAMES.get(app_package, "Chat")
+        safe_contact = re.sub(r"[^\w\s-]", "", contact_name or "Unknown").strip() or "Unknown"
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+        out_path = (VAULT_PATH / "0. Inbox" / f"Capture - {app_name} - {safe_contact} - {timestamp}.md").resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(output, encoding="utf-8")
+        rel_path = f"Vault/{str(out_path.relative_to(VAULT_PATH.resolve())).replace(chr(92), '/')}"
+        return f"- **Saved Note:** `{rel_path}`\n\n{output}"
+
+    return output
+
+
+# Signature breakdown for export_agent_conversation:
+# - source: str = "latest" ("latest", conversation ID prefix, or `.jsonl`/`.json` path).
+# - output_note_path: Optional[str] Vault-relative path to write the Obsidian Markdown transcript.
+# - include_thinking: bool = False includes model reasoning accordions.
+# - include_tools: bool = True includes coalesced tool execution `<details>` blocks.
+# - list_recent: bool = False returns the 15 most recent local Antigravity sessions without exporting.
+@tool
+def export_agent_conversation(
+    source: str = "latest",
+    output_note_path: Optional[str] = None,
+    include_thinking: bool = False,
+    include_tools: bool = True,
+    list_recent: bool = False,
+) -> str:
+    """List or coalesce-export a local Antigravity conversation transcript into clean Obsidian Markdown.
+
+    Args:
+        source: `"latest"`, conversation ID/prefix, or transcript path.
+        output_note_path: Optional Vault-relative path to write the exported Markdown note.
+        include_thinking: Include model thinking accordions (default: False).
+        include_tools: Include coalesced tool action summaries (default: True).
+        list_recent: Set True to list recent available conversations instead of exporting.
+    """
+    from nexus.shared_tools import export_conversation
+
+    try:
+        if list_recent:
+            recents = export_conversation.list_conversations(15)
+            if not recents:
+                return "No local conversation transcripts found."
+            lines = [
+                f"- `{r['id']}` — {r['created_at']} ({r['messages']} steps): {r['preview']}"
+                for r in recents
+            ]
+            return "\n".join(lines)
+
+        title_or_id, messages, source_desc = export_conversation.load_conversation_source(source)
+        turns = export_conversation.coalesce_conversation_turns(messages)
+        rendered = export_conversation.format_turns_to_markdown(
+            title_or_id=title_or_id,
+            turns=turns,
+            source_desc=source_desc,
+            include_thinking=include_thinking,
+            include_tools=include_tools,
+            vault_format=bool(output_note_path),
+        )
+
+        if output_note_path:
+            clean = output_note_path.strip().replace("\\", "/").lstrip("/")
+            if clean.startswith("Vault/"):
+                clean = clean[len("Vault/"):]
+            if not clean or re.match(r"^[a-zA-Z]:", clean):
+                return f"Error: Invalid Vault path '{output_note_path}'."
+            resolved_vault = VAULT_PATH.resolve()
+            out_file = (resolved_vault / clean).resolve()
+            if not out_file.is_relative_to(resolved_vault):
+                return f"Error: Refusing to write outside the Vault: '{output_note_path}'"
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            out_file.write_text(rendered, encoding="utf-8")
+            rel = f"Vault/{str(out_file.relative_to(resolved_vault)).replace(chr(92), '/')}"
+            return f"✅ Exported {len(messages)} steps ({len(turns)} turns) to `{rel}`."
+
+        return rendered
+    except Exception as exc:
+        return f"Error exporting conversation '{source}': {exc}"
 
 
 # ── 6. Mobile Push Notification Tool (Telegram Bridge) ───────────────────────
@@ -1623,13 +1878,10 @@ def run_shared_tool_cli(module: str, cli_args: Optional[List[str]] = None) -> st
 # `message: str` is the Markdown or plain-text notification body to push to the user's phone.
 @tool
 def send_telegram_notification(message: str) -> str:
-    """Send a proactive push notification message directly to the user's phone via the Telegram Mobile Bridge.
-
-    Use this tool when the user explicitly asks to be pinged, texted, or notified on their phone,
-    or when a scheduled daemon/task needs to deliver an alert to their mobile device.
+    """Send a push notification to the user's phone via the Telegram Mobile Bridge.
 
     Args:
-        message: Concise Markdown or plain-text message to send to the user's Telegram chat.
+        message: Concise Markdown or plain-text message body.
     """
     from nexus.shared_tools.telegram_bridge import send_telegram_message
 
@@ -1654,18 +1906,13 @@ def transcribe_media(
     include_timestamps: bool = True,
     save_to_vault: bool = True,
 ) -> str:
-    """Transcribe an audio (.mp3, .wav, .m4a, .aac, .flac, .ogg, .opus, .webm) or video (.mp4, .mov, .mkv, .avi) file into verbatim text via the Gemini File API.
-
-    Uploads media directly to Gemini without requiring local FFmpeg extraction or GPU dependencies.
-    Returns the complete, unabridged verbatim transcript (including speaker turns and periodic timestamps).
-    Optionally archives a formatted Markdown note with YAML frontmatter directly into the Obsidian Vault.
+    """Transcribe an audio or video file verbatim via Gemini File API and optionally save to Vault.
 
     Args:
-        file_path: Path to the media file (e.g. "Vault/0. Inbox/meeting.mp4", "recording.mp3", or absolute path).
-        output_note_path: Optional relative note path in Vault to save the transcript (e.g. "0. Inbox/Transcripts/Meeting.md").
-                          If omitted and `save_to_vault=True`, automatically archives to "Vault/0. Inbox/Transcripts/Transcript — <filename>.md".
-        include_timestamps: Whether to format transcript with [MM:SS] timestamps (default: True).
-        save_to_vault: Whether to persist the formatted transcript note in the Obsidian Vault (default: True).
+        file_path: Path to audio/video file (`.mp3`, `.wav`, `.m4a`, `.ogg`, `.mp4`, `.mov`, etc.).
+        output_note_path: Optional Vault-relative path to save transcript (defaults under `0. Inbox/Transcripts/`).
+        include_timestamps: Include `[MM:SS]` timestamps (default: True).
+        save_to_vault: Save formatted Markdown note into Vault (default: True).
     """
     from nexus.shared_tools.transcribe_media import transcribe_media_file
 
@@ -1694,40 +1941,15 @@ def spawn_conversation(
     nest_under_current: bool = True,
     target_section: Optional[str] = None,
 ) -> str:
-    """Create and seed a new, isolated Nexus conversation thread ready for focused follow-up discussion ("seed & wait").
+    """Seed a new isolated conversation thread ("seed & wait") without firing an LLM turn.
 
-    Use this tool to spin off distinct topics, email categories, or multi-thread deep dives into clean,
-    fresh context windows without firing an immediate LLM turn. The spawned conversation appears in the
-    Control Panel sidebar pre-loaded with your `context_brief` in both `chats.db` and LangGraph memory.
-
-    CONTEXT-PACKING STANDARD (ZERO-LOSS HANDOFF):
-    Write `context_brief` so the fresh thread can immediately get to work without re-running broad searches:
-      - **Email sweeps:** Include exact Gmail message/thread IDs, account name, sender/recipients, subject,
-        dates, key quotes/numbers, action items, and recommended next questions.
-      - **Vault / project deep dives:** Include exact verified `[[Wiki-Links]]` or Vault-relative paths,
-        pass `target_section` so the live on-disk directory tree is snapped automatically, and summarize
-        current architectural/decision state, constraints, and open questions.
-      - **External captures (`cache://`):** Any `read_browser_tabs`, `read_webpage`, and `fetch_emails`
-        captures cached in this conversation are inherited automatically (and appended as a lightweight manifest);
-        cite the exact relevant `cache://...` handle(s) in `context_brief` so the child thread knows what to
-        hydrate or splice via `{{cache:<key>}}`.
-      - **Deterministic Path Guard:** Referenced `[[Wiki-Links]]` and `.md`/`.pdf`/`.docx` filenames in
-        `context_brief` are automatically verified against disk; any missing filenames trigger a `[SYSTEM WARNING]`.
-
-    CALLING DISCIPLINE (HEAD AGENT VS. SUBAGENTS):
-      - **Head Agent:** May call anytime to break complex multi-topic sweeps or tangents into dedicated threads.
-      - **Subagents (`spawn_subagent`):** Only call `spawn_conversation` when your `task_prompt` (or delegated
-        user goal) instructs you to spin up threads directly from the raw data you gathered—avoid spawning
-        overlapping duplicate conversations across sibling workers.
+    Inherits `cache://` captures automatically and validates referenced `[[Wiki-Links]]` / filenames.
 
     Args:
-        title: Concise, descriptive title for the new conversation (e.g., "CPA & Tax Follow-ups", "Recruiter Outreach — Acme").
-        context_brief: Self-contained Markdown brief seeded as the opening context of the fresh thread.
-        nest_under_current: If True (default), nests the conversation as a child branch under the current thread
-                            (enabling collapsible sidebar grouping and `Distill & Merge`); set False to create a
-                            standalone top-level root conversation (e.g., for an ongoing independent project).
-        target_section: Optional Vault-relative section folder path (e.g. "3. Operations/3.1. Career Strategy & Revenue").
-                        When provided, Python automatically appends the live directory file tree to the seeded brief.
+        title: Concise conversation title.
+        context_brief: Self-contained Markdown handoff brief (IDs, verified paths, `cache://` keys, goals).
+        nest_under_current: Nest as child branch under current thread (True) or standalone root (False).
+        target_section: Optional Vault folder whose live file tree is appended to the seeded brief.
     """
     from nexus.core.chat_branching import spawn_seeded_conversation
     from nexus.core.conversation_cache import get_active_conversation_id
@@ -1772,15 +1994,3 @@ def spawn_conversation(
         return receipt
     except Exception as exc:
         return f"Error spawning conversation '{title}': {exc}"
-
-
-# ── Backward-Compatible Factories (for any legacy callers) ───────────────────
-
-def get_read_note_tool(agent_name: str = "NexusAgent", domain_path: Optional[str] = None):
-    """Returns the universal `read_file` tool (legacy factory shim)."""
-    return read_file
-
-
-def get_propose_write_tool(agent_name: str = "nexus_agent", domain_path: Optional[str] = None):
-    """Returns the surgical `modify_file` tool (legacy factory shim)."""
-    return modify_file

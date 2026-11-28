@@ -1,10 +1,9 @@
 """
 graph.py — Universal NexusAgent LangGraph Implementation.
 
-Rather than partitioning intelligence across rigid domain packages (router/, career/, librarian/)
-or restricting directory access, Nexus runs ONE universal agent design (`NexusAgent`) that:
+Nexus runs ONE universal agent that:
   1. Injects `Vault/Master Instructions.md` (`inject_root_instructions()`) dynamically before every LLM call
-     (pre-hydrated with `{vault_structure}`, `{shared_tools}`, and `{user_name}`).
+     (pre-hydrated with `{vault_structure}` and `{user_name}`).
   2. Navigates any Vault section directly (`get_directory_structure`, `read_file`, `search_vault`,
      `get_recent_modifications`) and reads `<Section>/Section Instructions.md` on demand.
   3. Surgically modifies existing Vault notes via `modify_file(file_path, target, replacement, reasoning)`,
@@ -111,7 +110,7 @@ def call_model(state: NexusAgentState, config: RunnableConfig | None = None) -> 
     active_model_name = resolved_model["model_name"]
     active_provider = resolved_model["provider"]
 
-    # 2. Inject fresh static root instructions (`Vault/Master Instructions.md` + `{vault_structure}` + `{shared_tools}`)
+    # 2. Inject fresh static root instructions (`Vault/Master Instructions.md` + `{vault_structure}`)
     # Never mutate `SystemMessage` with rolling summaries or timestamps so Message #0 and the entire conversation prefix
     # remain byte-identical for automatic provider KV prompt caching across turns (with explicit cache_control on Anthropic).
     system_prompt_content = inject_root_instructions()

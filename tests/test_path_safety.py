@@ -219,15 +219,6 @@ def test_http_routes_reject_folder_traversal(client: TestClient, malicious_http_
     assert resp_list.status_code == 400
 
 
-def test_http_podcast_routes_reject_traversal(client: TestClient):
-    """Assert that /podcast/generate and /podcast/download reject path traversal with HTTP 400."""
-    resp_gen = client.post("/api/vault/podcast/generate", json={"path": "../.env"})
-    assert resp_gen.status_code == 400
-
-    resp_dl = client.get("/api/vault/podcast/download?path=../.env")
-    assert resp_dl.status_code == 400
-
-
 def test_http_get_agent_run_rejects_traversal(client: TestClient):
     """Assert that GET /api/agents/runs/{run_id} returns HTTP 400 when run_id contains traversal."""
     resp_dotdot = client.get("/api/agents/runs/test..id")
@@ -235,3 +226,49 @@ def test_http_get_agent_run_rejects_traversal(client: TestClient):
 
     resp_backslash = client.get("/api/agents/runs/foo%5Cbar")
     assert resp_backslash.status_code == 400
+
+
+# ── 6. Root Directory Alias Depth Bound (Prevent Full-Vault File Dumps) ──────
+
+def test_get_directory_structure_root_aliases_are_bounded_depth_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Verify `get_directory_structure` with root aliases (`""`, `"."`, `"/"`, `"Vault"`) caps at depth 1."""
+    from nexus.shared_tools import shared as shared_module, vault_reader
+
+    vault_dir = tmp_path / "Vault"
+    (vault_dir / "0. Inbox").mkdir(parents=True, exist_ok=True)
+    (vault_dir / "3. Operations" / "3.1. Career").mkdir(parents=True, exist_ok=True)
+    (vault_dir / "Master Instructions.md").write_text("# Root", encoding="utf-8")
+    (vault_dir / "Gameplan.md").write_text("# Plan", encoding="utf-8")
+    (vault_dir / "0. Inbox" / "Capture.md").write_text("# Capture", encoding="utf-8")
+    (vault_dir / "3. Operations" / "3.1. Career" / "Mission - Deep.md").write_text("# Deep", encoding="utf-8")
+
+    monkeypatch.setattr(vault_reader, "VAULT_PATH", vault_dir)
+    monkeypatch.setattr(shared_module, "VAULT_PATH", vault_dir)
+
+    # 1. `path=None`: folders only across Vault
+    folders_only = shared_module.get_directory_structure.invoke({})
+    assert "0. Inbox/" in folders_only
+    assert "3.1. Career/" in folders_only
+    assert "Master Instructions.md" not in folders_only
+    assert "Mission - Deep.md" not in folders_only
+
+    # 2. Root aliases: show root files + top-level folders (nested subfolders collapsed inline), NEVER deep files
+    for root_alias in ("", ".", "/", "Vault", "Vault/"):
+        root_out = shared_module.get_directory_structure.invoke({"path": root_alias})
+        assert "Master Instructions.md" in root_out
+        assert "Gameplan.md" in root_out
+        assert "0. Inbox/" in root_out
+        assert "3. Operations/ [3.1. Career]" in root_out
+        assert "Capture.md" not in root_out
+        assert "Mission - Deep.md" not in root_out
+
+    # 3. Drilling into a specific folder still shows its files
+    inbox_out = shared_module.get_directory_structure.invoke({"path": "0. Inbox"})
+    assert "Capture.md" in inbox_out
+
+    # 4. Path traversal still rejected
+    assert shared_module.get_directory_structure.invoke({"path": "../"}).startswith("Error:")
+    assert shared_module.get_directory_structure.invoke({"path": "/etc"}).startswith("Error:")

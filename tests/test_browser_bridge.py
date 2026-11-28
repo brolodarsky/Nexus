@@ -2,7 +2,7 @@
 test_browser_bridge.py — Unit and integration tests for the Read-Only Nexus Browser Bridge.
 
 Verifies:
-1. `tool_catalog.py` static AST discovery of `nexus.shared_tools.browser_bridge [CLI]`.
+1. Unified `FastMCP` server registration of browser bridge tools (`list_browser_tabs`, `read_browser_tabs`, `open_browser_tabs`, `fill_browser_form`).
 2. Markdown formatting (`format_tabs_as_markdown`, `format_tab_reads_as_markdown`) for Chrome Tab Groups and tabs.
 3. Active Chat & Floating Overlays parsing and formatting from live rendered DOM.
 4. Standalone ephemeral WebSocket RPC loop (`_execute_via_ephemeral_ws`) with a simulated Chrome Extension client.
@@ -25,7 +25,7 @@ from websockets.asyncio.client import connect
 from nexus.agent.runtime import CORE_TOOLS
 from nexus.api.main import app
 from nexus.api.routers import browser as browser_router
-from nexus.core.tool_catalog import get_shared_tools_catalog
+from nexus.mcp.server import mcp as nexus_mcp
 from nexus.shared_tools import browser_bridge
 from nexus.shared_tools.shared import (
     fill_browser_form,
@@ -35,15 +35,10 @@ from nexus.shared_tools.shared import (
 )
 
 
-def test_browser_bridge_in_tool_catalog() -> None:
-    """Ensure runnable `[CLI]` tools are discovered by `tool_catalog.py` while non-CLI libraries are excluded."""
-    catalog = get_shared_tools_catalog()
-    assert "`nexus.shared_tools.browser_bridge` [CLI]" in catalog
-    assert "`nexus.shared_tools.gmail_engine` [CLI]" in catalog
-    assert "`nexus.shared_tools.read_webpage` [CLI]" in catalog
-    assert "`nexus.shared_tools.shared`" not in catalog
-    assert "`nexus.shared_tools.summarizer`" not in catalog
-    assert "`nexus.shared_tools.resume_engine.service`" not in catalog
+def test_browser_tools_registered_in_mcp_server() -> None:
+    """Ensure all four Chrome browser tools are exposed identically by the unified FastMCP server."""
+    mcp_names = {t.name for t in nexus_mcp._tool_manager.list_tools()}
+    assert {"list_browser_tabs", "read_browser_tabs", "open_browser_tabs", "fill_browser_form"} <= mcp_names
 
 
 def test_browser_tools_bound_in_core_tools() -> None:

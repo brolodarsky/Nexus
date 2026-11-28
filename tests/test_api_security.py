@@ -85,9 +85,7 @@ def test_query_token_strictly_scoped_to_media_get_routes(
     assert media_res.status_code == 200
     assert media_res.content == b"pngdata"
 
-    # Podcast download and resume file routes also honor ?token= past auth (reject 401 without token; reach path validation with token)
-    assert client.get("/api/vault/podcast/download?path=NonExistent.md").status_code == 401
-    assert client.get(f"/api/vault/podcast/download?path=NonExistent.md&token={auth_env}").status_code in (400, 403, 404)
+    # Resume file route also honors ?token= past auth (reject 401 without token; reach path validation with token)
     assert client.get("/api/tools/resume/file?path=NonExistent.md").status_code == 401
     assert client.get(f"/api/tools/resume/file?path=NonExistent.md&token={auth_env}").status_code in (400, 403, 404)
 

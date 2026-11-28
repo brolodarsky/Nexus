@@ -14,15 +14,11 @@ import sys
 
 from nexus.core.config import settings
 from nexus.core.constants import VAULT_PATH
-# Static (ast-based) shared tools catalog: no tool modules are imported during hydration
-from nexus.core.tool_catalog import get_shared_tools_catalog
 # Import deterministic vault directory tree builder for zero-overhead prompt structure hydration (<1ms disk read)
 from nexus.shared_tools.vault_reader import get_directory_tree
 
 # Root Master Instructions path at the top of the Vault hierarchy (`Vault/Master Instructions.md`)
 ROOT_INSTRUCTIONS_PATH: Path = VAULT_PATH / "Master Instructions.md"
-# Backward-compatible constant alias for external callers referencing CONSTITUTION_PATH
-CONSTITUTION_PATH: Path = ROOT_INSTRUCTIONS_PATH
 
 
 # `cache_stable: bool = True` is retained for backward-compatible signature callers.
@@ -36,7 +32,6 @@ def inject_root_instructions(cache_stable: bool = True) -> str:
     Placeholders in the markdown:
       {user_name}        -> settings.nexus_user_name   (e.g. "William")
       {vault_structure}  -> live directory tree string (deterministic folder hierarchy)
-      {shared_tools}     -> bullet list of src/nexus/shared_tools modules (module, [CLI], summary)
     """
     _ = cache_stable
     # Read fresh on every call (<1ms): human edits in Obsidian are live on the next LLM turn (Standard 9).
@@ -56,12 +51,7 @@ def inject_root_instructions(cache_stable: bool = True) -> str:
         template
         .replace("{user_name}", settings.nexus_user_name)
         .replace("{vault_structure}", vault_structure_tree)
-        .replace("{shared_tools}", get_shared_tools_catalog())
     )
-
-
-# Backward-compatible alias so legacy callers or scripts referencing get_engine_constitution() continue working seamlessly.
-get_engine_constitution = inject_root_instructions
 
 
 if __name__ == "__main__":

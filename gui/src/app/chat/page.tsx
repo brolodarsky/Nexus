@@ -676,7 +676,7 @@ export default function ChatPage() {
               toolName === "read_browser_tabs" ||
               toolName === "read_webpage" ||
               toolName === "fetch_emails" ||
-              toolName === "run_shared_tool_cli"
+              toolName === "get_youtube_transcript"
             ) {
               void refreshConversationCaptures(targetConvId);
             }

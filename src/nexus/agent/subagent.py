@@ -156,46 +156,16 @@ def spawn_subagent(
     model_tier: ModelTier = "low",
     context_files: Optional[list[str]] = None,
 ) -> str:
-    """Spawn an isolated subagent to execute a focused research, audit, or synthesis subtask.
+    """Spawn an isolated subagent for parallel research, audit, synthesis, or HITL-staged Vault edits.
 
-    PARALLEL SWARMING: Emitting multiple `spawn_subagent` tool calls in a single turn executes all
-    subagents concurrently in parallel via the runtime thread pool (`ToolNode`). Use parallel fan-out
-    whenever inspecting multiple files, auditing multiple sections, or running independent subtasks so
-    raw file contents stay out of your primary context window.
-
-    PRE-HYDRATED DISK & CACHE CONTEXT (`context_files`):
-    Never summarize user credentials, degrees, section rules, or captured webpages/emails from memory into `task_prompt`!
-    Pass shared baseline Vault paths/titles (e.g. `["3. Operations/3.1. Career Strategy & Revenue/Section Instructions.md", "Resume - Master.md"]`)
-    AND/OR per-conversation external capture keys (`"cache://tab/<slug>"`, `"cache://web/<slug>"`, `"cache://email/<id>"`, `"cache://"` manifest, or cached URLs)
-    via `context_files`. Python resolves them directly (zero Commander context bloat, zero extra subagent tool turns)
-    and prepends `# Pre-Hydrated Disk Context` to the subagent's initial prompt.
-    Governing ancestor `Section Instructions.md` files referenced by `context_files` or `task_prompt` are also discovered and pre-hydrated automatically.
-    If any path or cache key cannot be resolved, `spawn_subagent` fails fast before calling the LLM
-    and surfaces actual sibling files or available `cache://` keys in this conversation.
-
-    ARCHITECT-DRAFTER PATTERN (WRITING & EDIT DELEGATION):
-    Subagents are not just for reading; they are your execution workforce. When multiple notes need to be created
-    or surgically modified, do NOT pull full note bodies into your primary window to execute `modify_file` yourself.
-    Instead, decide the architecture and strategy as the Commander, and instruct the subagent exactly what to write:
-    provide the target note path, the exact replacement guidelines or markdown blocks, and instruct it to call
-    `modify_file` or `create_file` to stage the changes to the HITL queue. The subagent absorbs the raw file contents,
-    executes the tool loop, and returns only a concise confirmation receipt (Transaction ID and summary) to your context.
-
-    The subagent boots automatically with `inject_root_instructions()` (`Master Instructions.md` +
-    `{vault_structure}` + `{shared_tools}`) and has full access to all Vault navigation, reading,
-    search, HITL file tools, and `spawn_conversation` (when instructed to spin up seeded discussion
-    threads directly from raw tool payloads without dumping them back into the Commander window).
-    Make `task_prompt` self-contained, specific, and crystal clear:
-      1. State the exact objective and which Vault section(s) or note(s) to inspect (plus `context_files` for shared baseline notes).
-      2. Specify any constraints (e.g. read-only vs. staging a surgical edit via `modify_file`).
-      3. Specify the exact output format and distilled takeaways to return to you.
+    Emitting multiple `spawn_subagent` calls in one turn runs them concurrently in parallel.
+    Pass verified Vault paths or `cache://...` keys via `context_files` for zero-turn pre-hydration
+    (ancestor `Section Instructions.md` files are auto-discovered and fail-fast checked before boot).
 
     Args:
-        task_prompt: A clear, self-contained, actionable prompt instructing the subagent what to do and return.
-        model_tier: Capability/cost tier (`"low"`, `"medium"`, or `"strong"`). Defaults to `"low"` for fast,
-                    cost-efficient execution; pass `"medium"` or `"strong"` only for complex synthesis subtasks.
-        context_files: Optional list of Vault-relative paths, unique note titles, or `cache://...` capture handles/URLs
-                       to pre-hydrate directly under `# Pre-Hydrated Disk Context` (fails fast if any ref cannot be resolved).
+        task_prompt: Self-contained objective, target scope, constraints, and expected output format.
+        model_tier: `"low"` (default), `"medium"`, or `"strong"` (clamped unless enabled).
+        context_files: Optional Vault paths/titles or `cache://...` handles to pre-hydrate before Turn 1.
     """
     effective_tier: ModelTier = model_tier if model_tier in ("low", "medium", "strong") else "low"
     # Subagent Tier Clamp (`C3`): enforce Architect-Drafter cost boundary by clamping `"strong"` worker requests
@@ -289,7 +259,7 @@ def spawn_subagent(
             "### SUBAGENT EXECUTION PROTOCOL\n"
             "You are an ephemeral, isolated Subagent worker spawned by the Supervisor (NexusAgent).\n"
             "1. Read any relevant `Section Instructions.md` and Vault notes needed to execute your assigned task thoroughly.\n"
-            "2. **Batch Tool Calls:** Emit all independent `search_vault`, `read_file`, `get_directory_structure`, and `fetch_emails` calls in parallel in the same turn rather than one lookup per turn. Use `search_vault(keywords=[...])` for multi-term Vault searches, and use `start_line`/`end_line` slices on large notes when full files are unnecessary.\n"
+            "2. **Batch Tool Calls:** Emit all independent `search_vault`, `read_file`, `get_directory_structure`, `fetch_emails`, `create_file`, and `modify_file` (on distinct files) calls in parallel in the same turn rather than one tool call per turn. Use `search_vault(keywords=[...])` for multi-term Vault searches, and use `start_line`/`end_line` slices on large notes when full files are unnecessary.\n"
             "3. **Two-Phase Email Sweeps:** Call `fetch_emails(...)` with default metadata + snippets first (combining related terms with `OR` in one query), then pass ONLY the relevant `message_ids=[...]` to hydrate full bodies—skip newsletters and irrelevant hits.\n"
             "4. Return a concise, high-signal, grounded synthesis of your findings in your final response "
             "so the Supervisor can integrate your work directly."

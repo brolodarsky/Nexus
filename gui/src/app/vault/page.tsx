@@ -4,14 +4,14 @@
  * page.tsx — Brain Explorer & Vault Knowledge Browser.
  *
  * Provides a master-detail file browser for the entire Obsidian Vault:
- * - Left rail: Collapsible directory hierarchy with folder navigation and audio podcast badges.
+ * - Left rail: Collapsible directory hierarchy with folder navigation.
  * - Right pane: Full document reader featuring auto-collapsed YAML frontmatter metadata,
  *   rich Markdown rendering (GFM tables, checkboxes, Obsidian callouts, and [[Wiki-Links]]),
- *   reading metrics, raw/preview view modes, one-click copy, and integrated Podcast Studio.
+ *   reading metrics, raw/preview view modes, and one-click copy.
  */
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
-import { VaultEntry, listVault, generatePodcast, getPodcastAudioUrl, getNote } from "@/lib/api";
+import { VaultEntry, listVault, getNote } from "@/lib/api";
 import MarkdownMessage from "@/components/MarkdownMessage";
 import NoteFrontmatter from "@/components/NoteFrontmatter";
 
@@ -45,15 +45,8 @@ export default function BrainExplorerPage() {
   // isNoteCopied: temporary 2-second checkmark feedback when copying note content to clipboard
   const [isNoteCopied, setIsNoteCopied] = useState(false);
 
-  // generating: audio podcast generation in progress
-  const [generating, setGenerating] = useState(false);
-  // audioError: error string returned from podcast generation
-  const [audioError, setAudioError] = useState<string | null>(null);
-
   // isExplorerCollapsed: toggles the file tree menu between full navigation (w-80) and a compact rail (w-14)
   const [isExplorerCollapsed, setIsExplorerCollapsed] = useState(false);
-  // isPodcastCollapsed: allows minimizing the Podcast Studio control box when reading long notes
-  const [isPodcastCollapsed, setIsPodcastCollapsed] = useState(false);
 
   // pinnedNotes: array of note paths pinned to the Home page, synchronized via localStorage
   const [pinnedNotes, setPinnedNotes] = useState<string[]>([]);
@@ -101,7 +94,6 @@ export default function BrainExplorerPage() {
             name: cleanName,
             path: baseTarget,
             type: "file",
-            has_audio: false,
           };
           handleSelectNote(entry);
         }
@@ -134,7 +126,6 @@ export default function BrainExplorerPage() {
   async function handleSelectNote(entry: VaultEntry) {
     setSelectedNote(entry);
     setLoadingNote(true);
-    setAudioError(null);
 
     try {
       const data = await getNote(entry.path);
@@ -158,7 +149,6 @@ export default function BrainExplorerPage() {
       name: cleanName,
       path: baseTarget,
       type: "file",
-      has_audio: false,
     };
     handleSelectNote(entry);
 
@@ -180,24 +170,6 @@ export default function BrainExplorerPage() {
     setIsNoteCopied(true);
     setTimeout(() => setIsNoteCopied(false), 2000);
   }, [noteContent]);
-
-  // handleGenerate: triggers TTS audio podcast creation via FastAPI
-  async function handleGenerate(force = false) {
-    if (!selectedNote) return;
-    setGenerating(true);
-    setAudioError(null);
-    try {
-      await generatePodcast(selectedNote.path, force);
-      // Refresh directory list so the has_audio flag updates
-      await fetchDirectory(currentPath);
-      // Update selected note reference so the audio player becomes visible
-      setSelectedNote({ ...selectedNote, has_audio: true });
-    } catch (e) {
-      setAudioError(e instanceof Error ? e.message : "Failed to generate audio");
-    } finally {
-      setGenerating(false);
-    }
-  }
 
   function handleNavigateUp() {
     const parts = currentPath.split("/").filter(Boolean);
@@ -354,9 +326,6 @@ export default function BrainExplorerPage() {
                         >
                           <span className="text-lg opacity-80">📄</span>
                           <span className="truncate flex-1">{entry.name.replace(/\.md$/, "")}</span>
-                          {entry.has_audio && (
-                            <span className="text-accent-emerald text-sm" title="Audio ready">🎧</span>
-                          )}
                         </button>
                       </li>
                     );
@@ -375,7 +344,7 @@ export default function BrainExplorerPage() {
             <div className="text-6xl mb-4 opacity-50">🗂️</div>
             <p className="text-lg font-medium text-text-primary">No Note Selected</p>
             <p className="text-sm mt-2 max-w-sm text-text-secondary">
-              Select a markdown file from the explorer to read its rendered contents or generate an audio podcast.
+              Select a markdown file from the explorer to read its rendered contents.
             </p>
           </div>
         ) : (
@@ -491,90 +460,6 @@ export default function BrainExplorerPage() {
                   <span>•</span>
                   <span>~{readingTimeMinutes} min read</span>
                 </div>
-              </div>
-
-              {/* Collapsible Podcast Studio Box */}
-              <div className="glass-card p-4 relative overflow-hidden transition-all">
-                <div className="absolute top-0 left-0 w-1 h-full bg-accent-violet"></div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <h3 className="font-semibold text-text-primary flex items-center gap-2">
-                      <span className="text-lg text-accent-violet">🎙️</span> Podcast Studio
-                    </h3>
-                    <span className="text-xs text-text-muted hidden sm:inline">
-                      {selectedNote.has_audio 
-                        ? "Audio podcast ready"
-                        : "Convert note to audio podcast"}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {audioError && (
-                      <span className="text-xs text-accent-rose bg-accent-rose/10 px-2.5 py-1 rounded-full border border-accent-rose/20">
-                        Error: {audioError}
-                      </span>
-                    )}
-
-                    {!selectedNote.has_audio && !generating && (
-                      <button
-                        onClick={() => handleGenerate(false)}
-                        className="px-3 py-1.5 rounded-lg bg-accent-cyan/10 border border-accent-cyan/30 text-accent-cyan hover:bg-accent-cyan/20 transition-all font-medium text-xs shadow-[0_0_15px_rgba(56,189,248,0.1)] hover:shadow-[0_0_20px_rgba(56,189,248,0.2)] cursor-pointer"
-                      >
-                        Generate Audio
-                      </button>
-                    )}
-
-                    {generating && (
-                      <button disabled className="px-3 py-1.5 rounded-lg bg-border-subtle/50 text-text-muted flex items-center gap-2 text-xs font-medium">
-                        <span className="w-3.5 h-3.5 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin"></span>
-                        Generating...
-                      </button>
-                    )}
-
-                    {selectedNote.has_audio && !generating && (
-                      <button
-                        onClick={() => handleGenerate(true)}
-                        className="px-3 py-1.5 rounded-lg border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors text-xs font-medium cursor-pointer"
-                      >
-                        Regenerate
-                      </button>
-                    )}
-
-                    {/* Podcast Panel Collapse/Expand Toggle */}
-                    <button
-                      type="button"
-                      onClick={() => setIsPodcastCollapsed((prev) => !prev)}
-                      className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-surface transition-colors ml-1 cursor-pointer"
-                      title={isPodcastCollapsed ? "Expand Podcast Studio" : "Collapse Podcast Studio"}
-                      aria-expanded={!isPodcastCollapsed}
-                    >
-                      <svg
-                        className={`w-4 h-4 transition-transform duration-200 ${isPodcastCollapsed ? "-rotate-90" : "rotate-0"}`}
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Expanded Audio Player & Studio Details */}
-                {!isPodcastCollapsed && selectedNote.has_audio && (
-                  <div className="mt-4 p-3 rounded-xl bg-bg-primary/50 border border-border-subtle animate-fade-in-up">
-                    <audio 
-                      key={selectedNote.path} // force reload when path changes
-                      controls 
-                      className="w-full h-10 outline-none"
-                      style={{ filter: "invert(90%) hue-rotate(180deg)" }} // Make default audio player dark mode friendly
-                    >
-                      <source src={getPodcastAudioUrl(selectedNote.path)} type="audio/mpeg" />
-                      Your browser does not support the audio element.
-                    </audio>
-                  </div>
-                )}
               </div>
             </div>
 

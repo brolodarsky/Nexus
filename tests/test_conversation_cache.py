@@ -8,8 +8,8 @@ Covers:
   3. Cache inheritance across `fork_conversation` (`fork` and `tangent`) and `spawn_seeded_conversation`
      (`nest_under_parent=True` and `False`), plus snapshot isolation after fork.
   4. `delete_conversation` cleanup of `conversation_captures` without touching siblings or promoted children.
-  5. `read_browser_tabs` (`browser_bridge.read_tabs`), universal `read_webpage.scrape_url`, `run_shared_tool_cli`
-     subprocess `NEXUS_CONVERSATION_ID` propagation, and `fetch_emails` untruncated full-body caching.
+  5. `read_browser_tabs` (`browser_bridge.read_tabs`), universal `read_webpage.scrape_url`, `get_youtube_transcript`
+     auto-caching, `NEXUS_CONVERSATION_ID` fallback, and `fetch_emails` untruncated full-body caching.
   6. `read_file` + `hydrate_subagent_context_files` `cache://` resolution & fail-fast error diagnostics.
   7. Universal deterministic `{{cache:<key>}}` splicing in `create_file` and `modify_file` (backslashes,
      non-recursive expansion, multiple placeholders, fail-fast missing key).
@@ -23,6 +23,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
@@ -411,34 +412,41 @@ def test_read_webpage_extracts_accessible_images_and_filters_noise(
         reset_hitl_execution_context(tok)
 
 
-def test_run_shared_tool_cli_propagates_conversation_id(
+def test_read_webpage_and_youtube_tools_cache_in_active_conversation(
     isolated_env: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`run_shared_tool_cli` forwards active `conversation_id` as `NEXUS_CONVERSATION_ID` to subprocesses."""
-    captured_env: dict[str, str] = {}
+    """`read_webpage` and `get_youtube_transcript` cache under the active `conversation_id` and respect `NEXUS_CONVERSATION_ID`."""
+    from nexus.shared_tools import youtube_transcript
 
-    def fake_run(cmd, **kwargs):
-        captured_env.update(kwargs.get("env") or {})
-        proc = MagicMock()
-        proc.stdout = "ok"
-        proc.stderr = ""
-        proc.returncode = 0
-        return proc
+    monkeypatch.setattr(
+        read_webpage,
+        "scrape_url_with_cache",
+        lambda url, output_format="markdown": ("# Example Page\n\nBody text.", "cache://web/example"),
+    )
+    monkeypatch.setattr(
+        youtube_transcript,
+        "get_transcript",
+        lambda video_id: [SimpleNamespace(text="Hello unified tools.")],
+    )
+    monkeypatch.setattr(youtube_transcript, "get_video_title", lambda video_id: "Unified Tools Demo")
 
-    monkeypatch.setattr(shared_module.subprocess, "run", fake_run)
-    tok = set_hitl_execution_context(conversation_id="conv-cli-prop", thread_id="conv-cli-prop")
+    tok = set_hitl_execution_context(conversation_id="conv-unified-cache", thread_id="conv-unified-cache")
     try:
-        res = shared_module.run_shared_tool_cli.invoke(
-            {"module": "nexus.shared_tools.read_webpage", "cli_args": ["--help"]}
-        )
+        web_res = shared_module.read_webpage.invoke({"url": "https://example.com"})
+        yt_res = shared_module.get_youtube_transcript.invoke({"url_or_id": "https://youtu.be/abc123XYZ"})
+        cached = conversation_cache.get_capture("conv-unified-cache", "cache://youtube/abc123XYZ")
     finally:
         reset_hitl_execution_context(tok)
 
-    assert res == "ok"
-    assert captured_env.get("NEXUS_CONVERSATION_ID") == "conv-cli-prop"
+    assert "cache://web/example" in web_res
+    assert "# Example Page" in web_res
+    assert "cache://youtube/abc123XYZ" in yt_res
+    assert "Hello unified tools." in yt_res
+    assert cached is not None
+    assert "Unified Tools Demo" in cached["title"]
 
-    # Verify child process helper reads NEXUS_CONVERSATION_ID when ContextVar is unset
+    # Verify env fallback still resolves NEXUS_CONVERSATION_ID when ContextVar is unset
     monkeypatch.setenv("NEXUS_CONVERSATION_ID", "conv-from-env")
     assert conversation_cache.get_active_conversation_id() == "conv-from-env"
 
@@ -851,3 +859,194 @@ def test_http_conversation_captures_list_item_isolation_and_validation(
         params={"key": "   "},
     )
     assert blank_res.status_code == 400
+
+
+# ── 11. Verbatim Chat Draft Block Cache (`cache://chat`) & Literal Immunity ──
+
+def test_chat_block_extraction_manifest_splice_and_isolation(
+    isolated_env: dict[str, Path],
+) -> None:
+    """Verify `cache://chat` extracts fenced drafts verbatim (incl. 4-backtick nested fences) with strict isolation."""
+    nested_draft = (
+        "---\n"
+        "tags: [instructions]\n"
+        "---\n"
+        "# Master Draft\n\n"
+        "* **Subject:** Human named {user_name}\n"
+        "- Syntax note: `` `{{cache:...}}` ``\n\n"
+        "```markdown\n"
+        "# Inner Example\n"
+        "Body inside nested fence.\n"
+        "```\n"
+        + ("Extra substantive specification line.\n" * 6)
+    ).strip()
+    tilde_draft = (
+        "# Second Tilde Draft\n\n"
+        + ("Substantive tilde-fenced draft line for testing extraction.\n" * 6)
+    ).strip()
+    assistant_msg = (
+        "Here are your two drafts:\n\n"
+        "### Draft 1: `Master Draft.md`\n"
+        f"````markdown\n{nested_draft}\n````\n\n"
+        "### Draft 2: `Second Draft.md`\n"
+        "```text\nTiny snippet (<200 chars) should stay hidden in manifest\n```\n\n"
+        f"~~~markdown\n{tilde_draft}\n~~~\n"
+    )
+
+    conv_a = chats_db.create_conversation(title="Draft Chat A")
+    conv_b = chats_db.create_conversation(title="Draft Chat B")
+    chats_db.log_message(role="user", content="Write two drafts", conversation_id=conv_a)
+    msg_a_id = chats_db.log_message(role="assistant", content=assistant_msg, agent="nexus", conversation_id=conv_a)
+    chats_db.log_message(
+        role="assistant",
+        content=f"### Secret B\n```markdown\n{'Secret draft in B. ' * 15}\n```",
+        agent="nexus",
+        conversation_id=conv_b,
+    )
+
+    # 1. `extract_fenced_blocks` assigns stable 1-based `block_index` before `min_chars` filtering
+    all_blocks = conversation_cache.extract_fenced_blocks(assistant_msg, min_chars=0)
+    assert len(all_blocks) == 3
+    assert all_blocks[0]["block_index"] == 1
+    assert all_blocks[0]["content"] == nested_draft
+    assert all_blocks[2]["block_index"] == 3
+    assert all_blocks[2]["content"] == tilde_draft
+
+    # Only blocks >= CHAT_BLOCK_MIN_CHARS appear in `list_chat_blocks`, keeping `b1` and `b3` handles stable
+    listed = conversation_cache.list_chat_blocks(conv_a)
+    assert [item["cache_key"] for item in listed] == [
+        f"cache://chat/m{msg_a_id}-b1",
+        f"cache://chat/m{msg_a_id}-b3",
+    ]
+    assert all("content" not in item for item in listed)
+
+    tok = set_hitl_execution_context(conversation_id=conv_a, thread_id=conv_a)
+    try:
+        # 2. `read_file("cache://chat")` and `read_file("cache://")` expose chat draft handles without dumping raw bodies
+        chat_manifest = shared_module.read_file.invoke({"file_path": "cache://chat"})
+        assert f"cache://chat/m{msg_a_id}-b1" in chat_manifest
+        assert f"cache://chat/m{msg_a_id}-b3" in chat_manifest
+        assert "Body inside nested fence." not in chat_manifest
+
+        combined_manifest = shared_module.read_file.invoke({"file_path": "cache://"})
+        assert f"cache://chat/m{msg_a_id}-b1" in combined_manifest
+
+        # Adding an external capture keeps `# Cached External Captures (1 item(s)` header + chat section
+        conversation_cache.put_capture(
+            conversation_id=conv_a,
+            source_type="web",
+            title="External Ref",
+            content="External body",
+            source_url="https://example.com/ref",
+        )
+        both_manifest = shared_module.read_file.invoke({"file_path": "cache://"})
+        assert "Cached External Captures (1 item(s)" in both_manifest
+        assert f"cache://chat/m{msg_a_id}-b1" in both_manifest
+
+        # 3. `read_file` slicing & `hydrate_subagent_context_files` resolve `cache://chat/m<id>-b<n>`
+        sliced = shared_module.read_file.invoke(
+            {"file_path": f"cache://chat/m{msg_a_id}-b1", "start_line": 6, "end_line": 6}
+        )
+        assert "{user_name}" in sliced
+
+        prehydrated, hydr_err = shared_module.hydrate_subagent_context_files(
+            [f"cache://chat/m{msg_a_id}-b1"]
+        )
+        assert hydr_err is None
+        assert prehydrated is not None
+        assert nested_draft in prehydrated
+
+        # 4. `create_file` & `modify_file` splice `{{cache:chat/m<id>-b<n>}}` 100% verbatim
+        create_res = shared_module.create_file.invoke(
+            {
+                "file_path": "Draft - Master.md",
+                "content": f"{{{{cache:chat/m{msg_a_id}-b1}}}}",
+                "reasoning": "Copy draft verbatim from chat",
+            }
+        )
+        assert "spliced 1 cached capture(s) verbatim" in create_res
+        staged = hq.get_pending_for_file("Vault/Draft - Master.md")
+        assert staged is not None
+        assert staged["proposed_content"] == nested_draft
+
+        # 5. Cross-conversation isolation: conv_a cannot read or splice conv_b's chat blocks
+        conv_b_blocks = conversation_cache.list_chat_blocks(conv_b)
+        assert len(conv_b_blocks) == 1
+        secret_key = conv_b_blocks[0]["cache_key"]
+        secret_short = secret_key[len("cache://") :]
+
+        iso_read = shared_module.read_file.invoke({"file_path": secret_key})
+        assert f"not found in conversation `{conv_a}`" in iso_read
+
+        iso_splice = shared_module.create_file.invoke(
+            {
+                "file_path": "0. Inbox/Leak.md",
+                "content": f"{{{{cache:{secret_short}}}}}",
+                "reasoning": "Should not leak conv_b chat block",
+            }
+        )
+        assert iso_splice.startswith("Error: Unresolved cache placeholder(s)")
+    finally:
+        reset_hitl_execution_context(tok)
+
+
+def test_resolve_cache_placeholders_literal_doc_immunity(
+    isolated_env: dict[str, Path],
+) -> None:
+    """Verify inline-backticked and metasyntax `{{cache:...}}` examples pass through while active missing keys fail fast."""
+    conv_id = chats_db.create_conversation(title="Literal Doc Test")
+    draft_body = "# Real Draft\n\n" + ("Actual draft content line.\n" * 10)
+    msg_id = chats_db.log_message(
+        role="assistant",
+        content=f"### Draft\n```markdown\n{draft_body}\n```",
+        agent="nexus",
+        conversation_id=conv_id,
+    )
+
+    tok = set_hitl_execution_context(conversation_id=conv_id, thread_id=conv_id)
+    try:
+        # 1. Documentation tokens (backticked or metasyntax) stage cleanly with zero error
+        doc_content = (
+            "---\ntags: [instructions]\n---\n"
+            "- Never leak `{{cache:...}}` or `{{cache:tab/example}}`.\n"
+            "- Syntax: {{cache:<key>}} or {{cache:<type>/<slug>}} or {{cache:*}} or {{cache:...}}.\n"
+        )
+        ok_res = shared_module.create_file.invoke(
+            {
+                "file_path": "Draft - Docs.md",
+                "content": doc_content,
+                "reasoning": "Stage instruction doc mentioning cache syntax",
+            }
+        )
+        assert "✅ File creation staged to HITL queue" in ok_res
+        assert "spliced" not in ok_res
+        staged_doc = hq.get_pending_for_file("Vault/Draft - Docs.md")
+        assert staged_doc is not None
+        assert staged_doc["proposed_content"] == doc_content
+
+        # 2. Mixed doc: backticked literal `{{cache:...}}` + real {{cache:chat/m<id>-b1}} expands ONLY the real key
+        mixed_res = shared_module.create_file.invoke(
+            {
+                "file_path": "Draft - Mixed.md",
+                "content": f"Example: `{{{{cache:...}}}}`\n\n{{{{cache:chat/m{msg_id}-b1}}}}",
+                "reasoning": "Mixed literal doc token and active chat splice",
+            }
+        )
+        assert "spliced 1 cached capture(s) verbatim" in mixed_res
+        staged_mixed = hq.get_pending_for_file("Vault/Draft - Mixed.md")
+        assert staged_mixed is not None
+        assert "Example: `{{cache:...}}`" in staged_mixed["proposed_content"]
+        assert draft_body in staged_mixed["proposed_content"]
+
+        # 3. Missing active key MUST still fail fast without staging
+        bad_res = shared_module.create_file.invoke(
+            {
+                "file_path": "Draft - Missing.md",
+                "content": "Broken: {{cache:chat/m99999-b1}}",
+                "reasoning": "Should fail fast",
+            }
+        )
+        assert bad_res.startswith("Error: Unresolved cache placeholder(s)")
+        assert hq.get_pending_for_file("Vault/Draft - Missing.md") is None
+    finally:
+        reset_hitl_execution_context(tok)

@@ -1,9 +1,9 @@
 /**
- * vault.ts — Knowledge vault browsing, note content retrieval, structure tree, and audio podcast endpoints.
+ * vault.ts — Knowledge vault browsing, note content retrieval, and structure tree endpoints.
  * Connects to FastAPI `/api/vault` routes.
  */
 
-import { apiFetch, appendTokenQuery, getApiBase } from "./client";
+import { apiFetch } from "./client";
 
 // Interface for tree view representation of the Vault folder structure
 export interface VaultStructureResponse {
@@ -24,7 +24,6 @@ export interface VaultEntry {
   type: "file" | "directory"; // Discriminated union for folder vs file rendering
   size?: number;              // File size in bytes (omitted for directories)
   mtime?: number;             // Last modified timestamp in seconds since epoch
-  has_audio: boolean;         // True if a companion synthesized podcast .mp3 exists
 }
 
 // Interface representing lightweight metadata for all markdown notes in the Vault
@@ -63,19 +62,5 @@ export async function listVault(path?: string): Promise<VaultEntry[]> {
 // Promise<VaultNoteSummary[]>: Resolves with an array of note descriptors sorted alphabetically
 export async function getAllVaultNotes(): Promise<VaultNoteSummary[]> {
   return apiFetch<VaultNoteSummary[]>("/api/vault/notes");
-}
-
-// Triggers background TTS podcast audio generation for a specific markdown note
-export async function generatePodcast(path: string, force: boolean = false): Promise<Record<string, unknown>> {
-  return apiFetch<Record<string, unknown>>("/api/vault/podcast/generate", {
-    method: "POST",
-    body: JSON.stringify({ path, force }),
-  });
-}
-
-// Formats direct audio streaming URL for playing note podcasts in the browser
-export function getPodcastAudioUrl(path: string): string {
-  // getApiBase(): Dynamically resolves host IP so podcast audio streams work seamlessly over LAN/Tailscale
-  return appendTokenQuery(`${getApiBase()}/api/vault/podcast/download?path=${encodeURIComponent(path)}`);
 }
 

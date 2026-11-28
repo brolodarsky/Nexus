@@ -86,8 +86,8 @@ def execute_web_search(
     clean_exclude = [d.strip() for d in (exclude_domains or []) if d and d.strip()]
 
     try:
-        # Lazy-import `TavilySearch` inside the function so static AST scanners (`tool_catalog.py`)
-        # and lightweight CLI imports never pay import overhead unless a search is actually executed.
+        # Lazy-import `TavilySearch` inside the function so module imports and lightweight CLI runs
+        # never pay LangChain Tavily import overhead unless a search is actually executed.
         from langchain_tavily import TavilySearch
 
         search_client = TavilySearch(

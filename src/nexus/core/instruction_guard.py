@@ -50,6 +50,40 @@ _MASK_EXTERNAL_REF_RE = re.compile(
 _WIKILINK_RE = re.compile(r"\[\[([^\[\]\n]+?)\]\]")
 # Matches single-line inline code spans `` `...` ``.
 _BACKTICK_SPAN_RE = re.compile(r"`([^`\n]+)`")
+# CommonMark fenced code block opener (`>=3` backticks or tildes with optional leading indent <= 3).
+_PROMPT_FENCE_OPEN_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})([^\r\n]*)$")
+
+
+def _strip_fenced_code_blocks(text: str) -> str:
+    """Remove CommonMark fenced code blocks so pasted draft examples never trigger section auto-hydration."""
+    if not text or ("```" not in text and "~~~" not in text):
+        return text
+
+    kept_lines: List[str] = []
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+
+    for line in text.splitlines():
+        if not in_fence:
+            m = _PROMPT_FENCE_OPEN_RE.match(line)
+            if m:
+                seq = m.group(1)
+                info = m.group(2)
+                if seq[0] == "`" and "`" in info:
+                    kept_lines.append(line)
+                    continue
+                in_fence = True
+                fence_char = seq[0]
+                fence_len = len(seq)
+                continue
+            kept_lines.append(line)
+        else:
+            if re.match(rf"^[ \t]{{0,3}}{re.escape(fence_char)}{{{fence_len},}}[ \t]*$", line):
+                in_fence = False
+                kept_lines.append("")
+
+    return "\n".join(kept_lines)
 
 
 def set_instruction_batch_id(batch_id: Optional[str]) -> Token:
@@ -534,12 +568,13 @@ def discover_section_instructions_for_subagent(
     for rel_p in explicit_rel_list:
         _add_ancestors_for_rel(rel_p)
 
-    # Source 2: Best-effort deterministic scan of `task_prompt` for section folders, directories, wiki-links, and files.
+    # Source 2: Best-effort deterministic scan of `task_prompt` (excluding fenced code blocks) for section refs.
     norm_prompt = (task_prompt or "").replace("\\", "/")
     if norm_prompt.strip():
         section_dirs, rel_dirs, rel_files, basename_to_rels = _scan_vault_tree_fast(resolved_vault)
         if section_dirs:
-            masked_prompt = _MASK_EXTERNAL_REF_RE.sub(" ", norm_prompt)
+            prompt_outside_fences = _strip_fenced_code_blocks(norm_prompt)
+            masked_prompt = _MASK_EXTERNAL_REF_RE.sub(" ", prompt_outside_fences)
             masked_low = masked_prompt.lower()
             rel_dirs_list = sorted(rel_dirs)
 

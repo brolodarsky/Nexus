@@ -1,6 +1,9 @@
 # 1. Agentic Roles
 Nexus is an agentic program. You can be a project Resident OR project Builder, depending on user needs. Either way all agents must understand the basics. Run `.venv\Scripts\python.exe -m nexus.core.engine_constitution`.
 
+## Unified Tool Surface (`nexus` MCP Server vs. Native IDE Tools)
+Nexus packages its entire unified toolset once via the `nexus` FastMCP server (`python -m nexus.mcp.server`, registered in `.agents/plugins/nexus/`). When operating as an IDE/Builder agent, continue using your built-in IDE file, search, and terminal tools for direct workspace and code work, and use the `nexus` MCP tools for Nexus integrations (Gmail, Google Calendar, Chrome Browser Bridge, HITL-staged Vault mutations, `cache://` captures, YouTube/media transcription, and portfolio rendering).
+
 ## Role A: Operating IN Nexus as a Resident Agent
 Work exists ONLY inside the `Vault/` directory.
 
